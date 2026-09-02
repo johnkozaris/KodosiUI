@@ -81,6 +81,8 @@ qt_add_library(kodosi-desktop-integration STATIC
     attention/TerminalNotifications.cpp
     attention/TerminalNotifications.hpp
     platform/DesktopNotificationDriver.hpp
+    platform/DesktopFileIntegration.cpp
+    platform/DesktopFileIntegration.hpp
     platform/FreedesktopNotificationDriver.cpp
     platform/FreedesktopNotificationDriver.hpp
     platform/NotificationText.cpp
@@ -99,6 +101,7 @@ target_link_libraries(kodosi-desktop-integration
         kodosi-runtime-bridge
     PRIVATE
         Qt6::Gui
+        Qt6::Widgets
 )
 
 qt_add_library(kodosi-terminal-kernel STATIC
@@ -140,6 +143,7 @@ target_include_directories(kodosi-qml-models
 target_link_libraries(kodosi-qml-models
     PUBLIC
         Qt6::Qml
+        kodosi-desktop-integration
         kodosi-runtime-bridge
         kodosi-terminal-kernel
 )
@@ -283,6 +287,7 @@ qt_add_qml_module(kodosi-qt
         qml/Settings/SettingsDrawer.qml
         qml/Theme/KodosiTheme.qml
         qml/Workbench/SessionSidebar.qml
+        qml/Workbench/DesktopFileErrorBanner.qml
         qml/Workbench/TerminalDivider.qml
         qml/Workbench/TerminalStage.qml
         qml/Workbench/TerminalTile.qml
@@ -297,6 +302,7 @@ target_link_libraries(kodosi-qt
         Qt6::Qml
         Qt6::Quick
         Qt6::QuickControls2
+        Qt6::Widgets
         kodosi-desktop-integration
         kodosi-runtime-bridge
         kodosi-terminal-kernel
@@ -376,6 +382,12 @@ install(
         "$<TARGET_FILE:Qt6::QOffscreenIntegrationPlugin>"
         "$<TARGET_FILE:Qt6::QWaylandIntegrationPlugin>"
     DESTINATION lib/kodosi/plugins/platforms
+)
+install(
+    FILES
+        "$<TARGET_FILE:Qt6::QGtk3ThemePlugin>"
+        "$<TARGET_FILE:Qt6::QXdgDesktopPortalThemePlugin>"
+    DESTINATION lib/kodosi/plugins/platformthemes
 )
 install(
     FILES "$<TARGET_FILE:Qt6::QWaylandEglClientBufferPlugin>"

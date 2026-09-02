@@ -29,12 +29,13 @@
 #include "models/PendingPermissionsModel.hpp"
 #include "models/TrustModel.hpp"
 #include "platform/FreedesktopNotificationDriver.hpp"
+#include "platform/DesktopFileIntegration.hpp"
 #include "terminal/TerminalSessionRegistry.hpp"
 #include "terminal/TerminalSurfaceController.hpp"
 #include "terminal/TerminalAccessibility.hpp"
 #include "terminal/TerminalView.hpp"
 
-#include <QGuiApplication>
+#include <QApplication>
 #include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -136,8 +137,13 @@ QQuickItem* findQuickItem(
 
 int main(int argc, char* argv[])
 {
+    if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORMTHEME")) {
+        (void)qputenv(
+            "QT_QPA_PLATFORMTHEME",
+            QByteArrayLiteral("xdgdesktopportal"));
+    }
     QQuickStyle::setStyle(QStringLiteral("Basic"));
-    QGuiApplication application(argc, argv);
+    QApplication application(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("Kodosi"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("kodosi.com"));
     QCoreApplication::setApplicationName(QStringLiteral("Kodosi"));
@@ -243,6 +249,7 @@ int main(int argc, char* argv[])
         desktopStateSettings(!syntheticMode),
         !syntheticMode);
     desktopState.attachSessionCatalog(&sessionCatalog);
+    kodosi::DesktopFileIntegration desktopFiles(sessionCatalog);
     kodosi::TerminalTilingLayoutModel terminalTiling;
     if (desktopStateSmokeTest) {
         desktopState.setActiveView(2);
@@ -590,6 +597,7 @@ int main(int argc, char* argv[])
         deviceActions,
         desktopSettings,
         desktopState,
+        desktopFiles,
         missions,
         missionDetail,
         missionActions,
@@ -622,6 +630,7 @@ int main(int argc, char* argv[])
         qCritical() << "The root QML object is not a window.";
         return EXIT_FAILURE;
     }
+    desktopFiles.setTransientParent(mainWindow);
     const auto attachSize = windowSize
         ? windowSize
         : agentIntelSmokeTest
@@ -1554,7 +1563,14 @@ int main(int argc, char* argv[])
                     auto* workingDirectory = panel->findChild<QObject*>(
                         QStringLiteral(
                             "panel.settings.sessions.workingDirectory"));
+                    auto* browse = panel->findChild<QObject*>(
+                        QStringLiteral(
+                            "panel.settings.sessions.browse"));
+                    auto* openFolder = panel->findChild<QObject*>(
+                        QStringLiteral(
+                            "panel.settings.sessions.openFolder"));
                     if (scroll == nullptr || workingDirectory == nullptr
+                        || browse == nullptr || openFolder == nullptr
                         || !QMetaObject::invokeMethod(
                             workingDirectory,
                             "forceActiveFocus",

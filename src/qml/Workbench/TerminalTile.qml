@@ -16,6 +16,9 @@ Item {
     property bool isStageReady: false
     property bool focusedSizeAuthority: false
     property bool accessibilitySuppressed: false
+    property int desktopRequestSerial: 0
+    property string openProjectRequestId
+    property string openProjectError
     readonly property bool active:
         Models.DesktopState.selectedSessionId === sessionId
     readonly property bool focusMode:
@@ -88,6 +91,18 @@ Item {
         }
     }
 
+    function openProject() {
+        desktopRequestSerial += 1
+        const requestId = "stage.tile." + sessionId
+            + ".openProject." + desktopRequestSerial
+        openProjectRequestId = requestId
+        openProjectError = ""
+        Models.DesktopFiles.openSessionProject(
+            sessionId,
+            requestId,
+            Models.DesktopFiles.TerminalProject)
+    }
+
     function refreshPresentation() {
         const presentation =
             Models.Sessions.presentationForSession(sessionId)
@@ -154,6 +169,26 @@ Item {
         function onAttachmentRejected(rejectedSessionId, reason) {
             if (rejectedSessionId === root.sessionId)
                 root.terminalError = reason
+        }
+    }
+
+    Connections {
+        target: Models.DesktopFiles
+
+        function onPathOpened(requestId, purpose) {
+            if (requestId === root.openProjectRequestId
+                    && purpose === Models.DesktopFiles.TerminalProject) {
+                root.openProjectRequestId = ""
+                root.openProjectError = ""
+            }
+        }
+
+        function onOperationFailed(requestId, purpose, errorCode, message) {
+            if (requestId === root.openProjectRequestId
+                    && purpose === Models.DesktopFiles.TerminalProject) {
+                root.openProjectRequestId = ""
+                root.openProjectError = message
+            }
         }
     }
 
@@ -256,6 +291,22 @@ Item {
                     Accessible.selected: root.active
                     onClicked:
                         Models.DesktopState.selectSession(root.sessionId)
+                }
+
+                KIconButton {
+                    objectName:
+                        "stage.tile." + root.sessionId + ".openProject"
+                    Accessible.id: objectName
+                    Accessible.ignored:
+                        root.accessibilitySuppressed || !visible
+                    glyph: "folder"
+                    size: 26
+                    visible: root.chromeTier === 2
+                        && Models.DesktopFiles
+                            .canOpenSessionProject(root.sessionId)
+                    Accessible.name: qsTr("Open project for %1").arg(
+                        root.sessionName)
+                    onClicked: root.openProject()
                 }
 
                 KIconButton {
@@ -402,6 +453,19 @@ Item {
                         KMenuItem {
                             objectName:
                                 "stage.tile." + root.sessionId
+                                + ".overflow.openProject"
+                            Accessible.id: objectName
+                            Accessible.ignored: !visible
+                            visible: overflowMenu.visible
+                                && Models.DesktopFiles
+                                    .canOpenSessionProject(root.sessionId)
+                            text: qsTr("Open Project")
+                            onTriggered: root.openProject()
+                        }
+
+                        KMenuItem {
+                            objectName:
+                                "stage.tile." + root.sessionId
                                 + ".overflow.focus"
                             Accessible.id: objectName
                             Accessible.ignored: !visible
@@ -505,6 +569,46 @@ Item {
                 color: root.active
                     ? KodosiTheme.accentMuted
                     : KodosiTheme.seam
+            }
+        }
+
+        Rectangle {
+            visible: root.openProjectError.length > 0
+            Layout.fillWidth: true
+            implicitHeight: openProjectErrorRow.implicitHeight + 10
+            color: Qt.rgba(
+                KodosiTheme.danger.r,
+                KodosiTheme.danger.g,
+                KodosiTheme.danger.b,
+                0.08)
+
+            RowLayout {
+                id: openProjectErrorRow
+                anchors.fill: parent
+                anchors.leftMargin: KodosiTheme.spacing3
+                anchors.rightMargin: KodosiTheme.spacing2
+                spacing: KodosiTheme.spacing2
+
+                PlainLabel {
+                    Layout.fillWidth: true
+                    text: root.openProjectError
+                    color: KodosiTheme.danger
+                    font.pixelSize: 9
+                    wrapMode: Text.Wrap
+                    Accessible.name: text
+                }
+
+                KIconButton {
+                    objectName: "stage.tile." + root.sessionId
+                        + ".openProject.error.dismiss"
+                    Accessible.id: objectName
+                    Accessible.ignored: !visible
+                    glyph: "close"
+                    size: 24
+                    Accessible.name:
+                        qsTr("Dismiss project open error")
+                    onClicked: root.openProjectError = ""
+                }
             }
         }
 

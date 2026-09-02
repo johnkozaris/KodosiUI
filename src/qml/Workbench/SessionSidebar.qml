@@ -15,10 +15,20 @@ Item {
     property string selectedSessionId
     property bool createOpen: false
     property bool hiddenOpen: false
+    property int desktopRequestSerial: 0
+    property string directoryPickerRequestId
+    property string desktopFileRequestId
+    property string desktopFileError
     onCreateOpenChanged: {
-        if (createOpen)
+        if (createOpen) {
+            desktopFileError = ""
             createDirectory.text =
                 Models.SessionActions.defaultWorkingDirectory
+        } else if (directoryPickerRequestId.length > 0) {
+            Models.DesktopFiles.cancelDirectory(
+                directoryPickerRequestId,
+                Models.DesktopFiles.NewSessionWorkingDirectory)
+        }
     }
     property string shareSessionId
     property string shareSessionName
@@ -52,6 +62,38 @@ Item {
         shareDialog.open()
     }
 
+    function nextDesktopRequestId(suffix) {
+        desktopRequestSerial += 1
+        return "sidebar." + suffix + "." + desktopRequestSerial
+    }
+
+    function browseCreateDirectory() {
+        const requestId = nextDesktopRequestId("create.directory")
+        directoryPickerRequestId = requestId
+        desktopFileError = ""
+        Models.DesktopFiles.requestDirectory(
+            requestId,
+            Models.DesktopFiles.NewSessionWorkingDirectory,
+            createDirectory.text)
+    }
+
+    function openSessionProject(sessionId) {
+        const requestId = nextDesktopRequestId("session.project")
+        desktopFileRequestId = requestId
+        Models.DesktopFiles.openSessionProject(
+            sessionId,
+            requestId,
+            Models.DesktopFiles.SessionProject)
+    }
+
+    Component.onDestruction: {
+        if (directoryPickerRequestId.length > 0) {
+            Models.DesktopFiles.cancelDirectory(
+                directoryPickerRequestId,
+                Models.DesktopFiles.NewSessionWorkingDirectory)
+        }
+    }
+
     Connections {
         target: Models.SessionActions
 
@@ -77,6 +119,51 @@ Item {
 
         function onPresentationContextChanged() {
             accessHandle.clear()
+        }
+    }
+
+    Connections {
+        target: Models.DesktopFiles
+
+        function onDirectoryPicked(requestId, purpose, canonicalDirectory) {
+            if (requestId !== root.directoryPickerRequestId
+                    || purpose
+                        !== Models.DesktopFiles
+                            .NewSessionWorkingDirectory)
+                return
+            root.directoryPickerRequestId = ""
+            createDirectory.text = canonicalDirectory
+            root.desktopFileError = ""
+        }
+
+        function onDirectoryPickCancelled(requestId, purpose) {
+            if (requestId !== root.directoryPickerRequestId
+                    || purpose
+                        !== Models.DesktopFiles
+                            .NewSessionWorkingDirectory)
+                return
+            root.directoryPickerRequestId = ""
+        }
+
+        function onPathOpened(requestId, purpose) {
+            if (requestId === root.desktopFileRequestId
+                    && purpose === Models.DesktopFiles.SessionProject) {
+                root.desktopFileRequestId = ""
+                root.desktopFileError = ""
+            }
+        }
+
+        function onOperationFailed(requestId, purpose, errorCode, message) {
+            if (requestId === root.directoryPickerRequestId
+                    && purpose
+                        === Models.DesktopFiles
+                            .NewSessionWorkingDirectory) {
+                root.directoryPickerRequestId = ""
+                root.desktopFileError = message
+            } else if (requestId === root.desktopFileRequestId
+                    && purpose === Models.DesktopFiles.SessionProject) {
+                root.desktopFileRequestId = ""
+            }
         }
     }
 
@@ -213,15 +300,33 @@ Item {
                     enabled: !Models.SessionActions.creating
                 }
 
-                KTextField {
-                    id: createDirectory
-                    objectName: "session.create.directory"
-                    Accessible.id: objectName
+                RowLayout {
                     Layout.fillWidth: true
-                    text: Models.SessionActions.defaultWorkingDirectory
-                    placeholderText: qsTr("Working directory")
-                    Accessible.name: placeholderText
-                    enabled: !Models.SessionActions.creating
+                    spacing: KodosiTheme.spacing2
+
+                    KTextField {
+                        id: createDirectory
+                        objectName: "session.create.directory"
+                        Accessible.id: objectName
+                        Layout.fillWidth: true
+                        text: Models.SessionActions.defaultWorkingDirectory
+                        placeholderText: qsTr("Working directory")
+                        Accessible.name: placeholderText
+                        maximumLength: 4096
+                        enabled: !Models.SessionActions.creating
+                    }
+
+                    KButton {
+                        objectName: "session.create.directory.browse"
+                        Accessible.id: objectName
+                        text: qsTr("Browse")
+                        compact: true
+                        Accessible.name:
+                            qsTr("Browse for session working directory")
+                        enabled: !Models.SessionActions.creating
+                            && !Models.DesktopFiles.busy
+                        onClicked: root.browseCreateDirectory()
+                    }
                 }
 
                 RowLayout {
@@ -260,6 +365,46 @@ Item {
                     color: KodosiTheme.danger
                     font.pixelSize: 9
                     wrapMode: Text.Wrap
+                }
+
+                Rectangle {
+                    visible: root.desktopFileError.length > 0
+                    Layout.fillWidth: true
+                    implicitHeight: desktopFileErrorRow.implicitHeight + 12
+                    color: Qt.rgba(
+                        KodosiTheme.danger.r,
+                        KodosiTheme.danger.g,
+                        KodosiTheme.danger.b,
+                        0.08)
+                    border.width: 1
+                    border.color: KodosiTheme.danger
+                    radius: KodosiTheme.radiusSmall
+
+                    RowLayout {
+                        id: desktopFileErrorRow
+                        anchors.fill: parent
+                        anchors.margins: 6
+                        spacing: KodosiTheme.spacing2
+
+                        PlainLabel {
+                            Layout.fillWidth: true
+                            text: root.desktopFileError
+                            color: KodosiTheme.danger
+                            font.pixelSize: 9
+                            wrapMode: Text.Wrap
+                            Accessible.name: text
+                        }
+
+                        KIconButton {
+                            objectName: "sidebar.desktopFile.error.dismiss"
+                            Accessible.id: objectName
+                            glyph: "close"
+                            size: 24
+                            Accessible.name:
+                                qsTr("Dismiss filesystem action error")
+                            onClicked: root.desktopFileError = ""
+                        }
+                    }
                 }
             }
 
@@ -515,6 +660,7 @@ Item {
                             || sessionRow.canLeave
                             || sessionRow.leaveNeedsRetry
                             || sessionRow.canShare
+                            || sessionRow.selected
                         text: ""
                         iconName: "more"
                         variant: "quiet"
@@ -524,6 +670,21 @@ Item {
 
                         KMenu {
                             id: sessionActionsMenu
+
+                            KMenuItem {
+                                objectName: "sidebar.session.openProject."
+                                    + sessionRow.sessionId
+                                Accessible.id: objectName
+                                Accessible.ignored: !visible
+                                visible: sessionRow.selected
+                                    && sessionActionsMenu.visible
+                                    && Models.DesktopFiles
+                                        .canOpenSessionProject(
+                                            sessionRow.sessionId)
+                                text: qsTr("Open Project")
+                                onTriggered: root.openSessionProject(
+                                    sessionRow.sessionId)
+                            }
 
                             KMenuItem {
                                 objectName: "sidebar.session.renameAction."

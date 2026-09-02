@@ -15,6 +15,10 @@ KPopover {
 
     property string selectedCategory: "terminal"
     property bool agentIntelAvailable: false
+    property int desktopRequestSerial: 0
+    property string directoryPickerRequestId
+    property string openPathRequestId
+    property string desktopFileError
     readonly property bool compact: width < 760 || height < 580
     readonly property var categories: [
         {
@@ -88,12 +92,104 @@ KPopover {
             workingDirectory.text)
     }
 
+    function nextDesktopRequestId(suffix) {
+        desktopRequestSerial += 1
+        return "settings." + suffix + "." + desktopRequestSerial
+    }
+
+    function browseWorkingDirectory() {
+        const requestId = nextDesktopRequestId("sessions.directory")
+        directoryPickerRequestId = requestId
+        desktopFileError = ""
+        Models.DesktopFiles.requestDirectory(
+            requestId,
+            Models.DesktopFiles.SettingsWorkingDirectory,
+            workingDirectory.text.length > 0
+                ? workingDirectory.text
+                : Models.DesktopSettings.effectiveWorkingDirectory)
+    }
+
+    function openWorkingDirectory() {
+        const requestId = nextDesktopRequestId("sessions.openDirectory")
+        openPathRequestId = requestId
+        desktopFileError = ""
+        Models.DesktopFiles.openPath(
+            workingDirectory.text.length > 0
+                ? workingDirectory.text
+                : Models.DesktopSettings.effectiveWorkingDirectory,
+            requestId,
+            Models.DesktopFiles.SettingsOpenWorkingDirectory)
+    }
+
     onOpened: {
         selectedCategory = "terminal"
         resetDraft()
         closeButton.forceActiveFocus()
     }
-    onClosed: resetDraft()
+    onClosed: {
+        if (directoryPickerRequestId.length > 0) {
+            Models.DesktopFiles.cancelDirectory(
+                directoryPickerRequestId,
+                Models.DesktopFiles.SettingsWorkingDirectory)
+        }
+        openPathRequestId = ""
+        desktopFileError = ""
+        resetDraft()
+    }
+    Component.onDestruction: {
+        if (directoryPickerRequestId.length > 0) {
+            Models.DesktopFiles.cancelDirectory(
+                directoryPickerRequestId,
+                Models.DesktopFiles.SettingsWorkingDirectory)
+        }
+    }
+
+    Connections {
+        target: Models.DesktopFiles
+
+        function onDirectoryPicked(requestId, purpose, canonicalDirectory) {
+            if (requestId !== root.directoryPickerRequestId
+                    || purpose
+                        !== Models.DesktopFiles.SettingsWorkingDirectory)
+                return
+            root.directoryPickerRequestId = ""
+            workingDirectory.text = canonicalDirectory
+            root.desktopFileError = ""
+        }
+
+        function onDirectoryPickCancelled(requestId, purpose) {
+            if (requestId !== root.directoryPickerRequestId
+                    || purpose
+                        !== Models.DesktopFiles.SettingsWorkingDirectory)
+                return
+            root.directoryPickerRequestId = ""
+        }
+
+        function onPathOpened(requestId, purpose) {
+            if (requestId === root.openPathRequestId
+                    && purpose
+                        === Models.DesktopFiles
+                            .SettingsOpenWorkingDirectory) {
+                root.openPathRequestId = ""
+                root.desktopFileError = ""
+            }
+        }
+
+        function onOperationFailed(requestId, purpose, errorCode, message) {
+            if (requestId === root.directoryPickerRequestId
+                    && purpose
+                        === Models.DesktopFiles.SettingsWorkingDirectory) {
+                root.directoryPickerRequestId = ""
+                root.desktopFileError = message
+            } else if (requestId === root.openPathRequestId
+                    && purpose
+                        === Models.DesktopFiles
+                            .SettingsOpenWorkingDirectory) {
+                root.openPathRequestId = ""
+                root.desktopFileError = message
+            }
+        }
+    }
 
     background: Item {
         Rectangle {
@@ -515,16 +611,43 @@ KPopover {
                             font.weight: Font.DemiBold
                             font.letterSpacing: 1.0
                         }
-                        KTextField {
-                            id: workingDirectory
-                            objectName:
-                                "panel.settings.sessions.workingDirectory"
-                            Accessible.id: objectName
+                        RowLayout {
                             Layout.fillWidth: true
-                            placeholderText: qsTr(
-                                "Leave empty to use your home directory")
-                            Accessible.name:
-                                qsTr("Default working directory")
+                            spacing: KodosiTheme.spacing2
+
+                            KTextField {
+                                id: workingDirectory
+                                objectName:
+                                    "panel.settings.sessions.workingDirectory"
+                                Accessible.id: objectName
+                                Layout.fillWidth: true
+                                maximumLength: 4096
+                                placeholderText: qsTr(
+                                    "Leave empty to use your home directory")
+                                Accessible.name:
+                                    qsTr("Default working directory")
+                            }
+
+                            KButton {
+                                objectName:
+                                    "panel.settings.sessions.browse"
+                                Accessible.id: objectName
+                                text: qsTr("Browse")
+                                Accessible.name:
+                                    qsTr("Browse for default working directory")
+                                enabled: !Models.DesktopFiles.busy
+                                onClicked: root.browseWorkingDirectory()
+                            }
+
+                            KButton {
+                                objectName:
+                                    "panel.settings.sessions.openFolder"
+                                Accessible.id: objectName
+                                text: qsTr("Open Folder")
+                                Accessible.name:
+                                    qsTr("Open default working directory")
+                                onClicked: root.openWorkingDirectory()
+                            }
                         }
                         PlainLabel {
                             Layout.fillWidth: true
@@ -754,6 +877,7 @@ KPopover {
                         visible:
                             Models.DesktopSettings.settingsError.length > 0
                             || Models.DesktopState.lastError.length > 0
+                            || root.desktopFileError.length > 0
                         Layout.fillWidth: true
                         Layout.leftMargin: root.compact ? 18 : 28
                         Layout.rightMargin: root.compact ? 18 : 28
@@ -768,21 +892,38 @@ KPopover {
                         border.color: KodosiTheme.danger
                         radius: KodosiTheme.radiusMedium
 
-                        PlainLabel {
-                            id: settingsErrorLabel
+                        RowLayout {
                             anchors.fill: parent
                             anchors.margins: 10
-                            text:
-                                [
-                                    Models.DesktopSettings.settingsError,
-                                    Models.DesktopState.lastError
-                                ].filter(function(message) {
-                                    return message.length > 0
-                                }).join("\n")
-                            color: KodosiTheme.danger
-                            font.pixelSize: 11
-                            wrapMode: Text.Wrap
-                            Accessible.name: text
+                            spacing: KodosiTheme.spacing2
+
+                            PlainLabel {
+                                id: settingsErrorLabel
+                                Layout.fillWidth: true
+                                text:
+                                    [
+                                        Models.DesktopSettings.settingsError,
+                                        Models.DesktopState.lastError,
+                                        root.desktopFileError
+                                    ].filter(function(message) {
+                                        return message.length > 0
+                                    }).join("\n")
+                                color: KodosiTheme.danger
+                                font.pixelSize: 11
+                                wrapMode: Text.Wrap
+                                Accessible.name: text
+                            }
+
+                            KIconButton {
+                                objectName:
+                                    "panel.settings.desktopFile.error.dismiss"
+                                Accessible.id: objectName
+                                visible: root.desktopFileError.length > 0
+                                glyph: "close"
+                                Accessible.name:
+                                    qsTr("Dismiss filesystem action error")
+                                onClicked: root.desktopFileError = ""
+                            }
                         }
                     }
 

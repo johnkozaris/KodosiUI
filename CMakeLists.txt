@@ -22,7 +22,7 @@ find_package(
     Qt6 6.11.2
     EXACT
     REQUIRED
-    COMPONENTS Core DBus Gui Network Qml Quick QuickControls2 Test
+    COMPONENTS Core DBus Gui Network Qml Quick QuickControls2 Test Widgets
 )
 find_package(Threads REQUIRED)
 find_program(CARGO_EXECUTABLE cargo REQUIRED)
@@ -121,6 +121,10 @@ install(
     DESTINATION share/icons/hicolor/scalable/apps
 )
 install(
+    FILES packaging/linux/NATIVE-DESKTOP-INTEGRATION-NOTICE.txt
+    DESTINATION share/doc/kodosi
+)
+install(
     PROGRAMS packaging/linux/kodosi-qt
     DESTINATION bin
 )
@@ -143,7 +147,7 @@ set(CPACK_DEBIAN_PACKAGE_SECTION "devel")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
-    "libc6 (>= 2.39), libstdc++6, libgcc-s1, libatk1.0-0t64, libbrotli1, libcairo-gobject2, libcairo2, libdbus-1-3, libdrm2, libegl1, libfontconfig1, libfreetype6, libgbm1, libgdk-pixbuf-2.0-0, libgl1, libglib2.0-0t64, libgssapi-krb5-2, libgtk-3-0t64, libharfbuzz0b, libopengl0, libpango-1.0-0, libpangocairo-1.0-0, libwayland-client0, libwayland-cursor0, libwayland-egl1, libx11-6, libx11-xcb1, libxcb-cursor0, libxcb-glx0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-render0, libxcb-shape0, libxcb-shm0, libxcb-sync1, libxcb-util1, libxcb-xfixes0, libxcb-xkb1, libxcb1, libxkbcommon-x11-0, libxkbcommon0, libzstd1, zlib1g"
+    "libc6 (>= 2.39), libstdc++6, libgcc-s1, libatk1.0-0t64, libbrotli1, libcairo-gobject2, libcairo2, libdbus-1-3, libdrm2, libegl1, libfontconfig1, libfreetype6, libgbm1, libgdk-pixbuf-2.0-0, libgl1, libglib2.0-0t64, libgssapi-krb5-2, libgtk-3-0t64, libharfbuzz0b, libopengl0, libpango-1.0-0, libpangocairo-1.0-0, libwayland-client0, libwayland-cursor0, libwayland-egl1, libx11-6, libx11-xcb1, libxcb-cursor0, libxcb-glx0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-render0, libxcb-shape0, libxcb-shm0, libxcb-sync1, libxcb-util1, libxcb-xfixes0, libxcb-xkb1, libxcb1, libxkbcommon-x11-0, libxkbcommon0, libzstd1, xdg-desktop-portal, xdg-utils, zlib1g"
 )
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://kodosi.com")
 set(CPACK_ARCHIVE_FILE_NAME

@@ -26,6 +26,7 @@
 #include "models/SteeringModel.hpp"
 #include "models/TerminalTilingLayoutModel.hpp"
 #include "models/TrustModel.hpp"
+#include "platform/DesktopFileIntegration.hpp"
 #include "terminal/TerminalSurfaceController.hpp"
 #include "terminal/TerminalView.hpp"
 
@@ -234,6 +235,22 @@ struct DesktopStateModelForeign {
 public:
     inline static kodosi::DesktopStateModel* instance = nullptr;
     static kodosi::DesktopStateModel* create(QQmlEngine* engine, QJSEngine*)
+    {
+        return singleton(instance, engine);
+    }
+};
+
+struct DesktopFileIntegrationForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::DesktopFileIntegration)
+    QML_NAMED_ELEMENT(DesktopFiles)
+    QML_SINGLETON
+
+public:
+    inline static kodosi::DesktopFileIntegration* instance = nullptr;
+    static kodosi::DesktopFileIntegration* create(
+        QQmlEngine* engine,
+        QJSEngine*)
     {
         return singleton(instance, engine);
     }
@@ -512,6 +529,7 @@ void configureModelInstances(
     DeviceActions& deviceActions,
     DesktopSettings& desktopSettings,
     DesktopStateModel& desktopState,
+    DesktopFileIntegration& desktopFiles,
     MissionDirectoryModel& missions,
     MissionDetailModel& missionDetail,
     MissionActions& missionActions,

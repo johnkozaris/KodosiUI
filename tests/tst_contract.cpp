@@ -16,6 +16,7 @@ class ContractTest final : public QObject
 private slots:
     void dependencyBaselineIsCurrent();
     void desktopStateQmlContractIsNativeOwned();
+    void desktopFileIntegrationContractIsNativeOwned();
     void runtimeBridgeStartsAndStopsPinnedAbi();
 };
 
@@ -274,6 +275,160 @@ void ContractTest::desktopStateQmlContractIsNativeOwned()
         ">\"$artifact_dir/tiling-ready-tree.json\""));
     QVERIFY(smokeSource.contains(
         "native terminal accessible text is empty"));
+}
+
+void ContractTest::desktopFileIntegrationContractIsNativeOwned()
+{
+    QFile header(QStringLiteral(
+        KODOSI_SOURCE_DIR
+        "/src/platform/DesktopFileIntegration.hpp"));
+    QVERIFY2(header.open(QIODevice::ReadOnly), qPrintable(header.errorString()));
+    const auto headerSource = header.readAll();
+    QVERIFY(headerSource.contains("Q_PROPERTY(bool busy"));
+    QVERIFY(headerSource.contains("Q_PROPERTY(ErrorCode errorCode"));
+    QVERIFY(headerSource.contains("requestDirectory("));
+    QVERIFY(headerSource.contains("cancelDirectory("));
+    QVERIFY(headerSource.contains("openPath("));
+    QVERIFY(headerSource.contains("openSessionProject("));
+    QVERIFY(headerSource.contains("canOpenSessionProject("));
+    QVERIFY(headerSource.contains("QPointer<QWindow> transientParent"));
+    QVERIFY(headerSource.contains("directoryPickCancelled("));
+    QVERIFY(headerSource.contains("operationFailed("));
+
+    QFile implementation(QStringLiteral(
+        KODOSI_SOURCE_DIR
+        "/src/platform/DesktopFileIntegration.cpp"));
+    QVERIFY2(
+        implementation.open(QIODevice::ReadOnly),
+        qPrintable(implementation.errorString()));
+    const auto implementationSource = implementation.readAll();
+    QVERIFY(implementationSource.contains("QFileDialog::Directory"));
+    QVERIFY(implementationSource.contains("Qt::ApplicationModal"));
+    QVERIFY(implementationSource.contains("dialog->show()"));
+    QVERIFY(!implementationSource.contains("dialog->open()"));
+    QVERIFY(implementationSource.contains(
+        "dialog->setAttribute(Qt::WA_NativeWindow)"));
+    QVERIFY(implementationSource.contains(
+        "dialogWindow->setTransientParent(request.transientParent)"));
+    QVERIFY(!implementationSource.contains("winId()"));
+    QVERIFY(!implementationSource.contains("focusWindow()"));
+    QVERIFY(implementationSource.contains(
+        "QFileDialog::DontUseNativeDialog, false"));
+    QVERIFY(implementationSource.contains(
+        "setSupportedSchemes({QStringLiteral(\"file\")})"));
+    QVERIFY(implementationSource.contains(
+        "QDesktopServices::openUrl(url)"));
+    QVERIFY(implementationSource.contains("QUrl::fromLocalFile("));
+    QVERIFY(implementationSource.contains(
+        "::access(nativePath.constData(), R_OK)"));
+    QVERIFY(implementationSource.contains(
+        "::access(nativePath.constData(), X_OK)"));
+    QVERIFY(!implementationSource.contains("hasAnyPermission"));
+    QVERIFY(!implementationSource.contains("std::system"));
+    QVERIFY(!implementationSource.contains("QProcess"));
+    QVERIFY(!implementationSource.contains("/bin/sh"));
+
+    QFile mainCpp(QStringLiteral(KODOSI_SOURCE_DIR "/src/app/main.cpp"));
+    QVERIFY2(mainCpp.open(QIODevice::ReadOnly), qPrintable(mainCpp.errorString()));
+    const auto mainSource = mainCpp.readAll();
+    QVERIFY(mainSource.contains("QApplication application(argc, argv)"));
+    QVERIFY(!mainSource.contains("QGuiApplication application(argc, argv)"));
+    QVERIFY(mainSource.contains(
+        "qEnvironmentVariableIsSet(\"QT_QPA_PLATFORMTHEME\")"));
+    QVERIFY(mainSource.contains(
+        "QByteArrayLiteral(\"xdgdesktopportal\")"));
+    QVERIFY(
+        mainSource.indexOf("qEnvironmentVariableIsSet")
+        < mainSource.indexOf("QApplication application"));
+    QVERIFY(mainSource.contains(
+        "desktopFiles.setTransientParent(mainWindow)"));
+
+    QFile sidebar(QStringLiteral(
+        KODOSI_SOURCE_DIR
+        "/src/qml/Workbench/SessionSidebar.qml"));
+    QVERIFY2(sidebar.open(QIODevice::ReadOnly), qPrintable(sidebar.errorString()));
+    const auto sidebarSource = sidebar.readAll();
+    QVERIFY(sidebarSource.contains(
+        "objectName: \"session.create.directory.browse\""));
+    QVERIFY(sidebarSource.contains(
+        "Models.DesktopFiles.NewSessionWorkingDirectory"));
+    QVERIFY(sidebarSource.contains(
+        "Models.DesktopFiles.cancelDirectory("));
+    QVERIFY(sidebarSource.contains("Component.onDestruction:"));
+    QVERIFY(sidebarSource.contains(
+        "requestId !== root.directoryPickerRequestId"));
+    QVERIFY(sidebarSource.contains(
+        "objectName: \"sidebar.session.openProject.\""));
+    QVERIFY(sidebarSource.contains(
+        "Models.DesktopFiles.openSessionProject("));
+    QVERIFY(!sidebarSource.contains("Models.DesktopFiles.openPath("));
+
+    QFile settings(QStringLiteral(
+        KODOSI_SOURCE_DIR
+        "/src/qml/Settings/SettingsDrawer.qml"));
+    QVERIFY2(settings.open(QIODevice::ReadOnly), qPrintable(settings.errorString()));
+    const auto settingsSource = settings.readAll();
+    QVERIFY(settingsSource.contains(
+        "\"panel.settings.sessions.browse\""));
+    QVERIFY(settingsSource.contains(
+        "\"panel.settings.sessions.openFolder\""));
+    QVERIFY(settingsSource.contains(
+        "Models.DesktopFiles.SettingsWorkingDirectory"));
+    QVERIFY(settingsSource.contains(
+        "Models.DesktopFiles.cancelDirectory("));
+    QVERIFY(settingsSource.contains("Component.onDestruction:"));
+    QVERIFY(settingsSource.contains(
+        "requestId !== root.directoryPickerRequestId"));
+
+    QFile tile(QStringLiteral(
+        KODOSI_SOURCE_DIR
+        "/src/qml/Workbench/TerminalTile.qml"));
+    QVERIFY2(tile.open(QIODevice::ReadOnly), qPrintable(tile.errorString()));
+    const auto tileSource = tile.readAll();
+    QVERIFY(tileSource.contains(".overflow.openProject"));
+    QVERIFY(tileSource.contains(
+        "\"stage.tile.\" + root.sessionId + \".openProject\""));
+    QVERIFY(tileSource.contains("canOpenSessionProject(root.sessionId)"));
+    QVERIFY(tileSource.contains("Models.DesktopFiles.TerminalProject"));
+    QVERIFY(tileSource.contains(
+        "Models.DesktopFiles.openSessionProject("));
+    QVERIFY(!tileSource.contains("Models.DesktopFiles.openPath("));
+
+    QFile banner(QStringLiteral(
+        KODOSI_SOURCE_DIR
+        "/src/qml/Workbench/DesktopFileErrorBanner.qml"));
+    QVERIFY2(banner.open(QIODevice::ReadOnly), qPrintable(banner.errorString()));
+    const auto bannerSource = banner.readAll();
+    QVERIFY(bannerSource.contains(
+        "objectName: \"banner.desktopFile.error\""));
+    QVERIFY(bannerSource.contains(
+        "objectName: \"banner.desktopFile.error.dismiss\""));
+    QVERIFY(bannerSource.contains(
+        "Models.DesktopFiles.SessionProject"));
+
+    QFile shell(QStringLiteral(KODOSI_SOURCE_DIR "/src/qml/Main.qml"));
+    QVERIFY2(shell.open(QIODevice::ReadOnly), qPrintable(shell.errorString()));
+    QVERIFY(shell.readAll().contains("DesktopFileErrorBanner"));
+
+    QFile sourceCMake(QStringLiteral(
+        KODOSI_SOURCE_DIR "/src/CMakeLists.txt"));
+    QVERIFY2(
+        sourceCMake.open(QIODevice::ReadOnly),
+        qPrintable(sourceCMake.errorString()));
+    const auto sourceCMakeText = sourceCMake.readAll();
+    QVERIFY(sourceCMakeText.contains("Qt6::Widgets"));
+    QVERIFY(sourceCMakeText.contains("QGtk3ThemePlugin"));
+    QVERIFY(sourceCMakeText.contains("QXdgDesktopPortalThemePlugin"));
+    QVERIFY(sourceCMakeText.contains(
+        "qml/Workbench/DesktopFileErrorBanner.qml"));
+
+    QFile rootCMake(QStringLiteral(KODOSI_SOURCE_DIR "/CMakeLists.txt"));
+    QVERIFY2(
+        rootCMake.open(QIODevice::ReadOnly),
+        qPrintable(rootCMake.errorString()));
+    const auto rootCMakeText = rootCMake.readAll();
+    QVERIFY(rootCMakeText.contains("xdg-desktop-portal"));
+    QVERIFY(rootCMakeText.contains("xdg-utils"));
 }
 
 void ContractTest::runtimeBridgeStartsAndStopsPinnedAbi()

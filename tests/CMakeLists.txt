@@ -37,6 +37,33 @@ target_compile_definitions(kodosi-desktop-settings-tests
 )
 add_test(NAME kodosi-desktop-settings-tests COMMAND kodosi-desktop-settings-tests)
 
+qt_add_executable(kodosi-desktop-file-integration-tests
+    tst_desktop_file_integration.cpp
+)
+target_link_libraries(kodosi-desktop-file-integration-tests
+    PRIVATE
+        kodosi-desktop-integration
+        kodosi-runtime-bridge
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Test
+        Qt6::Widgets
+)
+target_compile_definitions(kodosi-desktop-file-integration-tests
+    PRIVATE
+        QT_NO_CAST_FROM_ASCII
+        QT_NO_CAST_TO_ASCII
+        QT_NO_URL_CAST_FROM_STRING
+)
+add_test(
+    NAME kodosi-desktop-file-integration-tests
+    COMMAND kodosi-desktop-file-integration-tests
+)
+set_tests_properties(kodosi-desktop-file-integration-tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 30
+)
+
 qt_add_executable(kodosi-desktop-state-model-tests
     tst_desktop_state_model.cpp
 )

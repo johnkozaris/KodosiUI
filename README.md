@@ -38,6 +38,23 @@ incarnations do not enter QML. The first client uses ABI 5 directly so the
 Linux work remains reversible. A shared Rust projection module may be added
 later only after it runs in shadow mode against the shipping Swift client.
 
+`DesktopFileIntegration` owns local folder selection and default-application
+launching. It uses an asynchronous, application-modal Qt Widgets
+`QFileDialog`. Before `QApplication` exists, Kodosi selects Qt's
+`xdgdesktopportal` platform theme when `QT_QPA_PLATFORMTHEME` is unset and
+preserves any explicit user override. The desktop portal discovers the active
+backend, including KDE's backend when the desktop provides it; Kodosi does not
+ship or claim a KDE Qt platform-theme plugin. The official Qt 6.11.2 portal
+theme and GTK 3 fallback are packaged in the private runtime. QML receives only
+semantic request results and typed failures. Every accepted or launched path
+is length-bounded, local, canonical, existing, and permission-checked.
+Launches call `QDesktopServices::openUrl(QUrl::fromLocalFile(...))`; Kodosi
+does not invoke a shell directly, while Qt or the desktop may delegate to a
+portal, registered handler, or `xdg-open`.
+
+Linux packages depend on `xdg-desktop-portal` for native chooser routing and
+`xdg-utils` as a desktop-handler fallback for `QDesktopServices`.
+
 `DesktopStateModel` owns Stage membership, selection, focus mode, account-scoped
 remote restoration, and versioned desktop persistence. The pure
 `TerminalTilingLayoutModel` owns adaptive 1–6 pane geometry, minimum tile
@@ -82,6 +99,11 @@ just ui-probe drag --from-x 10 --from-y 20 --to-x 300 --to-y 200
 just ui-probe-input-status
 just ui-probe-smoke
 ```
+
+Set `KODOSI_UI_PROBE_SKIP_INTERACTIVE_PORTALS=1` when running the real-app
+probe unattended. The flow still verifies the Browse and Open Folder
+accessibility contracts but does not click Browse or request screenshot
+consent.
 
 The real-app probe also launches an isolated
 `--ui-probe-tiling-synthetic` process to exercise multi-pane selection, focus,

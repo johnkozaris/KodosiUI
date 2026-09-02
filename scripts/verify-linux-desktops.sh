@@ -29,6 +29,9 @@ docker run --rm \
         set -euo pipefail
         mkdir -p /work/temp
         export TMPDIR=/work/temp
+        export LANG=C.UTF-8
+        export LC_ALL=C.UTF-8
+        export QT_QUICK_BACKEND=software
         apt-get update -qq
         DEBIAN_FRONTEND=noninteractive apt-get install -y \
             /work/kodosi.deb xvfb weston >/work/install.log
@@ -57,10 +60,13 @@ docker run --rm \
             sleep 0.1
         done
         DISPLAY=127.0.0.1:99 QT_QPA_PLATFORM=xcb \
+            QT_QPA_PLATFORMTHEME= \
             /usr/bin/kodosi-qt --smoke-test
         DISPLAY=127.0.0.1:99 QT_QPA_PLATFORM=xcb \
+            QT_QPA_PLATFORMTHEME= \
             /usr/bin/kodosi-qt --smoke-test-agent-intel
         DISPLAY=127.0.0.1:99 QT_QPA_PLATFORM=xcb \
+            QT_QPA_PLATFORMTHEME= \
             /usr/bin/kodosi-qt --smoke-test-attention
 
         export XDG_RUNTIME_DIR=/work/weston-runtime
@@ -76,12 +82,15 @@ docker run --rm \
         done
         WAYLAND_DISPLAY=wayland-9 \
             QT_QPA_PLATFORM=wayland \
+            QT_QPA_PLATFORMTHEME= \
             /usr/bin/kodosi-qt --smoke-test
         WAYLAND_DISPLAY=wayland-9 \
             QT_QPA_PLATFORM=wayland \
+            QT_QPA_PLATFORMTHEME= \
             /usr/bin/kodosi-qt --smoke-test-agent-intel
         WAYLAND_DISPLAY=wayland-9 \
             QT_QPA_PLATFORM=wayland \
+            QT_QPA_PLATFORMTHEME= \
             /usr/bin/kodosi-qt --smoke-test-attention
     '
 

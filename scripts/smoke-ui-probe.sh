@@ -237,6 +237,14 @@ category_handle=$(
 )
 "$probe" click "$category_handle" \
     >"$artifact_dir/settings-tab-$category-click.json"
+if [[ "$category" == sessions ]]; then
+    "$probe" find --app "$app_handle" \
+        --id panel.settings.sessions.browse \
+        >"$artifact_dir/settings-sessions-browse.json"
+    "$probe" find --app "$app_handle" \
+        --id panel.settings.sessions.openFolder \
+        >"$artifact_dir/settings-sessions-open-folder.json"
+fi
 "$probe" inspect "$category_handle" \
     >"$artifact_dir/settings-tab-$category-inspect.json"
 python3 -c '
@@ -437,7 +445,8 @@ agents_handle=$(
 "$probe" click "$agents_handle" >"$artifact_dir/agents-click.json"
 
 "$probe" doctor >"$artifact_dir/doctor.json"
-if [[ "$(
+if [[ "${KODOSI_UI_PROBE_SKIP_INTERACTIVE_PORTALS:-0}" != 1 \
+    && "$(
     json_value portal.screenshotAvailable <"$artifact_dir/doctor.json"
 )" = "True" ]]; then
     set +e
@@ -870,6 +879,8 @@ ready_name_handle=$(
 ready_directory_handle=$(
     json_value matches.0.handle <"$artifact_dir/ready-create-directory.json"
 )
+"$probe" find --app "$app_handle" --id session.create.directory.browse \
+    >"$artifact_dir/ready-create-directory-browse.json"
 "$probe" set-text "$ready_directory_handle" --text "$PWD" \
     >"$artifact_dir/ready-create-directory-set.json"
 "$probe" find --app "$app_handle" --id session.create.submit \

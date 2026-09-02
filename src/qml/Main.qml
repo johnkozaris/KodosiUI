@@ -349,6 +349,10 @@ ApplicationWindow {
             Layout.fillWidth: true
         }
 
+        DesktopFileErrorBanner {
+            Layout.fillWidth: true
+        }
+
         RuntimeHealthBanner {
             Layout.fillWidth: true
             onOpenDiagnosticsRequested: window.toggleDiagnostics()

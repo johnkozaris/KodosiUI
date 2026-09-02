@@ -9,7 +9,7 @@ depends=(
   at-spi2-core brotli cairo dbus libdrm libglvnd fontconfig freetype2
   mesa gdk-pixbuf2 krb5 gtk3 harfbuzz pango wayland libx11 libxcb
   xcb-util-cursor xcb-util-image xcb-util-keysyms xcb-util-renderutil
-  xcb-util-wm libxkbcommon-x11 zstd zlib
+  xcb-util-wm libxkbcommon-x11 xdg-desktop-portal xdg-utils zstd zlib
 )
 provides=('kodosi')
 conflicts=('kodosi')

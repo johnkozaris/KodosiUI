@@ -15,6 +15,7 @@ void configureModelInstances(
     DeviceActions& deviceActions,
     DesktopSettings& desktopSettings,
     DesktopStateModel& desktopState,
+    DesktopFileIntegration& desktopFiles,
     MissionDirectoryModel& missions,
     MissionDetailModel& missionDetail,
     MissionActions& missionActions,
@@ -43,6 +44,7 @@ void configureModelInstances(
     DeviceActionsForeign::instance = &deviceActions;
     DesktopSettingsForeign::instance = &desktopSettings;
     DesktopStateModelForeign::instance = &desktopState;
+    DesktopFileIntegrationForeign::instance = &desktopFiles;
     MissionDirectoryModelForeign::instance = &missions;
     MissionDetailModelForeign::instance = &missionDetail;
     MissionActionsForeign::instance = &missionActions;

@@ -37,12 +37,14 @@ docker run --rm \
             fontconfig freetype2 mesa gdk-pixbuf2 krb5 gtk3 harfbuzz pango \
             wayland libx11 libxcb xcb-util-cursor xcb-util-image \
             xcb-util-keysyms xcb-util-renderutil xcb-util-wm \
-            libxkbcommon-x11 zstd zlib >/build/pacman.log
+            libxkbcommon-x11 xdg-desktop-portal xdg-utils zstd zlib \
+            >/build/pacman.log
         useradd --create-home --uid "$HOST_UID" builder
         chown -R builder:builder /build
         su builder -c "cd /build && makepkg --noconfirm --clean"
         pacman -U --noconfirm /build/kodosi-bin-[0-9]*.pkg.tar.zst >/build/install.log
-        QT_QPA_PLATFORM=offscreen QSG_RHI_BACKEND=software /usr/bin/kodosi-qt --smoke-test
+        QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME= \
+            QSG_RHI_BACKEND=software /usr/bin/kodosi-qt --smoke-test
     '
 
 package=$(find "$stage" -maxdepth 1 -name 'kodosi-bin-[0-9]*.pkg.tar.zst' -print -quit)
