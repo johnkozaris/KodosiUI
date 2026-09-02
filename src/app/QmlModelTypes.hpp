@@ -26,6 +26,7 @@
 #include "models/SteeringModel.hpp"
 #include "models/TerminalTilingLayoutModel.hpp"
 #include "models/TrustModel.hpp"
+#include "logging/ApplicationLogStore.hpp"
 #include "platform/DesktopFileIntegration.hpp"
 #include "terminal/TerminalSurfaceController.hpp"
 #include "terminal/TerminalView.hpp"
@@ -380,6 +381,22 @@ public:
     }
 };
 
+struct ApplicationLogStoreForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::ApplicationLogStore)
+    QML_NAMED_ELEMENT(ApplicationLog)
+    QML_SINGLETON
+
+public:
+    inline static kodosi::ApplicationLogStore* instance = nullptr;
+    static kodosi::ApplicationLogStore* create(
+        QQmlEngine* engine,
+        QJSEngine*)
+    {
+        return singleton(instance, engine);
+    }
+};
+
 struct SessionCatalogModelForeign {
     Q_GADGET
     QML_FOREIGN(kodosi::SessionCatalogModel)
@@ -537,6 +554,7 @@ void configureModelInstances(
     PeopleModel& people,
     PeopleActions& peopleActions,
     RuntimeDiagnosticsModel& runtimeDiagnostics,
+    ApplicationLogStore& applicationLog,
     SessionCatalogModel& sessions,
     SessionAccess& sessionAccess,
     SessionActions& sessionActions,

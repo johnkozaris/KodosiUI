@@ -29,6 +29,8 @@ if grep -Fq 'libxcb-icccm4 (' <<<"$dependencies" ||
 fi
 
 test -x "$stage/usr/bin/kodosi-qt"
+test -x "$stage/usr/bin/kodosi"
+test -x "$stage/usr/lib/kodosi/bin/kodosi"
 test -x "$stage/usr/lib/kodosi/bin/kodosi-qt"
 test -f "$stage/usr/lib/kodosi/bin/qt.conf"
 test -f "$stage/usr/share/applications/com.kodosi.Kodosi.desktop"
@@ -91,6 +93,8 @@ desktop-file-validate \
 appstreamcli validate --no-net \
     "$stage/usr/share/metainfo/com.kodosi.Kodosi.metainfo.xml"
 
+./scripts/verify-installed-package-content.sh "$stage"
+
 QT_QPA_PLATFORM=offscreen \
 QT_QPA_PLATFORMTHEME= \
 QSG_RHI_BACKEND=software \
@@ -99,5 +103,12 @@ QT_QPA_PLATFORM=offscreen \
 QT_QPA_PLATFORMTHEME= \
 QSG_RHI_BACKEND=software \
 "$stage/usr/bin/kodosi-qt" --smoke-test-agent-intel
+isolated="$stage/isolated-cli-help"
+mkdir -p "$isolated/home" "$isolated/config" "$isolated/state" "$isolated/data"
+HOME="$isolated/home" \
+XDG_CONFIG_HOME="$isolated/config" \
+XDG_STATE_HOME="$isolated/state" \
+XDG_DATA_HOME="$isolated/data" \
+"$stage/usr/bin/kodosi" --help >/dev/null
 
 echo "Linux package verified: $(basename "$package")"

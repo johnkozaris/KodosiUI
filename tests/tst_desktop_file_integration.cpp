@@ -1,4 +1,5 @@
 #include "models/SessionCatalogModel.hpp"
+#include "logging/ApplicationLogStore.hpp"
 #include "platform/DesktopFileIntegration.hpp"
 
 #include <QDir>
@@ -202,6 +203,7 @@ private slots:
     void rejectsUnreadableAndUnsearchablePaths();
     void rejectsOversizedAndNulInputs();
     void opensCanonicalPathsWithoutShells();
+    void opensOnlyTheNativeApplicationLogDirectory();
     void reportsDeterministicOpenerFailure();
     void opensCurrentLocalSessionProjectAtInvocationTime();
     void rejectsRemovedRemoteAndArbitrarySessionPaths();
@@ -404,6 +406,68 @@ void DesktopFileIntegrationTest::opensCanonicalPathsWithoutShells()
     QCOMPARE(
         opened.constFirst().at(0).toString(),
         QStringLiteral("open.file.1"));
+}
+
+void DesktopFileIntegrationTest::opensOnlyTheNativeApplicationLogDirectory()
+{
+    QTemporaryDir directory {
+        QDir::current().filePath(
+            QStringLiteral("desktop-log-integration-XXXXXX"))
+    };
+    QVERIFY(directory.isValid());
+    kodosi::ApplicationLogStore logStore({
+        .directory = directory.filePath(QStringLiteral("state/logs")),
+        .installQtMessageHandler = false,
+    });
+    QVERIFY(logStore.healthy());
+
+    kodosi::SessionCatalogModel sessions;
+    auto picker = std::make_unique<FakeDirectoryPicker>();
+    QList<QUrl> opened;
+    Integration integration(
+        sessions,
+        std::move(picker),
+        [&opened](const QUrl& url) {
+            opened.append(url);
+            return true;
+        },
+        &logStore);
+
+    QVERIFY(integration.openLogDirectory(
+        QStringLiteral("diagnostics.logs.1"),
+        Purpose::DiagnosticsLogDirectory));
+    QCOMPARE(opened.size(), 1);
+    QCOMPARE(
+        opened.constFirst().toLocalFile(),
+        QFileInfo(logStore.directory()).canonicalFilePath());
+    QVERIFY(!integration.openLogDirectory(
+        QStringLiteral("diagnostics.logs.2"),
+        Purpose::SettingsOpenWorkingDirectory));
+    QVERIFY(!integration.openPath(
+        directory.path(),
+        QStringLiteral("diagnostics.logs.3"),
+        Purpose::DiagnosticsLogDirectory));
+
+    kodosi::ApplicationLogStore unhealthyStore({
+        .directory = logStore.directory(),
+        .rotationBytes = 1,
+        .installQtMessageHandler = false,
+    });
+    QVERIFY(!unhealthyStore.healthy());
+    QVERIFY(unhealthyStore.directoryAvailable());
+    auto unhealthyPicker = std::make_unique<FakeDirectoryPicker>();
+    Integration unhealthyIntegration(
+        sessions,
+        std::move(unhealthyPicker),
+        [&opened](const QUrl& url) {
+            opened.append(url);
+            return true;
+        },
+        &unhealthyStore);
+    QVERIFY(unhealthyIntegration.openLogDirectory(
+        QStringLiteral("diagnostics.logs.unhealthy"),
+        Purpose::DiagnosticsLogDirectory));
+    QCOMPARE(opened.size(), 2);
 }
 
 void DesktopFileIntegrationTest::reportsDeterministicOpenerFailure()

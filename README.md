@@ -55,6 +55,26 @@ portal, registered handler, or `xdg-open`.
 Linux packages depend on `xdg-desktop-portal` for native chooser routing and
 `xdg-utils` as a desktop-handler fallback for `QDesktopServices`.
 
+## Local application logs
+
+The Linux client installs its Qt message handler after application identity is
+set and before the Rust runtime or presentation models start. Redacted JSON
+lines are written to Qt's `StateLocation` under a process-specific
+`logs/kodosi-<pid>-<launch-id>.log` name with directory mode `0700` and file
+mode `0600`. Each process rotates independently at 2 MiB with at most five
+archives. Startup keeps only a bounded number of completed process families
+and never rotates or prunes a live process family. Persisted messages contain
+only UTC time, severity, Qt category, thread identity, and redacted text.
+Terminal bytes and terminal content are not logging inputs. Original Qt
+messages still go to stderr or journald as developer output.
+
+Diagnostics reports logging health, native path, size, retained archive count,
+and the last filesystem error. Logging health is status, not the Open Log
+Folder gate: that action remains available whenever the owned directory exists
+and passes native validation.
+Smoke-test and UI-probe processes set isolated `XDG_CONFIG_HOME` and
+`XDG_STATE_HOME` roots under `build/`; they do not write normal user logs.
+
 `DesktopStateModel` owns Stage membership, selection, focus mode, account-scoped
 remote restoration, and versioned desktop persistence. The pure
 `TerminalTilingLayoutModel` owns adaptive 1–6 pane geometry, minimum tile
@@ -171,3 +191,79 @@ authority reporting without opening an unattended consent request.
 The sibling `../Kodosi`, `../kodosiSwift`, and `../kodosi-ghostty` checkouts
 are required. CI checks out their immutable baseline commits and requires a
 read-only `KODOSI_REPOSITORY_TOKEN` secret for the private sibling repositories.
+
+## Linux release integrity
+
+Release packages include `/usr/bin/kodosi-qt` and the pinned Rust CLI at
+`/usr/bin/kodosi`, backed by private binaries under `/usr/lib/kodosi/bin`.
+The Ghostty licenses and Linux VT inventory, the exact dependency lock, the
+build-time identities of KodosiQT, the Rust runtime, and the Ghostty package,
+and a deterministic locked Rust dependency license inventory with actual
+LICENSE, COPYING, and NOTICE evidence are installed under
+`/usr/share/doc/kodosi`. Packages also include the applicable Qt open-source
+LGPL/GPL and third-party license texts, Qt's SPDX and CycloneDX SBOMs for the
+exact 6.11.2 `linux_gcc_64` binary distribution, and ICU 73.2 license and
+copyright evidence. Their official source URLs, immutable refs, source archive
+SHA-256 values, and individual evidence digests are recorded in
+`packaging/licenses/native-license-evidence.json`; Kodosi does not claim a Qt
+commercial license.
+
+`just release-manifest` builds and verifies the DEB, TGZ, and Manjaro package,
+then writes canonical `build/release/release-manifest.json`. The manifest has
+no clock field and is available only from a clean committed worktree after all
+three artifacts are rebuilt. It records the product version; clean, exact
+build-time identities for KodosiQT, `../Kodosi`, and `../kodosi-ghostty`;
+Qt/runtime/Ghostty pins;
+ABI/protocol versions, and each artifact's filename, size, SHA-256, and embedded
+source identities. The Swift parity checkout remains pinned by the parity gate
+but is not package provenance because it is neither compiled nor installed.
+The independent verifier rejects path traversal, symlinks, duplicate names,
+unexpected or oversized artifacts, hash changes, pin drift, dirty siblings,
+artifacts from stale sibling commits, a changed `Ghostty.ref`, and substitution
+of the pinned Linux Ghostty archive.
+
+`SOURCE_DATE_EPOCH` is the clean KodosiQT source commit time. It is passed to
+the Rust release builds and CPack, embedded in source identity, and used for
+the DEB, TGZ, and deterministic Arch package metadata. The package gate builds
+DEB/TGZ twice from the same compiled/install tree, writes the Arch package
+twice without `makepkg` host metadata, and requires byte-identical SHA-256
+results. Archive paths, ownership, modes, and mtimes are normalized, and
+`.BUILDINFO`, wall-clock, workstation, and rolling host-package metadata are
+rejected. This reproducibility guarantee is scoped to the same pinned source,
+toolchain, dependencies, and compiled/install build tree; it does not claim
+cross-toolchain or cross-host reproducibility.
+
+`just package` is a development packaging command: KodosiQT itself may be
+dirty and that fact is embedded as `client.dirty=true`. The runtime and
+Ghostty package must still be pinned and completely clean immediately before
+their build, copy, and install steps. Release-manifest generation and signing
+refuse a dirty identity for any of the three sources.
+
+Three crates whose registry archives omit their upstream license files use
+committed redistribution evidence under `packaging/licenses/rust-overrides`.
+`packaging/licenses/rust-license-overrides.json` binds the exact crate
+name/version/source identity to the official upstream URL, ref, commit, and
+SHA-256. Cargo metadata declarations alone are never accepted as license
+evidence.
+
+Unsigned local builds rely on this deterministic SHA-256 manifest only.
+Optional detached signing is explicit and noninteractive:
+
+```bash
+just sign-release-manifest FINGERPRINT
+just verify-release-signature FINGERPRINT
+```
+
+The scripts require the exact trusted 40-hex fingerprint and an already
+available GPG keyring. Signatures are ASCII-armored, verification disables
+automatic key retrieval, and expired, revoked, or unexpected signers are
+rejected. A signing subkey is accepted by its exact fingerprint or by the exact
+primary fingerprint reported in GPG's `VALIDSIG` status. Signature verification
+is offline and validates the signed manifest's canonical structure without a
+producer checkout; source/pin and artifact hash verification remain the
+separate full manifest verifier. Production scripts never generate, import,
+export, or prompt for keys; tests use an isolated throwaway `GNUPGHOME`.
+Private/internal GitHub artifact attestations require GitHub Enterprise Cloud,
+so this repository does not publish or claim attestations. Automatic update
+remains unimplemented; release consumers must verify the manifest (and, when
+provided, its detached signature) before installing an artifact.

@@ -235,11 +235,13 @@ void ContractTest::desktopStateQmlContractIsNativeOwned()
     QVERIFY(compositionSource.contains(
         "desktopStateSettings(!syntheticMode)"));
     QVERIFY(compositionSource.contains(
-        "build/synthetic-config/"));
+        "build/synthetic-roots/"));
     QVERIFY(compositionSource.contains(
         "removeSyntheticConfig"));
     QVERIFY(compositionSource.contains(
         "\"XDG_CONFIG_HOME\""));
+    QVERIFY(compositionSource.contains(
+        "\"XDG_STATE_HOME\""));
 
     QFile desktopStateCpp(
         QStringLiteral(
@@ -342,6 +344,12 @@ void ContractTest::desktopFileIntegrationContractIsNativeOwned()
         < mainSource.indexOf("QApplication application"));
     QVERIFY(mainSource.contains(
         "desktopFiles.setTransientParent(mainWindow)"));
+    QVERIFY(mainSource.contains("\"XDG_STATE_HOME\""));
+    QVERIFY(mainSource.contains(
+        "kodosi::ApplicationLogStore applicationLog"));
+    QVERIFY(
+        mainSource.indexOf("kodosi::ApplicationLogStore applicationLog")
+        < mainSource.indexOf("kodosi::RuntimeBridge runtime"));
 
     QFile sidebar(QStringLiteral(
         KODOSI_SOURCE_DIR
@@ -429,6 +437,13 @@ void ContractTest::desktopFileIntegrationContractIsNativeOwned()
     const auto rootCMakeText = rootCMake.readAll();
     QVERIFY(rootCMakeText.contains("xdg-desktop-portal"));
     QVERIFY(rootCMakeText.contains("xdg-utils"));
+    QVERIFY(rootCMakeText.contains("--bin kodosi"));
+    QVERIFY(rootCMakeText.contains("generate-source-identity.py"));
+    QVERIFY(rootCMakeText.contains("generate-rust-license-inventory.py"));
+    QVERIFY(rootCMakeText.contains(
+        "\"${KODOSI_GHOSTTY_ROOT}/LICENSE\""));
+    QVERIFY(rootCMakeText.contains("LICENSE-GHOSTTY"));
+    QVERIFY(rootCMakeText.contains("linux-vt-inventory.json"));
 }
 
 void ContractTest::runtimeBridgeStartsAndStopsPinnedAbi()

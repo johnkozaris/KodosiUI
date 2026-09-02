@@ -1,4 +1,5 @@
 #include "bridge/RuntimeBridge.hpp"
+#include "logging/ApplicationLogStore.hpp"
 
 #include <kodosi_runtime.h>
 
@@ -139,8 +140,13 @@ void RuntimeBridge::stop() noexcept
 
 RuntimeBridge::Result RuntimeBridge::send(const CommandLane lane, const QByteArrayView json)
 {
+    ScopedPerformanceSpan span(
+        PerformanceCategory::FfiDecode,
+        QStringLiteral("command.send"),
+        10);
     Q_ASSERT(thread() == QThread::currentThread());
     if (auto running = requireRunning(); !running) {
+        span.setOutcome(QStringLiteral("stopped"));
         return running;
     }
     if (json.size() < 0 || json.size() > KODOSI_MAX_FRAME_BYTES) {
@@ -182,7 +188,12 @@ RuntimeBridge::Result RuntimeBridge::send(const CommandLane lane, const QByteArr
         result = kodosi_send_agent_intel(m_handle, bytes, length);
         break;
     }
-    return terminalOperationResult(result, QStringLiteral("command dispatch"));
+    auto operation =
+        terminalOperationResult(result, QStringLiteral("command dispatch"));
+    if (!operation) {
+        span.setOutcome(QStringLiteral("rejected"));
+    }
+    return operation;
 }
 
 RuntimeBridge::Result RuntimeBridge::connectTerminal(
@@ -325,8 +336,14 @@ void RuntimeBridge::queueEvent(
     QMetaObject::invokeMethod(
         this,
         [this, generation, lane, payload] {
+            ScopedPerformanceSpan span(
+                PerformanceCategory::EventLane,
+                QStringLiteral("lane.apply"),
+                8);
             if (m_activeGeneration.load(std::memory_order_acquire) == generation) {
                 emit eventReceived(lane, payload);
+            } else {
+                span.setOutcome(QStringLiteral("stale"));
             }
         },
         Qt::QueuedConnection);

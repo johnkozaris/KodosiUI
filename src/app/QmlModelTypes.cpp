@@ -23,6 +23,7 @@ void configureModelInstances(
     PeopleModel& people,
     PeopleActions& peopleActions,
     RuntimeDiagnosticsModel& runtimeDiagnostics,
+    ApplicationLogStore& applicationLog,
     SessionCatalogModel& sessions,
     SessionAccess& sessionAccess,
     SessionActions& sessionActions,
@@ -52,6 +53,7 @@ void configureModelInstances(
     PeopleModelForeign::instance = &people;
     PeopleActionsForeign::instance = &peopleActions;
     RuntimeDiagnosticsModelForeign::instance = &runtimeDiagnostics;
+    ApplicationLogStoreForeign::instance = &applicationLog;
     SessionCatalogModelForeign::instance = &sessions;
     SessionAccessForeign::instance = &sessionAccess;
     SessionActionsForeign::instance = &sessionActions;

@@ -2,6 +2,7 @@
 #include "attention/TerminalNotifications.hpp"
 #include "app/QmlModelTypes.hpp"
 #include "bridge/RuntimeBridge.hpp"
+#include "logging/ApplicationLogStore.hpp"
 #include "models/AgentConversationModel.hpp"
 #include "models/AgentCustomAgentsModel.hpp"
 #include "models/AgentGlobalModel.hpp"
@@ -199,29 +200,40 @@ int main(int argc, char* argv[])
                 return argument.startsWith(QStringLiteral("--smoke-test"))
                     || argument.startsWith(QStringLiteral("--ui-probe-"));
             });
-    QString syntheticConfigDirectory;
+    QString syntheticRootDirectory;
     auto removeSyntheticConfig = qScopeGuard([&] {
-        if (!syntheticConfigDirectory.isEmpty()) {
-            (void)QDir(syntheticConfigDirectory).removeRecursively();
+        if (!syntheticRootDirectory.isEmpty()) {
+            (void)QDir(syntheticRootDirectory).removeRecursively();
         }
     });
     if (syntheticMode) {
-        syntheticConfigDirectory = QDir::current().absoluteFilePath(
-            QStringLiteral("build/synthetic-config/")
+        syntheticRootDirectory = QDir::current().absoluteFilePath(
+            QStringLiteral("build/synthetic-roots/")
             + QUuid::createUuid().toString(QUuid::WithoutBraces));
-        if (!QDir().mkpath(syntheticConfigDirectory)) {
+        const auto syntheticConfigDirectory =
+            QDir(syntheticRootDirectory).filePath(QStringLiteral("config"));
+        const auto syntheticStateDirectory =
+            QDir(syntheticRootDirectory).filePath(QStringLiteral("state"));
+        if (!QDir().mkpath(syntheticConfigDirectory)
+            || !QDir().mkpath(syntheticStateDirectory)) {
             qCritical().noquote()
-                << "Synthetic mode could not create an isolated settings directory.";
+                << "Synthetic mode could not create isolated state directories.";
             return EXIT_FAILURE;
         }
         if (!qputenv(
                 "XDG_CONFIG_HOME",
-                syntheticConfigDirectory.toUtf8())) {
+                syntheticConfigDirectory.toUtf8())
+            || !qputenv(
+                "XDG_STATE_HOME",
+                syntheticStateDirectory.toUtf8())) {
             qCritical()
-                << "Synthetic mode could not isolate XDG_CONFIG_HOME.";
+                << "Synthetic mode could not isolate XDG roots.";
             return EXIT_FAILURE;
         }
     }
+    kodosi::ApplicationLogStore applicationLog({
+        .directory = kodosi::ApplicationLogStore::standardLogDirectory(),
+    });
     kodosi::TerminalSessionRegistry terminalSessions;
     kodosi::RuntimeBridge runtime(terminalSessions);
     kodosi::RuntimeDiagnosticsModel runtimeDiagnostics(runtime);
@@ -249,7 +261,9 @@ int main(int argc, char* argv[])
         desktopStateSettings(!syntheticMode),
         !syntheticMode);
     desktopState.attachSessionCatalog(&sessionCatalog);
-    kodosi::DesktopFileIntegration desktopFiles(sessionCatalog);
+    kodosi::DesktopFileIntegration desktopFiles(
+        sessionCatalog,
+        &applicationLog);
     kodosi::TerminalTilingLayoutModel terminalTiling;
     if (desktopStateSmokeTest) {
         desktopState.setActiveView(2);
@@ -605,6 +619,7 @@ int main(int argc, char* argv[])
         people,
         peopleActions,
         runtimeDiagnostics,
+        applicationLog,
         sessionCatalog,
         sessionAccess,
         sessionActions,

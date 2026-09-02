@@ -17,6 +17,7 @@ set(QT_DEPLOY_BIN_DIR "lib/kodosi/bin" CACHE STRING "" FORCE)
 set(QT_DEPLOY_LIB_DIR "lib/kodosi/lib" CACHE STRING "" FORCE)
 set(QT_DEPLOY_PLUGINS_DIR "lib/kodosi/plugins" CACHE STRING "" FORCE)
 set(QT_DEPLOY_QML_DIR "lib/kodosi/qml" CACHE STRING "" FORCE)
+set(CMAKE_DISABLE_FIND_PACKAGE_WrapVulkanHeaders TRUE)
 
 find_package(
     Qt6 6.11.2
@@ -25,8 +26,21 @@ find_package(
     COMPONENTS Core DBus Gui Network Qml Quick QuickControls2 Test Widgets
 )
 find_package(Threads REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_program(CARGO_EXECUTABLE cargo REQUIRED)
 find_program(DBUS_RUN_SESSION_EXECUTABLE dbus-run-session REQUIRED)
+execute_process(
+    COMMAND
+        "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/source-date-epoch.py"
+        --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+    OUTPUT_VARIABLE KODOSI_SOURCE_DATE_EPOCH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY
+)
+if(NOT KODOSI_SOURCE_DATE_EPOCH MATCHES "^[0-9]+$")
+    message(FATAL_ERROR "SOURCE_DATE_EPOCH could not be derived from source HEAD")
+endif()
 
 set(
     KODOSI_RUNTIME_ROOT
@@ -49,11 +63,19 @@ set(
     KODOSI_RUNTIME_ARCHIVE
     "${KODOSI_RUNTIME_ROOT}/rustProcess/target/release/libkodosi_ffi_c.a"
 )
+set(
+    KODOSI_RUNTIME_CLI
+    "${KODOSI_RUNTIME_ROOT}/rustProcess/target/release/kodosi"
+)
 file(MAKE_DIRECTORY "${KODOSI_RUNTIME_HEADER_DIR}")
 set(
     KODOSI_GHOSTTY_VT_ARCHIVE
     "${KODOSI_GHOSTTY_ROOT}/Vendor/GhosttyVt/linux-x86_64/lib/libghostty-vt.a"
 )
+set(KODOSI_NATIVE_LICENSE_MANIFEST
+    "${CMAKE_CURRENT_SOURCE_DIR}/packaging/licenses/native-license-evidence.json"
+)
+set(KODOSI_QT_SBOM_DIR "${CMAKE_PREFIX_PATH}/sbom")
 
 if(NOT EXISTS "${KODOSI_RUNTIME_MANIFEST}")
     message(FATAL_ERROR "Kodosi runtime manifest not found: ${KODOSI_RUNTIME_MANIFEST}")
@@ -62,15 +84,32 @@ if(NOT EXISTS "${KODOSI_GHOSTTY_ROOT}/Ghostty.ref")
     message(FATAL_ERROR "Verified kodosi-ghostty checkout not found: ${KODOSI_GHOSTTY_ROOT}")
 endif()
 
+set(
+    KODOSI_VERIFY_PINNED_SOURCES_COMMAND
+    "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify-pinned-checkouts.py"
+    --dependencies "${CMAKE_CURRENT_SOURCE_DIR}/dependencies.lock.json"
+    --runtime-root "${KODOSI_RUNTIME_ROOT}"
+    --ghostty-package-root "${KODOSI_GHOSTTY_ROOT}"
+)
+execute_process(
+    COMMAND ${KODOSI_VERIFY_PINNED_SOURCES_COMMAND}
+    OUTPUT_QUIET
+    COMMAND_ERROR_IS_FATAL ANY
+)
+
 add_custom_target(kodosi-rust-ffi-build
+    COMMAND ${KODOSI_VERIFY_PINNED_SOURCES_COMMAND}
     COMMAND
         "${CMAKE_COMMAND}" -E env
         "KODOSI_GHOSTTY_DIR=${KODOSI_GHOSTTY_ROOT}"
+        "SOURCE_DATE_EPOCH=${KODOSI_SOURCE_DATE_EPOCH}"
         "${CARGO_EXECUTABLE}" build
         --manifest-path "${KODOSI_RUNTIME_MANIFEST}"
         --locked
         --release
         -p kodosi-ffi-c
+    COMMAND ${KODOSI_VERIFY_PINNED_SOURCES_COMMAND}
     COMMAND
         "${CMAKE_COMMAND}" -E copy_if_different
         "${KODOSI_RUNTIME_GENERATED_HEADER}"
@@ -100,6 +139,78 @@ set_property(TARGET kodosi-rust-runtime PROPERTY INTERFACE_LINK_LIBRARIES
 )
 add_dependencies(kodosi-rust-runtime kodosi-rust-ffi-build)
 
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_custom_target(kodosi-native-license-evidence ALL
+        COMMAND
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify-native-license-evidence.py"
+            --manifest "${KODOSI_NATIVE_LICENSE_MANIFEST}"
+            --license-root "${CMAKE_CURRENT_SOURCE_DIR}/packaging/licenses"
+            --qt-root "${CMAKE_PREFIX_PATH}"
+            --dependencies "${CMAKE_CURRENT_SOURCE_DIR}/dependencies.lock.json"
+        COMMENT "Verifying Qt 6.11.2 and ICU 73.2 license/SBOM evidence"
+        VERBATIM
+    )
+
+    add_custom_target(kodosi-rust-cli-build ALL
+        COMMAND ${KODOSI_VERIFY_PINNED_SOURCES_COMMAND}
+        COMMAND
+            "${CMAKE_COMMAND}" -E env
+            "KODOSI_GHOSTTY_DIR=${KODOSI_GHOSTTY_ROOT}"
+            "SOURCE_DATE_EPOCH=${KODOSI_SOURCE_DATE_EPOCH}"
+            "${CARGO_EXECUTABLE}" build
+            --manifest-path "${KODOSI_RUNTIME_MANIFEST}"
+            --locked
+            --release
+            -p kodosi-runtime
+            --bin kodosi
+        BYPRODUCTS "${KODOSI_RUNTIME_CLI}"
+        COMMENT "Building the pinned Kodosi CLI"
+        WORKING_DIRECTORY "${KODOSI_RUNTIME_ROOT}"
+        VERBATIM
+    )
+    add_dependencies(kodosi-rust-cli-build kodosi-rust-ffi-build)
+
+    set(KODOSI_SOURCE_IDENTITY
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/source-identity.json"
+    )
+    add_custom_target(kodosi-source-identity ALL
+        COMMAND ${KODOSI_VERIFY_PINNED_SOURCES_COMMAND}
+        COMMAND
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate-source-identity.py"
+            --client-root "${CMAKE_CURRENT_SOURCE_DIR}"
+            --runtime-root "${KODOSI_RUNTIME_ROOT}"
+            --ghostty-package-root "${KODOSI_GHOSTTY_ROOT}"
+            --output "${KODOSI_SOURCE_IDENTITY}"
+        BYPRODUCTS "${KODOSI_SOURCE_IDENTITY}"
+        COMMENT "Capturing the exact KodosiQT package source identity"
+        VERBATIM
+    )
+
+    set(KODOSI_RUST_LICENSE_DIR
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/rust-dependency-licenses"
+    )
+    add_custom_target(kodosi-rust-license-inventory ALL
+        COMMAND ${KODOSI_VERIFY_PINNED_SOURCES_COMMAND}
+        COMMAND
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate-rust-license-inventory.py"
+            --manifest "${KODOSI_RUNTIME_MANIFEST}"
+            --output-dir "${KODOSI_RUST_LICENSE_DIR}"
+            --overrides
+            "${CMAKE_CURRENT_SOURCE_DIR}/packaging/licenses/rust-license-overrides.json"
+        BYPRODUCTS
+            "${KODOSI_RUST_LICENSE_DIR}/rust-dependency-licenses.json"
+        COMMENT "Generating the locked Linux Rust dependency license inventory"
+        VERBATIM
+    )
+    add_dependencies(
+        kodosi-rust-license-inventory
+        kodosi-rust-cli-build
+    )
+endif()
+
 qt_standard_project_setup(
     REQUIRES 6.11.2
     I18N_TRANSLATED_LANGUAGES
@@ -125,9 +236,105 @@ install(
     DESTINATION share/doc/kodosi
 )
 install(
-    PROGRAMS packaging/linux/kodosi-qt
+    FILES dependencies.lock.json
+    DESTINATION share/doc/kodosi/provenance
+)
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    install(CODE "
+        execute_process(
+            COMMAND
+                \"${Python3_EXECUTABLE}\"
+                \"${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify-pinned-checkouts.py\"
+                --dependencies
+                \"${CMAKE_CURRENT_SOURCE_DIR}/dependencies.lock.json\"
+                --runtime-root
+                \"${KODOSI_RUNTIME_ROOT}\"
+                --ghostty-package-root
+                \"${KODOSI_GHOSTTY_ROOT}\"
+            RESULT_VARIABLE KODOSI_INSTALL_SOURCE_RESULT
+            ERROR_VARIABLE KODOSI_INSTALL_SOURCE_ERROR
+        )
+        if(NOT KODOSI_INSTALL_SOURCE_RESULT EQUAL 0)
+            message(FATAL_ERROR
+                \"Pinned source verification immediately before install failed: \${KODOSI_INSTALL_SOURCE_ERROR}\"
+            )
+        endif()
+    ")
+    install(
+        FILES "${KODOSI_SOURCE_IDENTITY}"
+        DESTINATION share/doc/kodosi/provenance
+    )
+    install(
+        DIRECTORY "${KODOSI_RUST_LICENSE_DIR}/"
+        DESTINATION share/doc/kodosi/rust
+    )
+    install(
+        DIRECTORY packaging/licenses/qt/6.11.2/
+        DESTINATION share/doc/kodosi/qt
+    )
+    install(
+        DIRECTORY packaging/licenses/icu/73.2/
+        DESTINATION share/doc/kodosi/icu
+    )
+    install(
+        FILES "${KODOSI_NATIVE_LICENSE_MANIFEST}"
+        DESTINATION share/doc/kodosi/provenance
+    )
+    install(
+        FILES
+            "${KODOSI_QT_SBOM_DIR}/qtbase-6.11.2.spdx"
+            "${KODOSI_QT_SBOM_DIR}/qtbase-6.11.2.spdx.json"
+            "${KODOSI_QT_SBOM_DIR}/qtbase-6.11.2.cdx.json"
+            "${KODOSI_QT_SBOM_DIR}/qtdeclarative-6.11.2.spdx"
+            "${KODOSI_QT_SBOM_DIR}/qtdeclarative-6.11.2.spdx.json"
+            "${KODOSI_QT_SBOM_DIR}/qtdeclarative-6.11.2.cdx.json"
+            "${KODOSI_QT_SBOM_DIR}/qtsvg-6.11.2.spdx"
+            "${KODOSI_QT_SBOM_DIR}/qtsvg-6.11.2.spdx.json"
+            "${KODOSI_QT_SBOM_DIR}/qtsvg-6.11.2.cdx.json"
+            "${KODOSI_QT_SBOM_DIR}/qtwayland-6.11.2.spdx"
+            "${KODOSI_QT_SBOM_DIR}/qtwayland-6.11.2.spdx.json"
+            "${KODOSI_QT_SBOM_DIR}/qtwayland-6.11.2.cdx.json"
+        DESTINATION share/doc/kodosi/qt/sbom
+    )
+endif()
+install(
+    FILES
+        "${KODOSI_GHOSTTY_ROOT}/LICENSE"
+        "${KODOSI_GHOSTTY_ROOT}/LICENSE-GHOSTTY"
+        "${KODOSI_GHOSTTY_ROOT}/THIRD_PARTY_NOTICES.md"
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/linux-vt-inventory.json"
+    DESTINATION share/doc/kodosi/ghostty
+)
+install(
+    FILES
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/licenses/highway-Apache-2.0.txt"
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/licenses/highway-BSD-3-Clause.txt"
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/licenses/simdutf-MIT.txt"
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/licenses/simdutf-PyTorch-BSD-3-Clause.txt"
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/licenses/simdutf-Fuchsia-BSD-3-Clause.txt"
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/licenses/uucode.txt"
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/licenses/uucode-Bjoern-Hoehrmann.txt"
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/licenses/unicode-data.txt"
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/licenses/wuffs.txt"
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/licenses/zig-compiler-runtime.txt"
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/licenses/compiler-rt-LLVM-derived.txt"
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/licenses/zig-runtime-Apache-2.0-LLVM-exception.txt"
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/licenses/compiler-rt-musl-derived.txt"
+        "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/licenses/zig-runtime-MIT-derived.txt"
+    DESTINATION share/doc/kodosi/ghostty/ThirdPartyNotices/licenses
+)
+install(
+    PROGRAMS
+        packaging/linux/kodosi
+        packaging/linux/kodosi-qt
     DESTINATION bin
 )
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    install(
+        PROGRAMS "${KODOSI_RUNTIME_CLI}"
+        DESTINATION lib/kodosi/bin
+    )
+endif()
 
 if(BUILD_TESTING)
     add_subdirectory(tests)
@@ -153,4 +360,5 @@ set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://kodosi.com")
 set(CPACK_ARCHIVE_FILE_NAME
     "kodosi-${PROJECT_VERSION}-linux-x86_64"
 )
+set(CPACK_THREADS 1)
 include(CPack)

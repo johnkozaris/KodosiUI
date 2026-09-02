@@ -12,6 +12,7 @@
 namespace kodosi {
 
 class SessionCatalogModel;
+class ApplicationLogStore;
 
 class DirectoryPicker {
 public:
@@ -57,6 +58,7 @@ public:
         SettingsOpenWorkingDirectory,
         SessionProject,
         TerminalProject,
+        DiagnosticsLogDirectory,
     };
     Q_ENUM(Purpose)
 
@@ -92,11 +94,13 @@ public:
 
     explicit DesktopFileIntegration(
         SessionCatalogModel& sessions,
+        ApplicationLogStore* applicationLog = nullptr,
         QObject* parent = nullptr);
     DesktopFileIntegration(
         SessionCatalogModel& sessions,
         std::unique_ptr<DirectoryPicker> picker,
         UrlOpener opener,
+        ApplicationLogStore* applicationLog = nullptr,
         QObject* parent = nullptr);
 
     [[nodiscard]] bool busy() const noexcept;
@@ -118,6 +122,9 @@ public:
         Purpose purpose);
     Q_INVOKABLE [[nodiscard]] bool openSessionProject(
         const QString& sessionId,
+        const QString& requestId,
+        Purpose purpose);
+    Q_INVOKABLE [[nodiscard]] bool openLogDirectory(
         const QString& requestId,
         Purpose purpose);
     Q_INVOKABLE [[nodiscard]] bool canOpenSessionProject(
@@ -155,6 +162,7 @@ private:
     static constexpr qsizetype maximumRequestIdLength = 256;
 
     SessionCatalogModel& m_sessions;
+    ApplicationLogStore* m_applicationLog = nullptr;
     std::unique_ptr<DirectoryPicker> m_picker;
     UrlOpener m_opener;
     QPointer<QWindow> m_transientParent;

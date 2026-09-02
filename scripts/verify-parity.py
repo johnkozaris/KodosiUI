@@ -9,10 +9,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+from release_common import verify_source_pins
+
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_ROOT = ROOT.parent / "Kodosi"
 SWIFT_ROOT = ROOT.parent / "kodosiSwift"
+GHOSTTY_ROOT = ROOT.parent / "kodosi-ghostty"
 MANIFEST_PATH = ROOT / "protocol" / "desktop-client-parity.json"
 DEPENDENCIES_PATH = ROOT / "dependencies.lock.json"
 HEADER_PATH = (
@@ -154,8 +157,17 @@ def main() -> None:
         fail("unsupported desktop parity schema")
     if dependencies.get("schemaVersion") != 1:
         fail("unsupported dependency lock schema")
-    require_clean_checkout(RUNTIME_ROOT, "runtime")
     require_clean_checkout(SWIFT_ROOT, "Swift")
+    try:
+        verify_source_pins(
+            ROOT,
+            RUNTIME_ROOT,
+            GHOSTTY_ROOT,
+            dependencies,
+            require_client_clean=False,
+        )
+    except (OSError, ValueError) as error:
+        fail(str(error))
     if git_head(RUNTIME_ROOT) != baseline.get("runtimeCommit"):
         fail("runtime checkout does not match the parity baseline")
     if git_head(SWIFT_ROOT) != baseline.get("swiftCommit"):
@@ -210,7 +222,6 @@ def main() -> None:
         fail("dependency lock and parity ABI versions differ")
     if locked_runtime["desktopProtocolVersion"] != baseline["desktopProtocolVersion"]:
         fail("dependency lock and parity protocol versions differ")
-
     try:
         workflow = CI_PATH.read_text(encoding="utf-8")
     except OSError as error:

@@ -21,6 +21,26 @@ target_compile_definitions(kodosi-qt-contract-tests
 
 add_test(NAME kodosi-qt-contract-tests COMMAND kodosi-qt-contract-tests)
 
+qt_add_executable(kodosi-application-log-store-tests
+    tst_application_log_store.cpp
+)
+target_link_libraries(kodosi-application-log-store-tests
+    PRIVATE
+        kodosi-runtime-bridge
+        Qt6::Core
+        Qt6::Test
+)
+target_compile_definitions(kodosi-application-log-store-tests
+    PRIVATE
+        KODOSI_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        QT_NO_CAST_FROM_ASCII
+        QT_NO_CAST_TO_ASCII
+)
+add_test(
+    NAME kodosi-application-log-store-tests
+    COMMAND kodosi-application-log-store-tests
+)
+
 qt_add_executable(kodosi-desktop-settings-tests
     tst_desktop_settings.cpp
 )

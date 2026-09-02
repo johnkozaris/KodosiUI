@@ -1,4 +1,5 @@
 #include "terminal/TerminalSessionRegistry.hpp"
+#include "logging/ApplicationLogStore.hpp"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -321,21 +322,35 @@ GhosttyTerminalKernel::ConfigureResult TerminalSessionRegistry::configure(
 
 void TerminalSessionRegistry::receiveData(TerminalData data) noexcept
 {
+    ScopedPerformanceSpan span(
+        PerformanceCategory::Terminal,
+        QStringLiteral("frame.apply"),
+        8);
     if (auto entry = m_impl->exact(data.subscription)) {
-        publishFrame(entry, entry->kernel.applyData(data));
+        if (!publishFrame(entry, entry->kernel.applyData(data))) {
+            span.setOutcome(QStringLiteral("inactive"));
+        }
+    } else {
+        span.setOutcome(QStringLiteral("stale"));
     }
 }
 
 void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
 {
+    ScopedPerformanceSpan span(
+        PerformanceCategory::Terminal,
+        QStringLiteral("frame.control"),
+        8);
     auto entry = m_impl->exact(control.subscription);
     if (!entry) {
+        span.setOutcome(QStringLiteral("stale"));
         return;
     }
 
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(control.json, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        span.setOutcome(QStringLiteral("invalid"));
         publishFailure(entry, {
             GhosttyTerminalKernel::Failure::Code::GhosttyRejected,
             QStringLiteral("Terminal control frame is not valid JSON."),
@@ -519,13 +534,23 @@ void TerminalSessionRegistry::receiveConnectResult(TerminalConnectResult result)
 bool TerminalSessionRegistry::installSemanticCheckpoint(
     TerminalSemanticCheckpoint checkpoint) noexcept
 {
+    ScopedPerformanceSpan span(
+        PerformanceCategory::Terminal,
+        QStringLiteral("frame.checkpoint"),
+        16);
     auto entry = m_impl->exact(checkpoint.subscription);
     if (!entry) {
+        span.setOutcome(QStringLiteral("stale"));
         return false;
     }
     auto result = entry->kernel.installCheckpoint(checkpoint);
     const auto accepted = result.has_value();
     const auto current = publishFrame(entry, std::move(result));
+    if (!accepted) {
+        span.setOutcome(QStringLiteral("rejected"));
+    } else if (!current) {
+        span.setOutcome(QStringLiteral("inactive"));
+    }
     return accepted && current;
 }
 

@@ -6,6 +6,8 @@ set_source_files_properties(
 qt_add_library(kodosi-runtime-bridge STATIC
     bridge/RuntimeBridge.cpp
     bridge/RuntimeBridge.hpp
+    logging/ApplicationLogStore.cpp
+    logging/ApplicationLogStore.hpp
     models/AccountContextFence.cpp
     models/AccountContextFence.hpp
     models/AgentConversationModel.cpp

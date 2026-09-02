@@ -1,4 +1,5 @@
 #include "terminal/TerminalView.hpp"
+#include "logging/ApplicationLogStore.hpp"
 
 #include <kodosi_runtime.h>
 
@@ -336,6 +337,7 @@ TerminalView::TerminalView(QQuickItem* parent)
 
 TerminalView::~TerminalView()
 {
+    m_renderPerformanceGeneration.fetch_add(1, std::memory_order_acq_rel);
     detach();
 }
 
@@ -828,6 +830,7 @@ bool TerminalView::attach(
         return false;
     }
     m_surfaceGeneration = ++m_nextSurfaceGeneration;
+    m_renderPerformanceGeneration.fetch_add(1, std::memory_order_acq_rel);
     const auto epoch = m_attachmentEpoch.fetch_add(1, std::memory_order_acq_rel) + 1;
     const auto registered = m_registry->registerSession(
         m_subscription,
@@ -929,6 +932,7 @@ bool TerminalView::attach(
 
 void TerminalView::detach()
 {
+    m_renderPerformanceGeneration.fetch_add(1, std::memory_order_acq_rel);
     Q_ASSERT(thread() == QThread::currentThread());
     const auto priorAccessibleText = accessibleText();
     const auto wasReady = m_terminalReady;
@@ -1036,12 +1040,17 @@ QSGNode* TerminalView::updatePaintNode(
         options.lineHeight = m_lineHeight;
         options.cursorStyle = m_cursorStyle;
         options.cursorPhaseVisible = m_cursorPhaseVisible;
+        QElapsedTimer rasterTimer;
+        rasterTimer.start();
         const auto image = TerminalRasterizer::render(
             *m_frame,
             m_font,
             devicePixelRatio,
             options);
         if (image.isNull()) {
+            queueRenderPerformance(
+                rasterTimer.elapsed(),
+                QStringLiteral("invalid"));
             delete node;
             return nullptr;
         }
@@ -1049,9 +1058,13 @@ QSGNode* TerminalView::updatePaintNode(
             image,
             QQuickWindow::TextureHasAlphaChannel);
         if (texture == nullptr) {
+            queueRenderPerformance(
+                rasterTimer.elapsed(),
+                QStringLiteral("texture-failed"));
             delete node;
             return nullptr;
         }
+        queueRenderPerformance(rasterTimer.elapsed(), QStringLiteral("ok"));
         node->setTexture(texture);
         m_renderedFrame = m_frame;
         m_renderedDevicePixelRatio = devicePixelRatio;
@@ -1061,6 +1074,51 @@ QSGNode* TerminalView::updatePaintNode(
     node->setRect(boundingRect());
     node->setFiltering(QSGTexture::Nearest);
     return node;
+}
+
+void TerminalView::queueRenderPerformance(
+    const qint64 durationMilliseconds,
+    QString outcome)
+{
+    if (durationMilliseconds < 16
+        || m_renderPerformanceQueued.exchange(true, std::memory_order_acq_rel)) {
+        return;
+    }
+    const auto generation =
+        m_renderPerformanceGeneration.load(std::memory_order_acquire);
+    const QPointer<TerminalView> self(this);
+    QMetaObject::invokeMethod(
+        this,
+        [self,
+         generation,
+         durationMilliseconds = std::clamp<qint64>(
+             durationMilliseconds,
+             0,
+             60'000),
+         outcome = outcome.left(32)] {
+            if (self == nullptr) {
+                return;
+            }
+            if (self->m_renderPerformanceGeneration.load(
+                       std::memory_order_acquire)
+                    != generation) {
+                self->m_renderPerformanceQueued.store(
+                    false,
+                    std::memory_order_release);
+                return;
+            }
+            self->m_renderPerformanceQueued.store(
+                false,
+                std::memory_order_release);
+            qCInfo(kodosiPerformance).noquote()
+                << QStringLiteral(
+                       "category=terminal operation=frame.raster "
+                       "duration_ms=%1 outcome=%2")
+                       .arg(
+                           QString::number(durationMilliseconds),
+                           outcome);
+        },
+        Qt::QueuedConnection);
 }
 
 void TerminalView::geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry)

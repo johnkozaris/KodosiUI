@@ -1,6 +1,7 @@
 #include "platform/DesktopFileIntegration.hpp"
 
 #include "models/SessionCatalogModel.hpp"
+#include "logging/ApplicationLogStore.hpp"
 
 #include <QCoreApplication>
 #include <QDesktopServices>
@@ -145,11 +146,13 @@ std::unique_ptr<DirectoryPicker> createNativeDirectoryPicker()
 
 DesktopFileIntegration::DesktopFileIntegration(
     SessionCatalogModel& sessions,
+    ApplicationLogStore* applicationLog,
     QObject* parent)
     : DesktopFileIntegration(
         sessions,
         createNativeDirectoryPicker(),
         [](const QUrl& url) { return QDesktopServices::openUrl(url); },
+        applicationLog,
         parent)
 {
 }
@@ -158,9 +161,11 @@ DesktopFileIntegration::DesktopFileIntegration(
     SessionCatalogModel& sessions,
     std::unique_ptr<DirectoryPicker> picker,
     UrlOpener opener,
+    ApplicationLogStore* applicationLog,
     QObject* parent)
     : QObject(parent)
     , m_sessions(sessions)
+    , m_applicationLog(applicationLog)
     , m_picker(std::move(picker))
     , m_opener(std::move(opener))
 {
@@ -351,6 +356,64 @@ bool DesktopFileIntegration::openSessionProject(
     }
     return openValidatedPath(
         current->workingDirectory,
+        requestId,
+        purpose,
+        true);
+}
+
+bool DesktopFileIntegration::openLogDirectory(
+    const QString& requestId,
+    const Purpose purpose)
+{
+    const auto requestValidation = validateRequestId(requestId);
+    if (!requestValidation.valid()) {
+        fail(
+            requestId,
+            purpose,
+            requestValidation.errorCode,
+            requestValidation.errorMessage);
+        return false;
+    }
+    if (purpose != Purpose::DiagnosticsLogDirectory) {
+        fail(
+            requestId,
+            purpose,
+            ErrorCode::InvalidRequest,
+            translated("This request cannot open the application log directory."));
+        return false;
+    }
+    if (m_applicationLog == nullptr) {
+        fail(
+            requestId,
+            purpose,
+            ErrorCode::InvalidRequest,
+            translated("The application log directory is unavailable."));
+        return false;
+    }
+
+    const auto trustedDirectory = m_applicationLog->directory();
+    const auto validation = validateDirectory(trustedDirectory);
+    if (!validation.valid()) {
+        fail(
+            requestId,
+            purpose,
+            validation.errorCode,
+            validation.errorMessage);
+        return false;
+    }
+    const auto trustedCanonical =
+        QFileInfo(trustedDirectory).canonicalFilePath();
+    if (trustedCanonical.isEmpty()
+        || validation.canonicalPath != trustedCanonical) {
+        fail(
+            requestId,
+            purpose,
+            ErrorCode::InvalidRequest,
+            translated("The application log directory failed native validation."));
+        return false;
+    }
+    return openValidatedPath(
+        trustedCanonical,
         requestId,
         purpose,
         true);

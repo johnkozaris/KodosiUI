@@ -195,8 +195,11 @@ private:
     QPoint m_selectionAnchor;
     bool m_selecting = false;
     bool m_copyShortcutActive = false;
+    std::atomic_bool m_renderPerformanceQueued = false;
+    std::atomic<std::uint64_t> m_renderPerformanceGeneration {1};
 
     void enqueueFrame(std::uint64_t epoch, GhosttyTerminalKernel::Frame frame);
+    void queueRenderPerformance(qint64 durationMilliseconds, QString outcome);
     void drainFrame(std::uint64_t epoch);
     void presentFrame(GhosttyTerminalKernel::Frame frame);
     void presentFailure(GhosttyTerminalKernel::Failure failure);

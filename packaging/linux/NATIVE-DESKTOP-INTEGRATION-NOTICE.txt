@@ -1,6 +1,21 @@
 Kodosi native desktop integration
 =================================
 
+This package was built from KodosiQT together with the exact dependency pins
+recorded in /usr/share/doc/kodosi/provenance/dependencies.lock.json:
+
+- Qt 6.11.2
+- Kodosi runtime commit 698fe24f3c5137904128085a786a1ce777c6e153
+  (FFI ABI 5, desktop protocol 36)
+- kodosi-ghostty package commit
+  77ebed9ed18de493296c5d4c2afc39b1d6d52e40
+- Ghostty commit 8af6897c0afc63037a8a3efee4162a380e3a4572
+
+The GUI statically incorporates the pinned Linux libghostty-vt archive. Its
+exact Linux dependency closure is recorded under
+/usr/share/doc/kodosi/ghostty/ThirdPartyNotices. The bundled private Kodosi CLI
+comes from the same pinned Rust runtime checkout as the GUI's C ABI library.
+
 This package uses the dynamically linked Qt 6.11.2 libraries and plugins
 shipped in its private runtime, including Qt Widgets QFileDialog, the GTK 3
 platform theme, and the XDG Desktop Portal platform theme. Kodosi selects the
@@ -9,10 +24,13 @@ xdg-desktop-portal service discovers the active desktop backend, including a
 KDE backend when installed; Kodosi does not ship a KDE Qt platform-theme
 plugin. The GTK 3 platform theme remains available as an explicit fallback.
 
-Qt is available under commercial and open-source licenses. The corresponding
-Qt 6.11.2 source and license texts are available from:
-
-https://download.qt.io/official_releases/qt/6.11/6.11.2/
+Kodosi uses the Qt open-source redistribution terms and does not claim a Qt
+commercial license. Applicable LGPL/GPL and third-party texts, exact
+binary-distribution SPDX/CycloneDX SBOMs, and ICU 73.2 license/copyright
+evidence are installed under /usr/share/doc/kodosi/qt and
+/usr/share/doc/kodosi/icu. Official exact-version source URLs, refs, archive
+SHA-256 values, and evidence-file digests are installed at
+/usr/share/doc/kodosi/provenance/native-license-evidence.json.
 
 Kodosi asks Qt QDesktopServices to open local files and directories and does
 not invoke a shell directly. Qt or the desktop may delegate the request to a
