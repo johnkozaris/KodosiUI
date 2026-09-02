@@ -69,6 +69,13 @@ check: parity visual-parity release-integrity-test rust-license-test native-lice
 
 package: parity bootstrap
     mkdir -p build/release
+    find build/release -maxdepth 1 -type f \
+        \( -name 'kodosi_*.deb' \
+        -o -name 'kodosi-*-linux-x86_64.tar.gz' \
+        -o -name 'kodosi-bin-*.pkg.tar.zst' \
+        -o -name 'release-manifest.json' \
+        -o -name 'release-manifest.json.asc' \) \
+        -delete
     git status --porcelain=v1 --untracked-files=no \
         > build/release/tracked-status.before
     SOURCE_DATE_EPOCH="$(python3 scripts/source-date-epoch.py --source-root .)" \
