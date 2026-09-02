@@ -1,0 +1,94 @@
+#pragma once
+
+#include "bridge/RuntimeBridge.hpp"
+#include "terminal/GhosttyTerminalKernel.hpp"
+
+#include <functional>
+#include <memory>
+
+namespace kodosi {
+
+struct TerminalFocusOutcome {
+    bool applied;
+    QString requestId;
+    QString runtimeIncarnationId;
+    QString reason;
+};
+
+struct TerminalResizeOutcome {
+    bool applied;
+    QString sessionId;
+    QString requestId;
+    QString expectedRuntimeIncarnationId;
+    QString subscriptionId;
+    std::uint64_t subscriptionGeneration;
+    std::uint64_t surfaceGeneration;
+    std::uint16_t columns;
+    std::uint16_t rows;
+    std::uint32_t widthPixels;
+    std::uint32_t heightPixels;
+    std::uint32_t cellWidthPixels;
+    std::uint32_t cellHeightPixels;
+    QString reason;
+};
+
+struct TerminalNotification {
+    QString title;
+    QString body;
+};
+
+class TerminalSessionRegistry final : public TerminalEventSink {
+public:
+    struct Listener {
+        // Callbacks run on Rust terminal callback threads. They must marshal
+        // UI work and must not re-enter this registry.
+        std::function<void(GhosttyTerminalKernel::Frame)> frameChanged;
+        std::function<void(GhosttyTerminalKernel::Failure)> failed;
+        std::function<void(std::int32_t)> connectionCompleted;
+        std::function<void(TerminalFocusOutcome)> focusCompleted;
+        std::function<void(TerminalResizeOutcome)> resizeCompleted;
+        std::function<void(TerminalNotification)> notificationRequested;
+        std::function<void()> closed;
+    };
+
+    TerminalSessionRegistry();
+    ~TerminalSessionRegistry() override;
+
+    TerminalSessionRegistry(const TerminalSessionRegistry&) = delete;
+    TerminalSessionRegistry& operator=(const TerminalSessionRegistry&) = delete;
+
+    [[nodiscard]] bool registerSession(
+        TerminalSubscription subscription,
+        Listener listener,
+        TerminalKernelSettings settings = {});
+    void unregisterSession(const TerminalSubscription& subscription);
+    [[nodiscard]] std::expected<QByteArray, GhosttyTerminalKernel::Failure> encodeKey(
+        const TerminalSubscription& subscription,
+        TerminalKeyEvent event);
+    [[nodiscard]] GhosttyTerminalKernel::Result select(
+        const TerminalSubscription& subscription,
+        std::uint16_t startColumn,
+        std::uint16_t startRow,
+        std::uint16_t endColumn,
+        std::uint16_t endRow,
+        bool rectangular = false);
+    [[nodiscard]] GhosttyTerminalKernel::Result clearSelection(
+        const TerminalSubscription& subscription);
+    [[nodiscard]] std::expected<QString, GhosttyTerminalKernel::Failure> selectedText(
+        const TerminalSubscription& subscription);
+    [[nodiscard]] GhosttyTerminalKernel::ConfigureResult configure(
+        const TerminalSubscription& subscription,
+        TerminalKernelSettings settings);
+
+    void receiveData(TerminalData data) noexcept override;
+    void receiveControl(TerminalControl control) noexcept override;
+    void receiveConnectResult(TerminalConnectResult result) noexcept override;
+    [[nodiscard]] bool installSemanticCheckpoint(
+        TerminalSemanticCheckpoint checkpoint) noexcept override;
+
+private:
+    class Impl;
+    std::unique_ptr<Impl> m_impl;
+};
+
+} // namespace kodosi

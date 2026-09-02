@@ -1,0 +1,22 @@
+pkgname=kodosi-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='Local-first mission control for coding agents'
+arch=('x86_64')
+url='https://kodosi.com'
+license=('LicenseRef-Proprietary')
+depends=(
+  at-spi2-core brotli cairo dbus libdrm libglvnd fontconfig freetype2
+  mesa gdk-pixbuf2 krb5 gtk3 harfbuzz pango wayland libx11 libxcb
+  xcb-util-cursor xcb-util-image xcb-util-keysyms xcb-util-renderutil
+  xcb-util-wm libxkbcommon-x11 zstd zlib
+)
+provides=('kodosi')
+conflicts=('kodosi')
+options=('!debug')
+source=('@ARCHIVE@')
+sha256sums=('@SHA256@')
+
+package() {
+  cp -a "$srcdir/kodosi-@VERSION@-Linux/usr" "$pkgdir/"
+}

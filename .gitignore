@@ -1,0 +1,9 @@
+/.cache/
+/.tools/
+/build/
+/aqtinstall.log
+/CMakeUserPresets.json
+__pycache__/
+*.pyc
+*.user
+compile_commands.json

@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "frameworks": {
+    "qt": {
+      "version": "6.11.2",
+      "released": "2026-08-18",
+      "source": "https://download.qt.io/official_releases/qt/6.11/6.11.2/"
+    }
+  },
+  "tools": {
+    "githubActions": {
+      "checkout": {
+        "version": "7.0.1",
+        "commit": "3d3c42e5aac5ba805825da76410c181273ba90b1"
+      },
+      "setupPython": {
+        "version": "7.0.0",
+        "commit": "5fda3b95a4ea91299a34e894583c3862153e4b97"
+      },
+      "setupUv": {
+        "version": "10.0.1",
+        "commit": "20cfd1bf945f4377ade1205e4dbc17946fc9a30d"
+      }
+    },
+    "uv": {
+      "version": "0.12.7",
+      "source": "https://github.com/astral-sh/uv/releases/tag/0.12.7"
+    },
+    "just": {
+      "version": "1.58.0",
+      "sha256": {
+        "linux-x86_64-musl": "4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d"
+      },
+      "source": "https://github.com/casey/just/releases/tag/1.58.0"
+    },
+    "cmake": {
+      "version": "4.4.3",
+      "sha256": {
+        "linux-x86_64": "d6c83076c575bc00b823522ac974bda66d0af05d6ddc30e739c12385cf32c6cc"
+      },
+      "source": "https://github.com/Kitware/CMake/releases/tag/v4.4.3"
+    },
+    "aqtinstall": {
+      "version": "3.3.0",
+      "source": "https://github.com/miurahr/aqtinstall/releases/tag/v3.3.0"
+    },
+    "ninja": {
+      "version": "1.13.2",
+      "sha256": {
+        "linux-x86_64": "5749cbc4e668273514150a80e387a957f933c6ed3f5f11e03fb30955e2bbead6"
+      },
+      "source": "https://github.com/ninja-build/ninja/releases/tag/v1.13.2"
+    }
+  },
+  "kodosi": {
+    "repository": "johnkozaris/Kodosi",
+    "commit": "698fe24f3c5137904128085a786a1ce777c6e153",
+    "ffiAbiVersion": 5,
+    "desktopProtocolVersion": 36
+  },
+  "swiftParityBaseline": {
+    "repository": "johnkozaris/kodosiSwift",
+    "commit": "5862580428b5219675c36e6e5c1cf875e94eedac"
+  },
+  "ghostty": {
+    "repository": "ghostty-org/ghostty",
+    "commit": "8af6897c0afc63037a8a3efee4162a380e3a4572",
+    "packageRepository": "johnkozaris/kodosi-ghostty",
+    "packageCommit": "77ebed9ed18de493296c5d4c2afc39b1d6d52e40",
+    "linuxVtArchiveSha256": "197f6c684acf864b93a62acf60d37f05614b3fdbb39f7bd93512e5168325e8d1",
+    "versioning": "unversioned-libghostty-tip"
+  },
+  "packaging": {
+    "ubuntuContainer": {
+      "image": "ubuntu",
+      "digest": "sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517"
+    },
+    "archLinuxContainer": {
+      "image": "archlinux",
+      "digest": "sha256:b860afd5823683f7ea389ba5f00d812f4fe55f6f286dea329d2abeefa535e309"
+    }
+  }
+}

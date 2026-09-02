@@ -1,0 +1,30 @@
+import QtQuick
+import QtQuick.Controls
+
+Popup {
+    id: root
+
+    padding: 0
+    palette.window: KodosiTheme.surfaceRaised
+    palette.windowText: KodosiTheme.textPrimary
+    palette.base: KodosiTheme.input
+    palette.alternateBase: KodosiTheme.surfaceElevated
+    palette.button: KodosiTheme.surfaceRaised
+    palette.buttonText: KodosiTheme.textPrimary
+    palette.text: KodosiTheme.textPrimary
+    palette.highlight: KodosiTheme.accent
+    palette.highlightedText: KodosiTheme.accentForeground
+    palette.placeholderText: KodosiTheme.placeholderText
+    palette.mid: KodosiTheme.seam
+
+    Overlay.modal: Rectangle {
+        color: KodosiTheme.overlayDim
+    }
+
+    background: Rectangle {
+        color: KodosiTheme.surfaceRaised
+        radius: KodosiTheme.radiusLarge
+        border.width: 1
+        border.color: KodosiTheme.seamStrong
+    }
+}

@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "baseline": {
+    "runtimeRepository": "johnkozaris/Kodosi",
+    "runtimeCommit": "698fe24f3c5137904128085a786a1ce777c6e153",
+    "swiftRepository": "johnkozaris/kodosiSwift",
+    "swiftCommit": "5862580428b5219675c36e6e5c1cf875e94eedac",
+    "ffiAbiVersion": 5,
+    "desktopProtocolVersion": 36
+  },
+  "authorities": {
+    "desktopRuntime": {
+      "path": "protocol/versions/v36.json",
+      "sha256": "cd5a3d5db53cbc5bf7c73c2160899058e6f9d1c3c0979c8677884e46d85928a6"
+    },
+    "roomInput": {
+      "path": "protocol/room-input-rules.json",
+      "sha256": "0e9142d57c99bc75d0dc993a6e4c53b6cd8c5f3cafede4c7bc8d37765687315c"
+    },
+    "sessionRelay": {
+      "path": "protocol/session-relay-authority.json",
+      "sha256": "bc6381f4a1c9416ae4596b31678449000b5f8f2360bb4936fe5550642eed1619"
+    },
+    "backendApi": {
+      "path": "protocol/backend-api-authority.json",
+      "sha256": "50e8187785773741fc36946a9b6b6438a6cd2990c951d39799c3aed54ce34e20"
+    },
+    "userEvents": {
+      "path": "protocol/user-events-authority.json",
+      "sha256": "53f05f206e3bda54f26683ee759b7d665fcc78b3a6cd94d96a39af22d297f1c6"
+    },
+    "identityWire": {
+      "path": "protocol/identity-wire-format.json",
+      "sha256": "be58ddb9486497e768663145335ec9cb8826a26c1aaa4a6c81a0fd63bde03500"
+    },
+    "cryptoDomains": {
+      "path": "protocol/crypto-domain-tags.json",
+      "sha256": "f54f986540ddb1d7c17fb66ab1d8301e41b66ed56300e96a3c5e551c25afa91a"
+    }
+  },
+  "architecture": {
+    "runtimeAuthority": "rust",
+    "qtRole": "presentation-adapter",
+    "initialTransport": "ffi-abi-5",
+    "qmlMayDecodeWireJson": false,
+    "terminalBytesEnterQml": false,
+    "checkpointAdmission": "synchronous"
+  },
+  "features": [
+    {"id": "app.lifecycle", "owner": "qt-adapter", "qtRole": "presentation"},
+    {"id": "app.window-restoration", "owner": "qt-adapter", "qtRole": "presentation"},
+    {"id": "app.shell", "owner": "qt-adapter", "qtRole": "presentation"},
+    {"id": "app.commands-shortcuts", "owner": "qt-adapter", "qtRole": "presentation"},
+    {"id": "bridge.runtime-handle", "owner": "qt-adapter", "qtRole": "ffi-adapter"},
+    {"id": "bridge.event-lanes", "owner": "parity-with-swift", "qtRole": "ffi-adapter"},
+    {"id": "bridge.command-lanes", "owner": "parity-with-swift", "qtRole": "ffi-adapter"},
+    {"id": "bridge.codecs", "owner": "generated-from-rust", "qtRole": "typed-adapter"},
+    {"id": "auth", "owner": "rust", "qtRole": "presentation"},
+    {"id": "friends", "owner": "rust", "qtRole": "presentation"},
+    {"id": "devices", "owner": "rust", "qtRole": "presentation"},
+    {"id": "trust", "owner": "rust", "qtRole": "presentation"},
+    {"id": "sessions.catalog-projection", "owner": "rust", "qtRole": "presentation"},
+    {"id": "sessions.reconciliation", "owner": "parity-with-swift", "qtRole": "typed-adapter"},
+    {"id": "sessions.creation", "owner": "rust", "qtRole": "presentation"},
+    {"id": "sessions.resume", "owner": "rust", "qtRole": "presentation"},
+    {"id": "sessions.close-delete", "owner": "rust", "qtRole": "presentation"},
+    {"id": "sessions.action-availability", "owner": "rust", "qtRole": "presentation"},
+    {"id": "sessions.sharing", "owner": "rust", "qtRole": "presentation"},
+    {"id": "agent.global", "owner": "rust", "qtRole": "presentation"},
+    {"id": "agent.intel", "owner": "rust", "qtRole": "presentation"},
+    {"id": "agent.project-memory", "owner": "rust", "qtRole": "typed-adapter"},
+    {"id": "agent.custom-agents", "owner": "rust", "qtRole": "typed-adapter"},
+    {"id": "permissions.snapshot", "owner": "rust", "qtRole": "presentation"},
+    {"id": "permissions.decision", "owner": "rust", "qtRole": "presentation"},
+    {"id": "attention", "owner": "parity-with-swift", "qtRole": "presentation"},
+    {"id": "steering", "owner": "rust", "qtRole": "presentation"},
+    {"id": "missions.directory", "owner": "rust", "qtRole": "presentation"},
+    {"id": "missions.roster", "owner": "rust", "qtRole": "presentation"},
+    {"id": "missions.invitations", "owner": "rust", "qtRole": "presentation"},
+    {"id": "missions.chat", "owner": "rust", "qtRole": "presentation"},
+    {"id": "missions.tasks", "owner": "rust", "qtRole": "presentation"},
+    {"id": "missions.hydration", "owner": "rust", "qtRole": "presentation"},
+    {"id": "missions.mutations", "owner": "rust", "qtRole": "presentation"},
+    {"id": "terminal.subscription", "owner": "rust", "qtRole": "native-render-adapter"},
+    {"id": "terminal.checkpoint", "owner": "rust", "qtRole": "native-render-adapter"},
+    {"id": "terminal.raw-output", "owner": "rust", "qtRole": "native-render-adapter"},
+    {"id": "terminal.control-frames", "owner": "rust", "qtRole": "native-render-adapter"},
+    {"id": "terminal.input", "owner": "rust", "qtRole": "native-input-adapter"},
+    {"id": "terminal.focus", "owner": "rust", "qtRole": "native-input-adapter"},
+    {"id": "terminal.resize", "owner": "rust", "qtRole": "native-input-adapter"},
+    {"id": "terminal.renderer-policy", "owner": "rust", "qtRole": "native-render-adapter"},
+    {"id": "terminal.tiling", "owner": "qt-adapter", "qtRole": "presentation"},
+    {"id": "settings", "owner": "qt-adapter", "qtRole": "presentation"},
+    {"id": "design-system", "owner": "qt-adapter", "qtRole": "presentation"},
+    {"id": "localization", "owner": "qt-adapter", "qtRole": "presentation"},
+    {"id": "accessibility", "owner": "qt-adapter", "qtRole": "presentation"},
+    {"id": "notifications.approval", "owner": "rust", "qtRole": "platform-adapter"},
+    {"id": "notifications.terminal", "owner": "rust", "qtRole": "platform-adapter"},
+    {"id": "deep-links", "owner": "rust", "qtRole": "platform-adapter"},
+    {"id": "file-picker", "owner": "qt-adapter", "qtRole": "platform-adapter"},
+    {"id": "editor-launch", "owner": "qt-adapter", "qtRole": "platform-adapter"},
+    {"id": "diagnostics", "owner": "rust", "qtRole": "presentation"},
+    {"id": "logging", "owner": "qt-adapter", "qtRole": "platform-adapter"},
+    {"id": "release.runtime-pin", "owner": "supply-chain", "qtRole": "verification"},
+    {"id": "release.renderer-pin", "owner": "supply-chain", "qtRole": "verification"},
+    {"id": "release.native-notices", "owner": "supply-chain", "qtRole": "verification"},
+    {"id": "release.bundled-cli", "owner": "supply-chain", "qtRole": "verification"},
+    {"id": "release.signing-packaging", "owner": "supply-chain", "qtRole": "verification"}
+  ]
+}

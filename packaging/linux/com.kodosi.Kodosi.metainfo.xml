@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.kodosi.Kodosi</id>
+  <name>Kodosi</name>
+  <summary>Local-first mission control for coding agents</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-Proprietary</project_license>
+  <developer id="com.kodosi">
+    <name>Kodosi</name>
+  </developer>
+  <description>
+    <p>
+      Supervise local and remote coding-agent sessions, terminal activity,
+      approvals, steering, and Missions from one native desktop application.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.kodosi.Kodosi.desktop</launchable>
+  <provides>
+    <binary>kodosi-qt</binary>
+  </provides>
+  <url type="homepage">https://kodosi.com</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-08-31"/>
+  </releases>
+</component>

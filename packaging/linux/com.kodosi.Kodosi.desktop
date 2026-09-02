@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Kodosi
+Comment=Local-first mission control for coding agents
+Exec=kodosi-qt
+Icon=com.kodosi.Kodosi
+Terminal=false
+Categories=Development;
+Keywords=agents;terminal;development;mission;
+StartupNotify=true
