@@ -20,7 +20,7 @@ pointer_button_down=false
 stop_current_app() {
     if [[ -n "$app_pid" ]] && kill -0 "$app_pid" 2>/dev/null; then
         kill -TERM "$app_pid" 2>/dev/null || true
-        for _ in $(seq 1 50); do
+        for _ in $(seq 1 150); do
             kill -0 "$app_pid" 2>/dev/null || break
             sleep 0.1
         done
@@ -138,6 +138,11 @@ print(matches[0])
 start_synthetic_app() {
     local stem=$1
     shift
+    local readiness_id=window.main
+    if [[ "${1:-}" == --ready-id ]]; then
+        readiness_id=$2
+        shift 2
+    fi
     stop_current_app
     XDG_CONFIG_HOME="$config_dir" \
         KODOSI_DATA_ROOT="$data_root" \
@@ -147,16 +152,27 @@ start_synthetic_app() {
     app_pid=$!
 
     local ready=false
-    for _ in $(seq 1 50); do
+    for _ in $(seq 1 150); do
         if "$probe" apps >"$artifact_dir/$stem-apps.json" 2>/dev/null; then
             app_handle=$(
                 app_handle_for_pid "$app_pid" "Kodosi" \
                     <"$artifact_dir/$stem-apps.json" || true
             )
         fi
-        if [[ -n "$app_handle" ]]; then
-            ready=true
-            break
+        if [[ -n "$app_handle" ]] \
+            && "$probe" find --app "$app_handle" --id "$readiness_id" \
+            >"$artifact_dir/$stem-ready.json" 2>/dev/null; then
+            if python3 -c '
+import json, sys
+matches = json.load(sys.stdin)["matches"]
+raise SystemExit(
+    0 if len(matches) == 1 and "showing" in matches[0].get("states", [])
+    else 1
+)
+' <"$artifact_dir/$stem-ready.json"; then
+                ready=true
+                break
+            fi
         fi
         kill -0 "$app_pid"
         sleep 0.1
@@ -192,11 +208,19 @@ for _ in $(seq 1 50); do
         )
     fi
     if [[ -n "$app_handle" ]] \
-        && "$probe" wait --app "$app_handle" id=window.main \
-        --state showing --timeout-ms 500 >"$artifact_dir/window.json" \
-        2>"$artifact_dir/window.err"; then
-        window_ready=true
-        break
+        && "$probe" find --app "$app_handle" --id window.main \
+        >"$artifact_dir/window.json" 2>"$artifact_dir/window.err"; then
+        if python3 -c '
+import json, sys
+matches = json.load(sys.stdin)["matches"]
+raise SystemExit(
+    0 if len(matches) == 1 and "showing" in matches[0].get("states", [])
+    else 1
+)
+' <"$artifact_dir/window.json"; then
+            window_ready=true
+            break
+        fi
     fi
     kill -0 "$app_pid"
     sleep 0.1
@@ -520,6 +544,7 @@ stop_current_app
 
 start_synthetic_app \
     resume-agent-work \
+    --ready-id panel.resumeAgentWork \
     --ui-probe-resume-agent-work \
     --window-size 820x560
 "$probe" wait --app "$app_handle" id=panel.resumeAgentWork \
@@ -585,6 +610,7 @@ resume_cancel_handle=$(
 
 start_synthetic_app \
     project-intel-wide \
+    --ready-id panel.projectIntel \
     --ui-probe-project-intel-populated \
     --window-size 1240x800
 "$probe" wait --app "$app_handle" id=panel.projectIntel \
@@ -668,6 +694,7 @@ project_memory_tab_handle=$(
 
 start_synthetic_app \
     project-intel-empty \
+    --ready-id panel.projectIntel \
     --ui-probe-project-intel-empty \
     --window-size 820x560
 "$probe" wait --app "$app_handle" id=panel.projectIntel \
@@ -702,6 +729,7 @@ done
 
 start_synthetic_app \
     project-intel-archive \
+    --ready-id panel.projectIntel \
     --ui-probe-project-intel-archive \
     --window-size 820x560
 "$probe" wait --app "$app_handle" id=panel.projectIntel \
@@ -743,6 +771,7 @@ if "Agents browser is only available for active projects." not in agents:
 
 start_synthetic_app \
     agent-settings-parity \
+    --ready-id panel.settings \
     --ui-probe-agent-settings-populated \
     --window-size 820x560
 "$probe" wait --app "$app_handle" id=panel.settings \
@@ -876,6 +905,7 @@ settings_project_handle=$(
 
 start_synthetic_app \
     agent-settings-wide \
+    --ready-id panel.settings \
     --ui-probe-agent-settings-populated \
     --window-size 1240x800
 "$probe" wait --app "$app_handle" id=panel.settings \
@@ -947,31 +977,16 @@ if [[ "$tiling_ready" != true ]]; then
     exit 4
 fi
 
-"$probe" tree --app "$app_handle" --depth 8 \
+"$probe" tree --app "$app_handle" --depth 12 \
     >"$artifact_dir/tiling-tree.json"
 test "$(
     json_value app.processId <"$artifact_dir/tiling-tree.json"
 )" = "$app_pid"
-python3 -c '
-import json, sys
-tree = json.load(sys.stdin)
-ids = set()
-def visit(value):
-    if isinstance(value, dict):
-        item_id = value.get("id")
-        if isinstance(item_id, str) and item_id:
-            ids.add(item_id)
-        for child in value.values():
-            visit(child)
-    elif isinstance(value, list):
-        for child in value:
-            visit(child)
-visit(tree)
-expected = {f"stage.tile.tiling-{index}" for index in range(4)}
-missing = sorted(expected - ids)
-if missing:
-    raise SystemExit("tiling tiles missing from accessibility tree: " + ", ".join(missing))
-' <"$artifact_dir/tiling-tree.json"
+for index in 0 1 2 3; do
+    "$probe" find --app "$app_handle" \
+        --id "stage.tile.tiling-$index" \
+        >"$artifact_dir/tiling-tile-$index.json"
+done
 
 "$probe" find --app "$app_handle" --id stage.tile.tiling-2.select \
     >"$artifact_dir/tiling-select.json"
@@ -1015,35 +1030,22 @@ if name != "Tiling 2":
 ' <"$artifact_dir/tiling-focus-title.json"
 "$probe" tree --app "$app_handle" --depth 12 \
     >"$artifact_dir/tiling-focus-tree.json"
+"$probe" find --app "$app_handle" --id stage.tile.tiling-2 \
+    >"$artifact_dir/tiling-focus-selected-tile.json"
 python3 -c '
-import json, re, sys
-tree = json.load(sys.stdin)
-ids = set()
-descriptions = {}
-def visit(value):
-    if isinstance(value, dict):
-        item_id = value.get("id")
-        if isinstance(item_id, str) and item_id:
-            ids.add(item_id)
-            descriptions[item_id] = value.get("description")
-        for child in value.values():
-            visit(child)
-    elif isinstance(value, list):
-        for child in value:
-            visit(child)
-visit(tree)
-tile_ids = sorted(
-    item_id for item_id in ids
-    if re.fullmatch(r"stage\.tile\.tiling-\d+", item_id)
-)
-if tile_ids != ["stage.tile.tiling-2"]:
-    raise SystemExit(
-        "off-focus terminal tiles leaked into accessibility tree: "
-        + ", ".join(tile_ids)
-    )
-if descriptions.get("stage.tile.tiling-2") != "Connecting terminal":
+import json, sys
+matches = json.load(sys.stdin)["matches"]
+if len(matches) != 1 or matches[0].get("description") != "Connecting terminal":
     raise SystemExit("connecting terminal status was not announced")
-' <"$artifact_dir/tiling-focus-tree.json"
+' <"$artifact_dir/tiling-focus-selected-tile.json"
+for index in 0 1 3; do
+    if "$probe" find --app "$app_handle" \
+        --id "stage.tile.tiling-$index" \
+        >"$artifact_dir/tiling-focus-hidden-$index.json" 2>/dev/null; then
+        echo "Off-focus terminal tile $index remained accessible." >&2
+        exit 1
+    fi
+done
 tiling_exit_handle=$(
     json_value element.handle <"$artifact_dir/tiling-focus-exit.json"
 )
@@ -1253,6 +1255,61 @@ compact_focus_handle=$(
 python3 -c '
 import json, sys
 tree = json.load(sys.stdin)
+scrollbar_states = None
+def visit(value):
+    global scrollbar_states
+    if isinstance(value, dict):
+        item_id = value.get("id")
+        if item_id == "stage.scrollbar":
+            scrollbar_states = set(value.get("states", []))
+        for child in value.values():
+            visit(child)
+    elif isinstance(value, list):
+        for child in value:
+            visit(child)
+visit(tree)
+if scrollbar_states is not None \
+        and {"showing", "visible"} & scrollbar_states:
+    raise SystemExit("terminal grid scroll bar remained accessible in focus mode")
+' <"$artifact_dir/tiling-compact-focus-tree.json"
+
+start_synthetic_app startup-failure --ready-id startup.retry \
+    --test-startup-failure-once
+"$probe" wait --app "$app_handle" id=startup.retry \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/startup-failure-retry.json"
+"$probe" wait --app "$app_handle" id=startup.retry \
+    --state focused --timeout-ms 5000 \
+    >"$artifact_dir/startup-failure-retry-focused.json"
+"$probe" tree --app "$app_handle" --depth 7 \
+    >"$artifact_dir/startup-failure-tree.json"
+assert_shell_hidden_by_modal <"$artifact_dir/startup-failure-tree.json"
+
+secondary_pid=
+set +e
+XDG_CONFIG_HOME="$config_dir" \
+    KODOSI_DATA_ROOT="$data_root" \
+    KODOSI_PRODUCTION_DATA_ROOT="$production_data_root" \
+    QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
+    "$app" "kodosi://session/startup-forwarded" \
+    >"$artifact_dir/startup-failure-secondary.log" 2>&1 &
+secondary_pid=$!
+wait "$secondary_pid"
+secondary_status=$?
+set -e
+if [[ "$secondary_status" -ne 0 ]]; then
+    echo "Startup-failed owner did not acknowledge activation." >&2
+    exit 4
+fi
+if ! kill -0 "$app_pid" 2>/dev/null; then
+    echo "Startup-failed owner exited during activation forwarding." >&2
+    exit 4
+fi
+"$probe" tree --app "$app_handle" --depth 7 \
+    >"$artifact_dir/startup-failure-forwarded-tree.json"
+python3 -c '
+import json, sys
+tree = json.load(sys.stdin)
 ids = set()
 def visit(value):
     if isinstance(value, dict):
@@ -1265,9 +1322,115 @@ def visit(value):
         for child in value:
             visit(child)
 visit(tree)
-if "stage.scrollbar" in ids:
-    raise SystemExit("terminal grid scroll bar remained accessible in focus mode")
-' <"$artifact_dir/tiling-compact-focus-tree.json"
+leaked = sorted(ids & {
+    "deepLink.status",
+    "deepLink.status.label",
+    "deepLink.status.dismiss",
+})
+if leaked:
+    raise SystemExit(
+        "deep-link status leaked before runtime recovery: "
+        + ", ".join(leaked)
+    )
+' <"$artifact_dir/startup-failure-forwarded-tree.json"
+
+"$probe" find --app "$app_handle" --id startup.diagnostics \
+    >"$artifact_dir/startup-failure-diagnostics.json"
+startup_diagnostics_handle=$(
+    json_value matches.0.handle \
+        <"$artifact_dir/startup-failure-diagnostics.json"
+)
+"$probe" click "$startup_diagnostics_handle" \
+    >"$artifact_dir/startup-failure-diagnostics-click.json"
+"$probe" wait --app "$app_handle" id=panel.diagnostics \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/startup-failure-diagnostics-panel.json"
+"$probe" tree --app "$app_handle" --depth 7 \
+    >"$artifact_dir/startup-failure-diagnostics-tree.json"
+assert_shell_hidden_by_modal \
+    <"$artifact_dir/startup-failure-diagnostics-tree.json"
+python3 -c '
+import json, sys
+tree = json.load(sys.stdin)
+ids = set()
+def visit(value):
+    if isinstance(value, dict):
+        item_id = value.get("id")
+        if isinstance(item_id, str) and item_id:
+            ids.add(item_id)
+        for child in value.values():
+            visit(child)
+    elif isinstance(value, list):
+        for child in value:
+            visit(child)
+visit(tree)
+leaked = sorted(ids & {
+    "startup.overlay",
+    "startup.content",
+    "startup.title",
+    "startup.failure.detail",
+    "startup.retry",
+    "startup.diagnostics",
+})
+if leaked:
+    raise SystemExit(
+        "startup controls leaked into Diagnostics AT-SPI tree: "
+        + ", ".join(leaked)
+    )
+' <"$artifact_dir/startup-failure-diagnostics-tree.json"
+"$probe" find --app "$app_handle" --id panel.diagnostics.close \
+    >"$artifact_dir/startup-failure-diagnostics-close.json"
+startup_diagnostics_close_handle=$(
+    json_value matches.0.handle \
+        <"$artifact_dir/startup-failure-diagnostics-close.json"
+)
+"$probe" click "$startup_diagnostics_close_handle" \
+    >"$artifact_dir/startup-failure-diagnostics-close-click.json"
+"$probe" wait --app "$app_handle" id=startup.retry \
+    --state focused --timeout-ms 5000 \
+    >"$artifact_dir/startup-failure-retry-refocused.json"
+startup_retry_handle=$(
+    json_value element.handle \
+        <"$artifact_dir/startup-failure-retry-refocused.json"
+)
+"$probe" click "$startup_retry_handle" \
+    >"$artifact_dir/startup-failure-retry-click.json"
+"$probe" wait --app "$app_handle" id=header.settings \
+    --state showing --timeout-ms 30000 \
+    >"$artifact_dir/startup-failure-ready.json"
+"$probe" wait --app "$app_handle" id=deepLink.status \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/startup-failure-deep-link-status.json"
+"$probe" find --app "$app_handle" --id deepLink.status.dismiss \
+    >"$artifact_dir/startup-failure-deep-link-dismiss.json"
+startup_deep_link_dismiss_handle=$(
+    json_value matches.0.handle \
+        <"$artifact_dir/startup-failure-deep-link-dismiss.json"
+)
+"$probe" click "$startup_deep_link_dismiss_handle" \
+    >"$artifact_dir/startup-failure-deep-link-dismiss-click.json"
+"$probe" tree --app "$app_handle" --depth 4 \
+    >"$artifact_dir/startup-failure-ready-tree.json"
+python3 -c '
+import json, sys
+tree = json.load(sys.stdin)
+ids = set()
+def visit(value):
+    if isinstance(value, dict):
+        item_id = value.get("id")
+        if isinstance(item_id, str) and item_id:
+            ids.add(item_id)
+        for child in value.values():
+            visit(child)
+    elif isinstance(value, list):
+        for child in value:
+            visit(child)
+visit(tree)
+if "startup.overlay" in ids:
+    raise SystemExit("startup overlay remained accessible after retry")
+if "deepLink.status" in ids:
+    raise SystemExit("dismissed deep-link status remained accessible")
+' <"$artifact_dir/startup-failure-ready-tree.json"
 
 stop_current_app
 rm -rf -- "$config_dir"
@@ -1280,7 +1443,7 @@ XDG_CONFIG_HOME="$config_dir" \
 app_pid=$!
 
 ready_window=false
-for _ in $(seq 1 50); do
+for _ in $(seq 1 150); do
     if "$probe" apps >"$artifact_dir/ready-apps.json" 2>/dev/null; then
         app_handle=$(
             app_handle_for_pid "$app_pid" "Kodosi" \
@@ -1288,12 +1451,20 @@ for _ in $(seq 1 50); do
         )
     fi
     if [[ -n "$app_handle" ]] \
-        && "$probe" wait --app "$app_handle" id=window.main \
-        --state showing --timeout-ms 500 \
+        && "$probe" find --app "$app_handle" --id window.main \
         >"$artifact_dir/ready-window.json" \
         2>"$artifact_dir/ready-window.err"; then
-        ready_window=true
-        break
+        if python3 -c '
+import json, sys
+matches = json.load(sys.stdin)["matches"]
+raise SystemExit(
+    0 if len(matches) == 1 and "showing" in matches[0].get("states", [])
+    else 1
+)
+' <"$artifact_dir/ready-window.json"; then
+            ready_window=true
+            break
+        fi
     fi
     kill -0 "$app_pid"
     sleep 0.1

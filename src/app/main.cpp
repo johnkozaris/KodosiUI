@@ -1,8 +1,9 @@
 #include "attention/ApprovalNotifications.hpp"
 #include "attention/TerminalNotifications.hpp"
-#include "app/QmlModelTypes.hpp"
+#include "app/ApplicationLifecycleModel.hpp"
 #include "app/DeepLinkController.hpp"
 #include "app/DeepLinkRouter.hpp"
+#include "app/QmlModelTypes.hpp"
 #include "app/SingleInstanceGuard.hpp"
 #include "bridge/RuntimeBridge.hpp"
 #include "logging/ApplicationLogStore.hpp"
@@ -304,6 +305,12 @@ int main(int argc, char* argv[])
     const auto resumeAgentWorkSmokeTest =
         arguments.contains(
             QStringLiteral("--smoke-test-resume-agent-work"));
+    const auto startupRecoverySmokeTest =
+        arguments.contains(
+            QStringLiteral("--smoke-test-startup-recovery"));
+    const auto injectedStartupFailure =
+        arguments.contains(
+            QStringLiteral("--test-startup-failure-once"));
     const auto smokeTest = settingsSmokeTest
         || agentIntelSmokeTest
         || projectIntelSmokeTest
@@ -317,6 +324,15 @@ int main(int argc, char* argv[])
         || shellParitySmokeTest
         || desktopStateSmokeTest
         || tilingSmokeTest;
+    const auto presentationProbeWithoutRuntime =
+        smokeTest
+        || tilingProbeSynthetic
+        || projectIntelProbePopulated
+        || projectIntelProbeEmpty
+        || projectIntelProbeArchive
+        || agentSettingsProbePopulated
+        || resumeAgentWorkProbe
+        || resumeAgentWorkSmokeTest;
     const auto syntheticMode = windowSize.has_value()
         || std::any_of(
             arguments.cbegin(),
@@ -398,6 +414,45 @@ int main(int argc, char* argv[])
     kodosi::RuntimeBridge runtime(terminalSessions);
     kodosi::RuntimeDiagnosticsModel runtimeDiagnostics(runtime);
     kodosi::AgentGlobalModel agentGlobal(runtime);
+    auto remainingInjectedStartupFailures =
+        injectedStartupFailure || startupRecoverySmokeTest ? 1 : 0;
+    kodosi::ApplicationLifecycleModel::StartOperation lifecycleStart;
+    if (presentationProbeWithoutRuntime) {
+        lifecycleStart =
+            [](kodosi::ApplicationLifecycleModel::Completion completion) {
+                completion(kodosi::RuntimeBridge::Result {});
+            };
+    } else {
+        lifecycleStart =
+            [&runtime, &remainingInjectedStartupFailures](
+                kodosi::ApplicationLifecycleModel::Completion completion) {
+                if (remainingInjectedStartupFailures > 0) {
+                    --remainingInjectedStartupFailures;
+                    completion(std::unexpected(kodosi::RuntimeFailure {
+                        .code =
+                            kodosi::RuntimeFailure::Code::StartRejected,
+                        .ffiResult = -1,
+                        .message = QStringLiteral(
+                            "The Kodosi runtime rejected the injected startup attempt."),
+                    }));
+                    return;
+                }
+                completion(runtime.start());
+            };
+    }
+    kodosi::ApplicationLifecycleModel applicationLifecycle(
+        runtime,
+        std::move(lifecycleStart),
+        [&runtime] { runtime.stop(); });
+    QObject::connect(
+        &applicationLifecycle,
+        &kodosi::ApplicationLifecycleModel::runtimeGenerationReady,
+        &agentGlobal,
+        [&agentGlobal, &runtime](quint64) {
+            if (runtime.isRunning()) {
+                (void)agentGlobal.refresh();
+            }
+        });
     kodosi::installTerminalAccessibility();
     kodosi::SessionCatalogModel sessionCatalog;
     kodosi::AgentSessionIntelModel agentSessionIntel(
@@ -609,7 +664,8 @@ int main(int argc, char* argv[])
     kodosi::PendingPermissionsModel pendingPermissions(runtime, sessionCatalog);
     kodosi::DeepLinkController deepLinks(
         sessionCatalog,
-        pendingPermissions);
+        pendingPermissions,
+        applicationLifecycle);
     if (deepLinkApprovalSmokeTest || deepLinkMissingApprovalSmokeTest) {
         constexpr auto smokeEpoch = 77;
         const auto authEvent = QJsonDocument(QJsonObject {
@@ -971,6 +1027,7 @@ int main(int argc, char* argv[])
         providerConversations,
         people,
         peopleActions,
+        applicationLifecycle,
         runtimeDiagnostics,
         applicationLog,
         sessionCatalog,
@@ -1072,11 +1129,214 @@ int main(int argc, char* argv[])
             deepLinks.reject(initialDeepLink->error);
         }
     }
-    if (deepLinkApprovalSmokeTest) {
+    const auto endpointReady = singleInstance.publishEndpoint();
+    if (endpointReady.state
+        != kodosi::SingleInstanceGuard::StartState::Owner) {
+        qCritical().noquote() << endpointReady.error;
+        return EXIT_FAILURE;
+    }
+    applicationLifecycle.scheduleInitialStart();
+    if (startupRecoverySmokeTest) {
         QTimer::singleShot(
-            0,
+            50,
             &application,
-            [&application, rootObject] {
+            [&application,
+             &applicationLifecycle,
+             &deepLinks,
+             mainWindow,
+             rootObject] {
+                auto* overlay = rootObject->findChild<QObject*>(
+                    QStringLiteral("startup.overlay"));
+                auto* startupContent = rootObject->findChild<QObject*>(
+                    QStringLiteral("startup.content"));
+                auto* retry = rootObject->findChild<QObject*>(
+                    QStringLiteral("startup.retry"));
+                auto* diagnostics = rootObject->findChild<QObject*>(
+                    QStringLiteral("startup.diagnostics"));
+                auto* rootItem = qobject_cast<QQuickItem*>(
+                    rootObject->property("contentItem")
+                        .value<QObject*>());
+                auto* banner = findQuickItem(
+                    rootItem,
+                    QStringLiteral("deepLink.status"));
+                deepLinks.reject(
+                    kodosi::DeepLinkParseError::UnsupportedRoute);
+                if (overlay == nullptr || startupContent == nullptr
+                    || retry == nullptr
+                    || diagnostics == nullptr
+                    || banner == nullptr || mainWindow == nullptr
+                    || applicationLifecycle.state()
+                        != kodosi::ApplicationLifecycleModel::State::Failed
+                    || !overlay->property("visible").toBool()
+                    || !startupContent->property("visible").toBool()
+                    || !retry->property("activeFocus").toBool()
+                    || banner->isVisible() || banner->isEnabled()
+                    || deepLinks.statusCode()
+                        != QStringLiteral("invalid")
+                    || applicationLifecycle.errorText().isEmpty()
+                    || applicationLifecycle.errorText().size() > 320) {
+                    qCritical()
+                        << "Startup failure did not remain visible and recoverable.";
+                    application.exit(EXIT_FAILURE);
+                    return;
+                }
+                if (!QMetaObject::invokeMethod(
+                        diagnostics,
+                        "clicked",
+                        Qt::DirectConnection)) {
+                    qCritical()
+                        << "Startup diagnostics could not be opened.";
+                    application.exit(EXIT_FAILURE);
+                    return;
+                }
+                QTimer::singleShot(
+                    50,
+                    &application,
+                    [&application,
+                     &applicationLifecycle,
+                     &deepLinks,
+                     mainWindow,
+                     rootObject,
+                     retry] {
+                        auto* drawer = rootObject->findChild<QObject*>(
+                            QStringLiteral("panel.diagnostics"));
+                        auto* close = rootObject->findChild<QObject*>(
+                            QStringLiteral(
+                                "panel.diagnostics.close"));
+                        auto* startupContent =
+                            rootObject->findChild<QObject*>(
+                                QStringLiteral("startup.content"));
+                        auto* title = rootObject->findChild<QObject*>(
+                            QStringLiteral("startup.title"));
+                        auto* diagnostics =
+                            rootObject->findChild<QObject*>(
+                                QStringLiteral("startup.diagnostics"));
+                        if (drawer == nullptr || close == nullptr
+                            || startupContent == nullptr
+                            || title == nullptr || diagnostics == nullptr
+                            || !drawer->property("opened").toBool()
+                            || !close->property("activeFocus").toBool()
+                            || startupContent->property("visible").toBool()
+                            || startupContent->property("enabled").toBool()
+                            || title->property("visible").toBool()
+                            || retry->property("visible").toBool()
+                            || retry->property("enabled").toBool()
+                            || diagnostics->property("visible").toBool()
+                            || diagnostics->property("enabled").toBool()) {
+                            qCritical()
+                                << "Startup diagnostics did not establish modal focus.";
+                            application.exit(EXIT_FAILURE);
+                            return;
+                        }
+                        if (!QMetaObject::invokeMethod(
+                                drawer,
+                                "close",
+                                Qt::DirectConnection)) {
+                            qCritical()
+                                << "Startup diagnostics could not be closed.";
+                            application.exit(EXIT_FAILURE);
+                            return;
+                        }
+                        QTimer::singleShot(
+                            50,
+                            &application,
+                            [&application,
+                             &applicationLifecycle,
+                             &deepLinks,
+                             mainWindow,
+                             rootObject,
+                             retry] {
+                                if (!retry->property("activeFocus")
+                                         .toBool()
+                                    || !QMetaObject::invokeMethod(
+                                        retry,
+                                        "clicked",
+                                        Qt::DirectConnection)
+                                    || applicationLifecycle.state()
+                                        != kodosi::
+                                            ApplicationLifecycleModel::
+                                                State::Starting) {
+                                    qCritical()
+                                        << "Startup retry did not restore focus or enter Starting.";
+                                    application.exit(EXIT_FAILURE);
+                                    return;
+                                }
+                                QTimer::singleShot(
+                                    500,
+                                    &application,
+                                    [&application,
+                                     &applicationLifecycle,
+                                     &deepLinks,
+                                     mainWindow,
+                                     rootObject] {
+                                        auto* overlay =
+                                            rootObject->findChild<QObject*>(
+                                                QStringLiteral(
+                                                    "startup.overlay"));
+                                        auto* rootItem =
+                                            qobject_cast<QQuickItem*>(
+                                                rootObject
+                                                    ->property(
+                                                        "contentItem")
+                                                    .value<QObject*>());
+                                        auto* banner = findQuickItem(
+                                            rootItem,
+                                            QStringLiteral(
+                                                "deepLink.status"));
+                                        auto* dismiss = findQuickItem(
+                                            rootItem,
+                                            QStringLiteral(
+                                                "deepLink.status.dismiss"));
+                                        if (overlay == nullptr
+                                            || banner == nullptr
+                                            || dismiss == nullptr
+                                            || mainWindow == nullptr
+                                            || applicationLifecycle.state()
+                                                != kodosi::
+                                                    ApplicationLifecycleModel::
+                                                        State::Ready
+                                            || overlay->property("visible")
+                                                   .toBool()
+                                            || !banner->isVisible()
+                                            || !banner->isEnabled()
+                                            || !dismiss->isVisible()
+                                            || !dismiss->isEnabled()
+                                            || deepLinks.statusCode()
+                                                != QStringLiteral("invalid")
+                                            || applicationLifecycle
+                                                    .runtimeGeneration()
+                                                != 1) {
+                                            qCritical()
+                                                << "Startup retry did not reach the normal ready state.";
+                                            application.exit(
+                                                EXIT_FAILURE);
+                                            return;
+                                        }
+                                        if (!QMetaObject::invokeMethod(
+                                                dismiss,
+                                                "clicked",
+                                                Qt::DirectConnection)
+                                            || !deepLinks.statusCode()
+                                                    .isEmpty()
+                                            || banner->isVisible()) {
+                                            qCritical()
+                                                << "Recovered deep-link status was not dismissible.";
+                                            application.exit(
+                                                EXIT_FAILURE);
+                                            return;
+                                        }
+                                        application.quit();
+                                    });
+                            });
+                    });
+            });
+    }
+    if (deepLinkApprovalSmokeTest) {
+        QObject::connect(
+            &applicationLifecycle,
+            &kodosi::ApplicationLifecycleModel::runtimeGenerationReady,
+            &application,
+            [&application, rootObject](quint64) {
                 const auto* drawer = rootObject->findChild<QObject*>(
                     QStringLiteral("panel.agentIntel"));
                 if (drawer == nullptr
@@ -1095,10 +1355,11 @@ int main(int argc, char* argv[])
             });
     }
     if (deepLinkMissingApprovalSmokeTest) {
-        QTimer::singleShot(
-            0,
+        QObject::connect(
+            &applicationLifecycle,
+            &kodosi::ApplicationLifecycleModel::runtimeGenerationReady,
             &application,
-            [&application, rootObject, &pendingPermissions] {
+            [&application, rootObject, &pendingPermissions](quint64) {
                 const auto* drawer = rootObject->findChild<QObject*>(
                     QStringLiteral("panel.agentIntel"));
                 const auto approval =
@@ -3208,26 +3469,14 @@ int main(int argc, char* argv[])
                         });
                 });
         }
-    } else if (tilingProbeSynthetic || projectIntelProbePopulated
-        || projectIntelProbeEmpty || projectIntelProbeArchive
-        || agentSettingsProbePopulated || resumeAgentWorkProbe
-        || resumeAgentWorkSmokeTest) {
+    } else if (presentationProbeWithoutRuntime) {
         qInfo() << "Synthetic presentation probe is ready.";
-    } else if (auto result = runtime.start(); !result) {
-        qCritical().noquote() << result.error().message;
-        return EXIT_FAILURE;
-    } else {
-        (void)agentGlobal.refresh();
     }
-    const auto endpointReady = singleInstance.publishEndpoint();
-    if (endpointReady.state
-        != kodosi::SingleInstanceGuard::StartState::Owner) {
-        qCritical().noquote() << endpointReady.error;
-        return EXIT_FAILURE;
-    }
-    QObject::connect(&application, &QCoreApplication::aboutToQuit, &runtime, [&runtime] {
-        runtime.stop();
-    });
+    QObject::connect(
+        &application,
+        &QCoreApplication::aboutToQuit,
+        &applicationLifecycle,
+        [&applicationLifecycle] { applicationLifecycle.stop(); });
 
     return application.exec();
 }

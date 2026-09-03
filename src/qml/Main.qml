@@ -47,7 +47,8 @@ ApplicationWindow {
         selectedSessionAvailable
         && Models.SessionActions.canClose(shortcutSelectedSessionId)
     readonly property bool blockingOverlayOpen:
-        settingsDrawer.opened
+        startupOverlay.visible
+        || settingsDrawer.opened
         || utilityMenu.opened
         || keyboardShortcutsOverlay.opened
         || attentionPanel.opened
@@ -204,14 +205,14 @@ ApplicationWindow {
             return qsTr("The link contains unsupported parameters.")
         case "queueFull":
             return qsTr("Too many links are waiting to open. Try the link again.")
+        case "waitingRuntime":
+            return qsTr("Waiting for Kodosi to finish starting before opening the link…")
         case "waitingAccount":
             return qsTr("Waiting for the active account before opening the link…")
         case "waitingSessions":
             return qsTr("Waiting for the authoritative session list…")
         case "accountChanged":
             return qsTr("The link expired because the active account changed.")
-        case "runtimeRestarted":
-            return qsTr("The link expired because the runtime restarted.")
         case "expired":
             return qsTr("The link expired before its authoritative data became available.")
         case "sessionsUnavailable":
@@ -298,7 +299,8 @@ ApplicationWindow {
     }
 
     function toggleDiagnostics() {
-        if (authOverlay.visible && !diagnosticsDrawer.opened)
+        if ((authOverlay.visible || startupOverlay.visible)
+                && !diagnosticsDrawer.opened)
             return
         attentionPanel.close()
         agentIntelDrawer.close()
@@ -307,6 +309,19 @@ ApplicationWindow {
             diagnosticsDrawer.close()
         else
             diagnosticsDrawer.open()
+    }
+
+    function openStartupDiagnostics() {
+        if (!startupOverlay.failed)
+            return
+        utilityMenu.close()
+        keyboardShortcutsOverlay.close()
+        attentionPanel.close()
+        settingsDrawer.close()
+        agentIntelDrawer.close()
+        projectIntelModal.close()
+        resumeAgentWorkModal.closeModal()
+        diagnosticsDrawer.open()
     }
 
     function openSettings() {
@@ -388,6 +403,8 @@ ApplicationWindow {
 
     function refreshShellAccessibility() {
         setShellAccessibilityIgnored(shellContent, false)
+        if (!shellContent.visible)
+            return
         if (blockingOverlayOpen)
             setShellAccessibilityIgnored(shellContent, true)
         else if (!Models.DesktopState.sidebarOpen)
@@ -699,10 +716,12 @@ ApplicationWindow {
     Timer {
         interval: 50
         repeat: true
-        running: window.blockingOverlayOpen
+        running: (window.blockingOverlayOpen
+            && !startupOverlay.visible)
             || !Models.DesktopState.sidebarOpen
         onTriggered: {
-            if (window.blockingOverlayOpen)
+            if (window.blockingOverlayOpen
+                    && !startupOverlay.visible)
                 window.setShellAccessibilityIgnored(shellContent, true)
             else
                 window.setShellAccessibilityIgnored(sessionSidebar, true)
@@ -711,6 +730,7 @@ ApplicationWindow {
 
     AuthOverlay {
         id: authOverlay
+        suppressed: startupOverlay.visible
         accountRecoverySurfaceOpen:
             settingsDrawer.opened
             && settingsDrawer.selectedCategory === "account"
@@ -731,6 +751,10 @@ ApplicationWindow {
         id: deepLinkStatus
         objectName: "deepLink.status"
         Accessible.id: objectName
+        readonly property bool available:
+            Models.ApplicationLifecycle.state
+                === Models.ApplicationLifecycle.Ready
+            && Models.DeepLinks.statusCode.length > 0
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
@@ -740,7 +764,8 @@ ApplicationWindow {
                 + KodosiTheme.spacing4)
             : 0
         height: implicitHeight
-        visible: Models.DeepLinks.statusCode.length > 0
+        visible: deepLinkStatus.available
+        enabled: deepLinkStatus.available
         z: 10000
         radius: KodosiTheme.radiusMedium
         color: KodosiTheme.surfaceElevated
@@ -748,10 +773,11 @@ ApplicationWindow {
         border.color: KodosiTheme.seam
         Accessible.role: Accessible.AlertMessage
         Accessible.name: deepLinkStatusLabel.text
-        Accessible.ignored: !visible
+        Accessible.ignored: !deepLinkStatus.available
 
         RowLayout {
             id: deepLinkStatusRow
+            enabled: deepLinkStatus.available
             anchors.fill: parent
             anchors.leftMargin: KodosiTheme.spacing5
             anchors.rightMargin: KodosiTheme.spacing5
@@ -768,6 +794,7 @@ ApplicationWindow {
                     Models.DeepLinks.statusCode)
                 color: KodosiTheme.textPrimary
                 wrapMode: Text.Wrap
+                Accessible.ignored: !deepLinkStatus.available
             }
 
             KIconButton {
@@ -775,6 +802,7 @@ ApplicationWindow {
                 Accessible.id: objectName
                 glyph: "close"
                 Accessible.name: qsTr("Dismiss link status")
+                Accessible.ignored: !deepLinkStatus.available
                 onClicked: Models.DeepLinks.clearStatus()
             }
         }
@@ -1065,5 +1093,35 @@ ApplicationWindow {
 
     DiagnosticsDrawer {
         id: diagnosticsDrawer
+        onClosed: {
+            if (startupOverlay.visible)
+                Qt.callLater(startupOverlay.restorePrimaryFocus)
+        }
+    }
+
+    Connections {
+        target: Models.ApplicationLifecycle
+
+        function onStateChanged() {
+            if (Models.ApplicationLifecycle.state
+                    === Models.ApplicationLifecycle.Ready)
+                return
+            utilityMenu.close()
+            keyboardShortcutsOverlay.close()
+            attentionPanel.close()
+            settingsDrawer.close()
+            agentIntelDrawer.close()
+            projectIntelModal.close()
+            resumeAgentWorkModal.closeModal()
+            diagnosticsDrawer.close()
+            Models.SessionActions.cancelCloseConfirmation()
+            sessionSidebar.closeConflictingOverlays()
+        }
+    }
+
+    StartupOverlay {
+        id: startupOverlay
+        diagnosticsOpen: diagnosticsDrawer.opened
+        onDiagnosticsRequested: window.openStartupDiagnostics()
     }
 }

@@ -9,6 +9,7 @@ KPopover {
     signal accountRecoveryRequested()
 
     property bool accountRecoverySurfaceOpen: false
+    property bool suppressed: false
 
     readonly property bool hasCode:
         Models.AuthState.userCode.length > 0
@@ -49,7 +50,8 @@ KPopover {
     y: 0
     width: parent ? parent.width : 0
     height: parent ? parent.height : 0
-    visible: !Models.AuthState.signedIn
+    visible: !root.suppressed
+        && !Models.AuthState.signedIn
         && (Models.AuthActions.busy || hasCode || failed)
         && !accountRecoverySurfaceOpen
     modal: true

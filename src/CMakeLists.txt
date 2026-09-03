@@ -4,6 +4,8 @@ set_source_files_properties(
 )
 
 qt_add_library(kodosi-runtime-bridge STATIC
+    app/ApplicationLifecycleModel.cpp
+    app/ApplicationLifecycleModel.hpp
     app/DeepLinkController.cpp
     app/DeepLinkController.hpp
     app/DeepLinkRouter.cpp
@@ -312,6 +314,7 @@ qt_add_qml_module(kodosi-qt
         qml/Settings/SettingsDrawer.qml
         qml/Settings/AgentsSettingsSurface.qml
         qml/Shell/KeyboardShortcutsOverlay.qml
+        qml/Startup/StartupOverlay.qml
         qml/Theme/KodosiTheme.qml
         qml/Workbench/SessionSidebar.qml
         qml/Workbench/ResumeAgentWorkModal.qml

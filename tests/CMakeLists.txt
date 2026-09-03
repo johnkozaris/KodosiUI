@@ -21,6 +21,26 @@ target_compile_definitions(kodosi-qt-contract-tests
 
 add_test(NAME kodosi-qt-contract-tests COMMAND kodosi-qt-contract-tests)
 
+qt_add_executable(kodosi-application-lifecycle-model-tests
+    tst_application_lifecycle_model.cpp
+)
+target_link_libraries(kodosi-application-lifecycle-model-tests
+    PRIVATE
+        kodosi-runtime-bridge
+        Qt6::Core
+        Qt6::Test
+)
+target_compile_definitions(kodosi-application-lifecycle-model-tests
+    PRIVATE
+        KODOSI_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        QT_NO_CAST_FROM_ASCII
+        QT_NO_CAST_TO_ASCII
+)
+add_test(
+    NAME kodosi-application-lifecycle-model-tests
+    COMMAND kodosi-application-lifecycle-model-tests
+)
+
 qt_add_executable(kodosi-application-log-store-tests
     tst_application_log_store.cpp
 )
@@ -235,6 +255,14 @@ add_test(
         820x560
 )
 add_test(
+    NAME kodosi-startup-recovery-presentation
+    COMMAND
+        kodosi-qt
+        --smoke-test-startup-recovery
+        --window-size
+        820x560
+)
+add_test(
     NAME kodosi-resume-agent-work-presentation
     COMMAND
         kodosi-qt
@@ -270,6 +298,11 @@ add_test(
         820x560
 )
 set_tests_properties(kodosi-shell-account-device-parity PROPERTIES
+    ENVIRONMENT
+        "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
+    TIMEOUT 20
+)
+set_tests_properties(kodosi-startup-recovery-presentation PROPERTIES
     ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
     TIMEOUT 20

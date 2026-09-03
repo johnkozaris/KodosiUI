@@ -69,9 +69,14 @@ Linux uses one app owner per isolated Kodosi data root. Secondary desktop
 launches wait on the owner's early startup lock, then forward a bounded native
 activation frame over a mode-0600, same-UID Unix socket below
 `QStandardPaths::RuntimeLocation`, wait for an acknowledgement, and exit before
-constructing the Rust runtime. The owner publishes the socket only after its
-QML activation connections and runtime are ready, immediately before entering
-the Qt event loop. The endpoint
+constructing the Rust runtime. The owner publishes the socket after its QML
+activation connections are ready and before the event-loop-scheduled runtime
+start attempt. Runtime startup failure leaves the window and activation
+endpoint alive so the native lifecycle model can retry the same bridge
+instance without losing desktop activation. Deep links received before runtime
+readiness remain in the bounded native queue without consuming their
+authoritative-data timeout; runtime loss pauses that timeout until the next
+successful generation. The endpoint
 namespace hashes the normalized effective Rust data root: validated
 `KODOSI_DATA_ROOT/core` in isolated runs, otherwise
 `QStandardPaths::ConfigLocation/kodosi`. Isolated roots require

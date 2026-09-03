@@ -11,6 +11,10 @@
 #include <QSignalSpy>
 #include <QtTest/QTest>
 
+#include <chrono>
+#include <utility>
+#include <vector>
+
 class DeepLinkDispatcher final : public kodosi::CommandDispatcher {
 public:
     bool reject = false;
@@ -104,6 +108,24 @@ QByteArray snapshot(
     }).toJson(QJsonDocument::Compact);
 }
 
+kodosi::RuntimeBridge::Result rejectedStart()
+{
+    return std::unexpected(kodosi::RuntimeFailure {
+        .code = kodosi::RuntimeFailure::Code::StartRejected,
+        .ffiResult = -1,
+        .message = QStringLiteral("injected failure"),
+    });
+}
+
+kodosi::DeepLinkController::RuntimeReadiness readyRuntime(
+    const quint64 generation = 1)
+{
+    return {
+        .state = kodosi::ApplicationLifecycleModel::State::Ready,
+        .generation = generation,
+    };
+}
+
 void activate(
     kodosi::DeepLinkController& controller,
     kodosi::SessionCatalogModel& catalog,
@@ -135,6 +157,11 @@ private slots:
     void staleIncarnationApprovalIsAuthoritativelyMissing();
     void opensSessionWhenApprovalAuthorityFails();
     void cancelsAccountAndIncarnationStaleRoutes();
+    void lifecycleSignalsRetainRouteAcrossFailureAndRetry();
+    void retainsRouteUntilFirstReadyBeyondThirtySeconds();
+    void pausesDeadlineAcrossFailureAndRetry();
+    void resumedDeadlineKeepsRemainingBudget();
+    void invalidStatusSurvivesRuntimeRecovery();
     void boundsPendingRoutes();
     void statusCanBeDismissedAndReplaced();
     void qmlAndDesktopRegistrationContract();
@@ -227,7 +254,10 @@ void DeepLinksTest::waitsForCatalogAndOpensExactSession()
     DeepLinkDispatcher dispatcher;
     kodosi::SessionCatalogModel catalog;
     kodosi::PendingPermissionsModel permissions(dispatcher, catalog);
-    kodosi::DeepLinkController controller(catalog, permissions);
+    kodosi::DeepLinkController controller(
+        catalog,
+        permissions,
+        readyRuntime());
     QSignalSpy opened(
         &controller,
         &kodosi::DeepLinkController::openSessionRequested);
@@ -251,7 +281,10 @@ void DeepLinksTest::waitsForPermissionAuthorityAndEmitsOpaqueIdentity()
     DeepLinkDispatcher dispatcher;
     kodosi::SessionCatalogModel catalog;
     kodosi::PendingPermissionsModel permissions(dispatcher, catalog);
-    kodosi::DeepLinkController controller(catalog, permissions);
+    kodosi::DeepLinkController controller(
+        catalog,
+        permissions,
+        readyRuntime());
     QSignalSpy reviewed(
         &controller,
         &kodosi::DeepLinkController::reviewApprovalRequested);
@@ -280,7 +313,10 @@ void DeepLinksTest::reportsAuthoritativeMissingApproval()
     DeepLinkDispatcher dispatcher;
     kodosi::SessionCatalogModel catalog;
     kodosi::PendingPermissionsModel permissions(dispatcher, catalog);
-    kodosi::DeepLinkController controller(catalog, permissions);
+    kodosi::DeepLinkController controller(
+        catalog,
+        permissions,
+        readyRuntime());
     QSignalSpy missing(
         &controller,
         &kodosi::DeepLinkController::missingApprovalRequested);
@@ -304,7 +340,10 @@ void DeepLinksTest::staleIncarnationApprovalIsAuthoritativelyMissing()
     DeepLinkDispatcher dispatcher;
     kodosi::SessionCatalogModel catalog;
     kodosi::PendingPermissionsModel permissions(dispatcher, catalog);
-    kodosi::DeepLinkController controller(catalog, permissions);
+    kodosi::DeepLinkController controller(
+        catalog,
+        permissions,
+        readyRuntime());
     QSignalSpy missing(
         &controller,
         &kodosi::DeepLinkController::missingApprovalRequested);
@@ -330,7 +369,10 @@ void DeepLinksTest::opensSessionWhenApprovalAuthorityFails()
     dispatcher.reject = true;
     kodosi::SessionCatalogModel catalog;
     kodosi::PendingPermissionsModel permissions(dispatcher, catalog);
-    kodosi::DeepLinkController controller(catalog, permissions);
+    kodosi::DeepLinkController controller(
+        catalog,
+        permissions,
+        readyRuntime());
     QSignalSpy opened(
         &controller,
         &kodosi::DeepLinkController::openSessionRequested);
@@ -351,7 +393,10 @@ void DeepLinksTest::cancelsAccountAndIncarnationStaleRoutes()
     DeepLinkDispatcher dispatcher;
     kodosi::SessionCatalogModel catalog;
     kodosi::PendingPermissionsModel permissions(dispatcher, catalog);
-    kodosi::DeepLinkController controller(catalog, permissions);
+    kodosi::DeepLinkController controller(
+        catalog,
+        permissions,
+        readyRuntime());
     QSignalSpy reviewed(
         &controller,
         &kodosi::DeepLinkController::reviewApprovalRequested);
@@ -384,12 +429,209 @@ void DeepLinksTest::cancelsAccountAndIncarnationStaleRoutes()
     QCOMPARE(reviewed.count(), 0);
 }
 
+void DeepLinksTest::lifecycleSignalsRetainRouteAcrossFailureAndRetry()
+{
+    using namespace std::chrono_literals;
+
+    DeepLinkDispatcher dispatcher;
+    kodosi::RuntimeBridge runtime;
+    kodosi::SessionCatalogModel catalog;
+    kodosi::PendingPermissionsModel permissions(dispatcher, catalog);
+    std::vector<kodosi::ApplicationLifecycleModel::Completion>
+        completions;
+    kodosi::ApplicationLifecycleModel lifecycle(
+        runtime,
+        [&completions](
+            kodosi::ApplicationLifecycleModel::Completion completion) {
+            completions.push_back(std::move(completion));
+        },
+        [] {});
+    auto now = kodosi::DeepLinkController::MonotonicTime {};
+    kodosi::DeepLinkController controller(
+        catalog,
+        permissions,
+        lifecycle,
+        [&now] { return now; });
+    QSignalSpy opened(
+        &controller,
+        &kodosi::DeepLinkController::openSessionRequested);
+
+    controller.enqueue({
+        .sessionId = QStringLiteral("session-1"),
+    });
+    lifecycle.scheduleInitialStart();
+    QTRY_COMPARE(completions.size(), std::size_t {1});
+    now += 31s;
+    completions.front()(rejectedStart());
+    QCOMPARE(
+        lifecycle.state(),
+        kodosi::ApplicationLifecycleModel::State::Failed);
+    QCOMPARE(controller.pendingCount(), 1);
+
+    lifecycle.retry();
+    QTRY_COMPARE(completions.size(), std::size_t {2});
+    activate(controller, catalog, permissions);
+    now += 31s;
+    completions.back()(kodosi::RuntimeBridge::Result {});
+
+    QCOMPARE(
+        lifecycle.state(),
+        kodosi::ApplicationLifecycleModel::State::Ready);
+    QCOMPARE(opened.count(), 1);
+    QCOMPARE(controller.pendingCount(), 0);
+}
+
+void DeepLinksTest::retainsRouteUntilFirstReadyBeyondThirtySeconds()
+{
+    using namespace std::chrono_literals;
+
+    DeepLinkDispatcher dispatcher;
+    kodosi::SessionCatalogModel catalog;
+    kodosi::PendingPermissionsModel permissions(dispatcher, catalog);
+    auto now = kodosi::DeepLinkController::MonotonicTime {};
+    kodosi::DeepLinkController controller(
+        catalog,
+        permissions,
+        {
+            .state =
+                kodosi::ApplicationLifecycleModel::State::Starting,
+            .generation = 0,
+        },
+        [&now] { return now; });
+    QSignalSpy opened(
+        &controller,
+        &kodosi::DeepLinkController::openSessionRequested);
+
+    controller.enqueue({
+        .sessionId = QStringLiteral("session-1"),
+    });
+    QCOMPARE(controller.statusCode(), QStringLiteral("waitingRuntime"));
+    now += 31s;
+    activate(controller, catalog, permissions);
+    QCOMPARE(controller.pendingCount(), 1);
+    QCOMPARE(opened.count(), 0);
+
+    controller.updateRuntimeReadiness(readyRuntime());
+    QCOMPARE(opened.count(), 1);
+    QCOMPARE(controller.pendingCount(), 0);
+}
+
+void DeepLinksTest::pausesDeadlineAcrossFailureAndRetry()
+{
+    using namespace std::chrono_literals;
+
+    DeepLinkDispatcher dispatcher;
+    kodosi::SessionCatalogModel catalog;
+    kodosi::PendingPermissionsModel permissions(dispatcher, catalog);
+    auto now = kodosi::DeepLinkController::MonotonicTime {};
+    kodosi::DeepLinkController controller(
+        catalog,
+        permissions,
+        readyRuntime(),
+        [&now] { return now; });
+    QSignalSpy opened(
+        &controller,
+        &kodosi::DeepLinkController::openSessionRequested);
+
+    controller.enqueue({
+        .sessionId = QStringLiteral("session-1"),
+    });
+    now += 20s;
+    controller.updateRuntimeReadiness({
+        .state = kodosi::ApplicationLifecycleModel::State::Failed,
+        .generation = 1,
+    });
+    controller.resetRuntimeAuthority();
+    now += 40s;
+    controller.updateRuntimeReadiness({
+        .state = kodosi::ApplicationLifecycleModel::State::Starting,
+        .generation = 1,
+    });
+    activate(controller, catalog, permissions);
+    QCOMPARE(controller.pendingCount(), 1);
+    QCOMPARE(opened.count(), 0);
+
+    controller.updateRuntimeReadiness(readyRuntime(2));
+    QCOMPARE(opened.count(), 1);
+    QCOMPARE(controller.pendingCount(), 0);
+}
+
+void DeepLinksTest::resumedDeadlineKeepsRemainingBudget()
+{
+    using namespace std::chrono_literals;
+
+    DeepLinkDispatcher dispatcher;
+    kodosi::SessionCatalogModel catalog;
+    kodosi::PendingPermissionsModel permissions(dispatcher, catalog);
+    auto now = kodosi::DeepLinkController::MonotonicTime {};
+    kodosi::DeepLinkController controller(
+        catalog,
+        permissions,
+        readyRuntime(),
+        [&now] { return now; });
+
+    controller.enqueue({
+        .sessionId = QStringLiteral("session-1"),
+    });
+    now += 20s;
+    controller.updateRuntimeReadiness({
+        .state = kodosi::ApplicationLifecycleModel::State::Failed,
+        .generation = 1,
+    });
+    now += 40s;
+    controller.updateRuntimeReadiness({
+        .state = kodosi::ApplicationLifecycleModel::State::Starting,
+        .generation = 1,
+    });
+    controller.updateRuntimeReadiness(readyRuntime(2));
+    QCOMPARE(controller.pendingCount(), 1);
+
+    now += 11s;
+    controller.ingestAuthEvent(auth(QStringLiteral("account"), 1));
+    QCOMPARE(controller.pendingCount(), 0);
+    QCOMPARE(controller.statusCode(), QStringLiteral("expired"));
+}
+
+void DeepLinksTest::invalidStatusSurvivesRuntimeRecovery()
+{
+    DeepLinkDispatcher dispatcher;
+    kodosi::SessionCatalogModel catalog;
+    kodosi::PendingPermissionsModel permissions(dispatcher, catalog);
+    auto now = kodosi::DeepLinkController::MonotonicTime {};
+    kodosi::DeepLinkController controller(
+        catalog,
+        permissions,
+        {
+            .state =
+                kodosi::ApplicationLifecycleModel::State::Starting,
+            .generation = 0,
+        },
+        [&now] { return now; });
+
+    controller.reject(kodosi::DeepLinkParseError::UnsupportedRoute);
+    now += std::chrono::minutes(1);
+    controller.updateRuntimeReadiness({
+        .state = kodosi::ApplicationLifecycleModel::State::Failed,
+        .generation = 0,
+    });
+    controller.updateRuntimeReadiness({
+        .state = kodosi::ApplicationLifecycleModel::State::Starting,
+        .generation = 0,
+    });
+    controller.updateRuntimeReadiness(readyRuntime());
+
+    QCOMPARE(controller.statusCode(), QStringLiteral("invalid"));
+}
+
 void DeepLinksTest::boundsPendingRoutes()
 {
     DeepLinkDispatcher dispatcher;
     kodosi::SessionCatalogModel catalog;
     kodosi::PendingPermissionsModel permissions(dispatcher, catalog);
-    kodosi::DeepLinkController controller(catalog, permissions);
+    kodosi::DeepLinkController controller(
+        catalog,
+        permissions,
+        readyRuntime());
     for (auto index = 0; index < 17; ++index) {
         controller.enqueue({
             .sessionId =
@@ -405,7 +647,10 @@ void DeepLinksTest::statusCanBeDismissedAndReplaced()
     DeepLinkDispatcher dispatcher;
     kodosi::SessionCatalogModel catalog;
     kodosi::PendingPermissionsModel permissions(dispatcher, catalog);
-    kodosi::DeepLinkController controller(catalog, permissions);
+    kodosi::DeepLinkController controller(
+        catalog,
+        permissions,
+        readyRuntime());
 
     controller.reject(kodosi::DeepLinkParseError::UnsupportedRoute);
     QCOMPARE(controller.statusCode(), QStringLiteral("invalid"));
@@ -443,6 +688,17 @@ void DeepLinksTest::qmlAndDesktopRegistrationContract()
         "onClicked: Models.DeepLinks.clearStatus()"));
     QVERIFY(contents.contains(
         "objectName: \"deepLink.status.label\""));
+    QVERIFY(contents.contains("case \"waitingRuntime\":"));
+    QVERIFY(contents.contains(
+        "Waiting for Kodosi to finish starting before opening the link"));
+    QVERIFY(contents.contains(
+        "Models.ApplicationLifecycle.state"));
+    QVERIFY(contents.contains(
+        "=== Models.ApplicationLifecycle.Ready"));
+    QVERIFY(contents.contains(
+        "enabled: deepLinkStatus.available"));
+    QVERIFY(contents.contains(
+        "Accessible.ignored: !deepLinkStatus.available"));
     QVERIFY(contents.contains("sessionSidebar.closeConflictingOverlays()"));
     QVERIFY(!contents.contains("XDG_ACTIVATION_TOKEN"));
 
@@ -452,6 +708,8 @@ void DeepLinksTest::qmlAndDesktopRegistrationContract()
     const auto compositionSource = composition.readAll();
     QVERIFY(compositionSource.contains(
         "SingleInstanceGuard::withActivationToken("));
+    QVERIFY(compositionSource.contains(
+        "pendingPermissions,\n        applicationLifecycle"));
     QVERIFY(compositionSource.contains(
         "qunsetenv(\"XDG_ACTIVATION_TOKEN\")"));
 

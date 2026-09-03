@@ -7,6 +7,7 @@
 #include <QScopeGuard>
 
 #include <algorithm>
+#include <chrono>
 #include <limits>
 
 namespace kodosi {
@@ -18,16 +19,86 @@ QString optionalString(const QJsonObject& object, const QString& key)
     return value.isString() ? value.toString() : QString {};
 }
 
+DeepLinkController::MonotonicClock systemMonotonicClock()
+{
+    return [] { return std::chrono::steady_clock::now(); };
+}
+
 } // namespace
 
 DeepLinkController::DeepLinkController(
     SessionCatalogModel& sessions,
     PendingPermissionsModel& permissions,
+    ApplicationLifecycleModel& lifecycle,
+    QObject* parent)
+    : DeepLinkController(
+          sessions,
+          permissions,
+          lifecycle,
+          systemMonotonicClock(),
+          parent)
+{
+}
+
+DeepLinkController::DeepLinkController(
+    SessionCatalogModel& sessions,
+    PendingPermissionsModel& permissions,
+    ApplicationLifecycleModel& lifecycle,
+    MonotonicClock clock,
+    QObject* parent)
+    : DeepLinkController(
+          sessions,
+          permissions,
+          RuntimeReadiness {
+              .state = lifecycle.state(),
+              .generation = lifecycle.runtimeGeneration(),
+          },
+          std::move(clock),
+          parent)
+{
+    connect(
+        &lifecycle,
+        &ApplicationLifecycleModel::stateChanged,
+        this,
+        [this, &lifecycle] {
+            updateRuntimeReadiness({
+                .state = lifecycle.state(),
+                .generation = lifecycle.runtimeGeneration(),
+            });
+        });
+}
+
+DeepLinkController::DeepLinkController(
+    SessionCatalogModel& sessions,
+    PendingPermissionsModel& permissions,
+    const RuntimeReadiness readiness,
+    QObject* parent)
+    : DeepLinkController(
+          sessions,
+          permissions,
+          readiness,
+          systemMonotonicClock(),
+          parent)
+{
+}
+
+DeepLinkController::DeepLinkController(
+    SessionCatalogModel& sessions,
+    PendingPermissionsModel& permissions,
+    const RuntimeReadiness readiness,
+    MonotonicClock clock,
     QObject* parent)
     : QObject(parent)
     , m_sessions(sessions)
     , m_permissions(permissions)
+    , m_runtimeReadiness(readiness)
+    , m_clock(std::move(clock))
 {
+    Q_ASSERT(m_clock);
+    Q_ASSERT(
+        m_runtimeReadiness.state
+            != ApplicationLifecycleModel::State::Ready
+        || m_runtimeReadiness.generation > 0);
     m_pendingTimer.setSingleShot(true);
     connect(
         &m_pendingTimer,
@@ -89,7 +160,11 @@ void DeepLinkController::enqueue(DeepLinkDestination destination)
         .destination = std::move(destination),
         .account = m_account,
         .incarnationId = std::nullopt,
-        .deadline = QDeadlineTimer(30'000, Qt::PreciseTimer),
+        .remainingAuthorityTime = PendingRouteLifetime,
+        .deadline = runtimeReady()
+            ? std::optional<MonotonicTime>(
+                  m_clock() + PendingRouteLifetime)
+            : std::nullopt,
     });
     emit activationRequested();
     process();
@@ -126,6 +201,41 @@ void DeepLinkController::clearStatus()
 void DeepLinkController::reportNavigationResult(const bool succeeded)
 {
     setStatus(succeeded ? QString {} : QStringLiteral("navigationFailed"));
+}
+
+void DeepLinkController::updateRuntimeReadiness(
+    const RuntimeReadiness readiness)
+{
+    if (readiness.generation < m_runtimeReadiness.generation) {
+        return;
+    }
+    if (readiness.state == ApplicationLifecycleModel::State::Ready) {
+        Q_ASSERT(readiness.generation > 0);
+    }
+    if (m_runtimeReadiness.state == readiness.state
+        && m_runtimeReadiness.generation == readiness.generation) {
+        return;
+    }
+
+    const auto wasReady = runtimeReady();
+    if (wasReady
+        && readiness.state != ApplicationLifecycleModel::State::Ready) {
+        pausePendingDeadlines();
+    }
+    m_runtimeReadiness = readiness;
+    if (readiness.state == ApplicationLifecycleModel::State::Failed) {
+        clearRuntimeAuthority();
+    }
+    if (!runtimeReady()) {
+        m_pendingTimer.stop();
+        if (!m_pending.isEmpty()) {
+            setStatus(QStringLiteral("waitingRuntime"));
+        }
+        return;
+    }
+
+    resumePendingDeadlines();
+    process();
 }
 
 void DeepLinkController::ingestAuthEvent(QByteArray json)
@@ -170,13 +280,21 @@ void DeepLinkController::ingestAuthEvent(QByteArray json)
 
 void DeepLinkController::resetRuntimeAuthority()
 {
-    m_account.reset();
+    pausePendingDeadlines();
     m_pendingTimer.stop();
+    m_runtimeReadiness.state =
+        ApplicationLifecycleModel::State::Failed;
+    clearRuntimeAuthority();
     if (!m_pending.isEmpty()) {
-        m_pending.clear();
-        setStatus(QStringLiteral("runtimeRestarted"));
+        setStatus(QStringLiteral("waitingRuntime"));
         emit activationRequested();
     }
+}
+
+bool DeepLinkController::runtimeReady() const noexcept
+{
+    return m_runtimeReadiness.state
+        == ApplicationLifecycleModel::State::Ready;
 }
 
 void DeepLinkController::process()
@@ -188,9 +306,17 @@ void DeepLinkController::process()
     const auto resetProcessing =
         qScopeGuard([this] { m_processing = false; });
 
+    if (!runtimeReady()) {
+        m_pendingTimer.stop();
+        if (!m_pending.isEmpty()) {
+            setStatus(QStringLiteral("waitingRuntime"));
+        }
+        return;
+    }
+
     while (!m_pending.isEmpty()) {
         auto& route = m_pending.head();
-        if (route.deadline.hasExpired()) {
+        if (route.deadline && m_clock() >= *route.deadline) {
             m_pending.dequeue();
             setStatus(QStringLiteral("expired"));
             emit activationRequested();
@@ -294,16 +420,19 @@ void DeepLinkController::process()
 
 void DeepLinkController::schedulePendingTimeout()
 {
-    if (m_pending.isEmpty()) {
+    if (!runtimeReady() || m_pending.isEmpty()
+        || !m_pending.head().deadline) {
         m_pendingTimer.stop();
         return;
     }
-    const auto remaining = m_pending.head().deadline.remainingTime();
+    const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(
+        *m_pending.head().deadline - m_clock());
     m_pendingTimer.start(static_cast<int>(
         std::clamp(
-            remaining,
-            qint64 {1},
-            static_cast<qint64>(std::numeric_limits<int>::max()))));
+            remaining.count(),
+            std::chrono::milliseconds::rep {1},
+            static_cast<std::chrono::milliseconds::rep>(
+                std::numeric_limits<int>::max()))));
 }
 
 void DeepLinkController::setStatus(QString code)
@@ -332,6 +461,40 @@ void DeepLinkController::cancelBoundRoutes(QString code)
     if (removed) {
         setStatus(std::move(code));
         emit activationRequested();
+    }
+}
+
+void DeepLinkController::pausePendingDeadlines()
+{
+    const auto now = m_clock();
+    for (auto& route : m_pending) {
+        if (!route.deadline) {
+            continue;
+        }
+        route.remainingAuthorityTime = std::max(
+            std::chrono::milliseconds::zero(),
+            std::chrono::ceil<std::chrono::milliseconds>(
+                *route.deadline - now));
+        route.deadline.reset();
+    }
+}
+
+void DeepLinkController::resumePendingDeadlines()
+{
+    const auto now = m_clock();
+    for (auto& route : m_pending) {
+        if (!route.deadline) {
+            route.deadline = now + route.remainingAuthorityTime;
+        }
+    }
+}
+
+void DeepLinkController::clearRuntimeAuthority()
+{
+    m_account.reset();
+    for (auto& route : m_pending) {
+        route.account.reset();
+        route.incarnationId.reset();
     }
 }
 

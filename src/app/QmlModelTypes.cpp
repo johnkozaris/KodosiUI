@@ -28,6 +28,7 @@ void configureModelInstances(
     ProviderConversationsModel& providerConversations,
     PeopleModel& people,
     PeopleActions& peopleActions,
+    ApplicationLifecycleModel& applicationLifecycle,
     RuntimeDiagnosticsModel& runtimeDiagnostics,
     ApplicationLogStore& applicationLog,
     SessionCatalogModel& sessions,
@@ -64,6 +65,7 @@ void configureModelInstances(
     ProviderConversationsModelForeign::instance = &providerConversations;
     PeopleModelForeign::instance = &people;
     PeopleActionsForeign::instance = &peopleActions;
+    ApplicationLifecycleModelForeign::instance = &applicationLifecycle;
     RuntimeDiagnosticsModelForeign::instance = &runtimeDiagnostics;
     ApplicationLogStoreForeign::instance = &applicationLog;
     SessionCatalogModelForeign::instance = &sessions;

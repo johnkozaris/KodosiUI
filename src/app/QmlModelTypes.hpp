@@ -1,5 +1,8 @@
 #pragma once
 
+#include "app/ApplicationLifecycleModel.hpp"
+#include "app/DeepLinkController.hpp"
+#include "logging/ApplicationLogStore.hpp"
 #include "models/AgentConversationModel.hpp"
 #include "models/AgentAutoModeRulesModel.hpp"
 #include "models/AgentCustomAgentsModel.hpp"
@@ -31,8 +34,6 @@
 #include "models/SteeringModel.hpp"
 #include "models/TerminalTilingLayoutModel.hpp"
 #include "models/TrustModel.hpp"
-#include "app/DeepLinkController.hpp"
-#include "logging/ApplicationLogStore.hpp"
 #include "platform/DesktopFileIntegration.hpp"
 #include "terminal/TerminalSurfaceController.hpp"
 #include "terminal/TerminalView.hpp"
@@ -493,6 +494,22 @@ public:
     }
 };
 
+struct ApplicationLifecycleModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::ApplicationLifecycleModel)
+    QML_NAMED_ELEMENT(ApplicationLifecycle)
+    QML_SINGLETON
+
+public:
+    inline static kodosi::ApplicationLifecycleModel* instance = nullptr;
+    static kodosi::ApplicationLifecycleModel* create(
+        QQmlEngine* engine,
+        QJSEngine*)
+    {
+        return singleton(instance, engine);
+    }
+};
+
 struct ApplicationLogStoreForeign {
     Q_GADGET
     QML_FOREIGN(kodosi::ApplicationLogStore)
@@ -671,6 +688,7 @@ void configureModelInstances(
     ProviderConversationsModel& providerConversations,
     PeopleModel& people,
     PeopleActions& peopleActions,
+    ApplicationLifecycleModel& applicationLifecycle,
     RuntimeDiagnosticsModel& runtimeDiagnostics,
     ApplicationLogStore& applicationLog,
     SessionCatalogModel& sessions,
