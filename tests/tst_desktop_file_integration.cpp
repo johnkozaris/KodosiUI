@@ -2,9 +2,11 @@
 #include "logging/ApplicationLogStore.hpp"
 #include "platform/DesktopFileIntegration.hpp"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -15,6 +17,8 @@
 #include <QWindow>
 
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <utility>
@@ -24,6 +28,32 @@ namespace {
 using Integration = kodosi::DesktopFileIntegration;
 using Purpose = Integration::Purpose;
 using ErrorCode = Integration::ErrorCode;
+
+#if defined(Q_OS_LINUX)
+QString createBoundArtifact(
+    const QString& root,
+    const qint64 processId,
+    const int descriptor,
+    const QString& suffix)
+{
+    const auto directory =
+        QDir(root).filePath(QStringLiteral("kodosi-open-") + suffix);
+    if (!QDir().mkpath(directory)
+        || ::chmod(QFile::encodeName(directory).constData(), 0700) != 0) {
+        return {};
+    }
+    const auto artifact = QDir(directory).filePath(QStringLiteral("handoff"));
+    const auto target = QStringLiteral("/proc/%1/fd/%2")
+        .arg(processId)
+        .arg(descriptor);
+    return ::symlink(
+               QFile::encodeName(target).constData(),
+               QFile::encodeName(artifact).constData())
+            == 0
+        ? artifact
+        : QString {};
+}
+#endif
 
 class FakeDirectoryPicker final : public kodosi::DirectoryPicker {
 public:
@@ -217,6 +247,8 @@ private slots:
     void nativePickerIsApplicationModalAndTransient();
     void nativePickerAcceptsDirectoryUrlFallback();
     void validatesSessionProjectAvailabilityNatively();
+    void opensRuntimeProcessBoundHandoffs();
+    void revealsBoundSourcesThroughContainingDirectories();
 };
 
 void DesktopFileIntegrationTest::validatesAndCanonicalizesDirectories()
@@ -917,6 +949,207 @@ void DesktopFileIntegrationTest::validatesSessionProjectAvailabilityNatively()
         missing.directory.filePath(QStringLiteral("missing")));
     QVERIFY(!missing.integration->canOpenSessionProject(
         QStringLiteral("missing-project")));
+}
+
+void DesktopFileIntegrationTest::opensRuntimeProcessBoundHandoffs()
+{
+#if defined(Q_OS_LINUX)
+    Fixture fixture;
+    const auto path = createFile(
+        fixture.directory.filePath(QStringLiteral("memory.md")));
+    QVERIFY(!path.isEmpty());
+    auto descriptor =
+        ::open(path.toLocal8Bit().constData(), O_RDONLY | O_CLOEXEC);
+    QVERIFY(descriptor >= 0);
+    const auto closeDescriptor = qScopeGuard([&descriptor] {
+        if (descriptor >= 0) {
+            ::close(descriptor);
+        }
+    });
+    int control[2] {-1, -1};
+    QCOMPARE(::pipe(control), 0);
+    const auto child = ::fork();
+    QVERIFY(child >= 0);
+    if (child == 0) {
+        (void)::close(control[1]);
+        char value = 0;
+        (void)::read(control[0], &value, 1);
+        (void)::close(control[0]);
+        _exit(0);
+    }
+    (void)::close(control[0]);
+    control[0] = -1;
+    auto childFinished = false;
+    const auto finishChild = qScopeGuard([&] {
+        if (childFinished) {
+            return;
+        }
+        if (control[1] >= 0) {
+            char value = 1;
+            (void)::write(control[1], &value, 1);
+            (void)::close(control[1]);
+            control[1] = -1;
+        }
+        int status = 0;
+        (void)::waitpid(child, &status, 0);
+    });
+    const auto handoff = createBoundArtifact(
+        fixture.directory.path(),
+        child,
+        descriptor,
+        QStringLiteral("success"));
+    QVERIFY(!handoff.isEmpty());
+
+    QVERIFY(fixture.integration->openBoundHandoff(
+        handoff,
+        QStringLiteral("bound-memory"),
+        Purpose::ProjectMemory));
+    QCOMPARE(fixture.openedUrls.size(), 1);
+    const auto ownedHandoff = fixture.openedUrls.constFirst().toLocalFile();
+    QVERIFY(ownedHandoff != handoff);
+    QVERIFY(ownedHandoff.startsWith(
+        QStringLiteral("/proc/%1/fd/")
+            .arg(QCoreApplication::applicationPid())));
+    QFile opened(ownedHandoff);
+    QVERIFY(opened.open(QIODevice::ReadOnly));
+    QCOMPARE(opened.readAll(), QByteArrayLiteral("kodosi"));
+    opened.close();
+
+    QCOMPARE(::close(descriptor), 0);
+    descriptor = -1;
+    char value = 1;
+    QCOMPARE(::write(control[1], &value, 1), 1);
+    QCOMPARE(::close(control[1]), 0);
+    control[1] = -1;
+    int status = 0;
+    QCOMPARE(::waitpid(child, &status, 0), child);
+    childFinished = true;
+    QVERIFY(!QFileInfo::exists(handoff));
+
+    QFile retained(ownedHandoff);
+    QVERIFY(retained.open(QIODevice::ReadOnly));
+    QCOMPARE(retained.readAll(), QByteArrayLiteral("kodosi"));
+    retained.close();
+
+    QVERIFY(!fixture.integration->openBoundHandoff(
+        QStringLiteral("/proc/self/fd/0"),
+        QStringLiteral("non-numeric-process"),
+        Purpose::ProjectMemory));
+    QCOMPARE(fixture.integration->errorCode(), ErrorCode::InvalidRequest);
+    const auto missingHandoff = createBoundArtifact(
+        fixture.directory.path(),
+        999999999,
+        0,
+        QStringLiteral("missing"));
+    QVERIFY(!missingHandoff.isEmpty());
+    QVERIFY(!fixture.integration->openBoundHandoff(
+        missingHandoff,
+        QStringLiteral("missing-process"),
+        Purpose::ProjectMemory));
+    QCOMPARE(fixture.integration->errorCode(), ErrorCode::MissingPath);
+    QVERIFY(!fixture.integration->openBoundHandoff(
+        handoff,
+        QStringLiteral("wrong-purpose"),
+        Purpose::SettingsOpenWorkingDirectory));
+    QCOMPARE(fixture.integration->errorCode(), ErrorCode::InvalidRequest);
+    fixture.integration.reset();
+    QVERIFY(!QFileInfo::exists(ownedHandoff));
+
+    Fixture failed;
+    failed.openerResult = false;
+    const auto failedSource =
+        ::open(path.toLocal8Bit().constData(), O_RDONLY | O_CLOEXEC);
+    QVERIFY(failedSource >= 0);
+    const auto closeFailedSource =
+        qScopeGuard([failedSource] { ::close(failedSource); });
+    const auto failedHandoff = createBoundArtifact(
+        failed.directory.path(),
+        QCoreApplication::applicationPid(),
+        failedSource,
+        QStringLiteral("failure"));
+    QVERIFY(!failedHandoff.isEmpty());
+    QVERIFY(!failed.integration->openBoundHandoff(
+        failedHandoff,
+        QStringLiteral("bound-launch-failure"),
+        Purpose::ProjectMemory));
+    QCOMPARE(failed.integration->errorCode(), ErrorCode::LaunchFailed);
+    QCOMPARE(failed.openedUrls.size(), 1);
+    const auto failedOwnedHandoff =
+        failed.openedUrls.constFirst().toLocalFile();
+    QVERIFY(failedOwnedHandoff != failedHandoff);
+    QVERIFY(!QFileInfo::exists(failedOwnedHandoff));
+
+    int pipeDescriptors[2] {-1, -1};
+    QCOMPARE(::pipe(pipeDescriptors), 0);
+    const auto closePipe = qScopeGuard([&pipeDescriptors] {
+        ::close(pipeDescriptors[0]);
+        ::close(pipeDescriptors[1]);
+    });
+    const auto specialHandoff = createBoundArtifact(
+        failed.directory.path(),
+        QCoreApplication::applicationPid(),
+        pipeDescriptors[0],
+        QStringLiteral("special"));
+    QVERIFY(!specialHandoff.isEmpty());
+    QVERIFY(!failed.integration->openBoundHandoff(
+        specialHandoff,
+        QStringLiteral("bound-special-file"),
+        Purpose::ProjectMemory));
+    QCOMPARE(
+        failed.integration->errorCode(),
+        ErrorCode::UnsupportedFileType);
+
+    Fixture directoryFixture;
+    const auto directoryDescriptor = ::open(
+        QFile::encodeName(directoryFixture.directory.path()).constData(),
+        O_RDONLY | O_CLOEXEC | O_DIRECTORY);
+    QVERIFY(directoryDescriptor >= 0);
+    const auto closeDirectoryDescriptor =
+        qScopeGuard([directoryDescriptor] { ::close(directoryDescriptor); });
+    const auto directoryHandoff = createBoundArtifact(
+        directoryFixture.directory.path(),
+        QCoreApplication::applicationPid(),
+        directoryDescriptor,
+        QStringLiteral("directory"));
+    QVERIFY(!directoryHandoff.isEmpty());
+    QVERIFY(directoryFixture.integration->openBoundHandoff(
+        directoryHandoff,
+        QStringLiteral("bound-directory"),
+        Purpose::ExternalSource));
+    const auto ownedDirectory =
+        directoryFixture.openedUrls.constLast().toLocalFile();
+    QVERIFY(QFileInfo(ownedDirectory).isDir());
+#endif
+}
+
+void DesktopFileIntegrationTest::
+    revealsBoundSourcesThroughContainingDirectories()
+{
+    Fixture fixture;
+    const auto path = createFile(
+        fixture.directory.filePath(QStringLiteral("source.json")));
+    QVERIFY(!path.isEmpty());
+
+    QVERIFY(fixture.integration->revealBoundSource(
+        path,
+        QStringLiteral("reveal-source"),
+        Purpose::ExternalSource));
+    QCOMPARE(
+        fixture.openedUrls,
+        QList<QUrl> {QUrl::fromLocalFile(fixture.directory.path())});
+
+    QVERIFY(!fixture.integration->revealBoundSource(
+        path,
+        QStringLiteral("wrong-purpose"),
+        Purpose::ProjectMemory));
+    QCOMPARE(fixture.integration->errorCode(), ErrorCode::InvalidRequest);
+
+    fixture.openerResult = false;
+    QVERIFY(!fixture.integration->revealBoundSource(
+        path,
+        QStringLiteral("reveal-failure"),
+        Purpose::ExternalSource));
+    QCOMPARE(fixture.integration->errorCode(), ErrorCode::LaunchFailed);
 }
 
 QTEST_MAIN(DesktopFileIntegrationTest)

@@ -4,6 +4,7 @@ namespace kodosi::qml {
 
 void configureModelInstances(
     AgentGlobalModel& agentGlobal,
+    AgentAutoModeRulesModel& agentAutoModeRules,
     AgentConversationModel& agentConversation,
     AgentCustomAgentsModel& agentCustomAgents,
     AgentMemoryModel& agentMemory,
@@ -16,10 +17,12 @@ void configureModelInstances(
     DesktopSettings& desktopSettings,
     DesktopStateModel& desktopState,
     DesktopFileIntegration& desktopFiles,
+    ExternalDiscoveryModel& externalDiscovery,
     MissionDirectoryModel& missions,
     MissionDetailModel& missionDetail,
     MissionActions& missionActions,
     PendingPermissionsModel& pendingPermissions,
+    ProjectIntelligenceModel& projectIntelligence,
     PeopleModel& people,
     PeopleActions& peopleActions,
     RuntimeDiagnosticsModel& runtimeDiagnostics,
@@ -34,6 +37,7 @@ void configureModelInstances(
     TerminalSurfaceController& terminalSurfaces)
 {
     AgentGlobalModelForeign::instance = &agentGlobal;
+    AgentAutoModeRulesModelForeign::instance = &agentAutoModeRules;
     AgentConversationModelForeign::instance = &agentConversation;
     AgentCustomAgentsModelForeign::instance = &agentCustomAgents;
     AgentMemoryModelForeign::instance = &agentMemory;
@@ -46,10 +50,12 @@ void configureModelInstances(
     DesktopSettingsForeign::instance = &desktopSettings;
     DesktopStateModelForeign::instance = &desktopState;
     DesktopFileIntegrationForeign::instance = &desktopFiles;
+    ExternalDiscoveryModelForeign::instance = &externalDiscovery;
     MissionDirectoryModelForeign::instance = &missions;
     MissionDetailModelForeign::instance = &missionDetail;
     MissionActionsForeign::instance = &missionActions;
     PendingPermissionsModelForeign::instance = &pendingPermissions;
+    ProjectIntelligenceModelForeign::instance = &projectIntelligence;
     PeopleModelForeign::instance = &people;
     PeopleActionsForeign::instance = &peopleActions;
     RuntimeDiagnosticsModelForeign::instance = &runtimeDiagnostics;

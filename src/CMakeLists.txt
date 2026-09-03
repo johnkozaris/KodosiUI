@@ -12,6 +12,8 @@ qt_add_library(kodosi-runtime-bridge STATIC
     models/AccountContextFence.hpp
     models/AgentConversationModel.cpp
     models/AgentConversationModel.hpp
+    models/AgentAutoModeRulesModel.cpp
+    models/AgentAutoModeRulesModel.hpp
     models/AgentCustomAgentsModel.cpp
     models/AgentCustomAgentsModel.hpp
     models/AgentMemoryModel.cpp
@@ -89,6 +91,10 @@ qt_add_library(kodosi-desktop-integration STATIC
     platform/FreedesktopNotificationDriver.hpp
     platform/NotificationText.cpp
     platform/NotificationText.hpp
+    models/ExternalDiscoveryModel.cpp
+    models/ExternalDiscoveryModel.hpp
+    models/ProjectIntelligenceModel.cpp
+    models/ProjectIntelligenceModel.hpp
 )
 
 target_include_directories(kodosi-desktop-integration
@@ -254,6 +260,7 @@ qt_add_qml_module(kodosi-qt
         qml/Auth/AuthErrorBanner.qml
         qml/AgentIntel/AgentCustomAgentsSurface.qml
         qml/AgentIntel/AgentIntelDrawer.qml
+        qml/AgentIntel/ProjectIntelligenceModal.qml
         qml/Controls/NavTab.qml
         qml/Controls/KButton.qml
         qml/Controls/KBusyIndicator.qml
@@ -287,6 +294,7 @@ qt_add_qml_module(kodosi-qt
         qml/People/PeopleView.qml
         qml/People/MissionDetailView.qml
         qml/Settings/SettingsDrawer.qml
+        qml/Settings/AgentsSettingsSurface.qml
         qml/Theme/KodosiTheme.qml
         qml/Workbench/SessionSidebar.qml
         qml/Workbench/DesktopFileErrorBanner.qml

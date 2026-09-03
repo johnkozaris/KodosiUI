@@ -13,6 +13,8 @@ Button {
     property bool contentLeftAligned: false
     property bool showLeadingDot: false
     property color leadingDotColor: KodosiTheme.textTertiary
+    property bool tonalSelection: false
+    property color iconColor: label.color
     property string secondaryText: ""
     property real secondaryMaximumWidth: 160
 
@@ -49,7 +51,7 @@ Button {
             Layout.preferredWidth: 15
             Layout.preferredHeight: 15
             name: root.iconName
-            color: label.color
+            color: root.iconColor
         }
 
         Rectangle {
@@ -68,7 +70,9 @@ Button {
             color: !root.enabled
                 ? KodosiTheme.disabled
                 : root.selected
-                  ? KodosiTheme.accent
+                  ? (root.tonalSelection
+                     ? KodosiTheme.textPrimary
+                     : KodosiTheme.accent)
                   : root.filled
                   ? (root.variant === "danger"
                      ? KodosiTheme.dangerForeground
@@ -108,7 +112,7 @@ Button {
             Layout.preferredWidth: 14
             Layout.preferredHeight: 14
             name: root.iconName
-            color: label.color
+            color: root.iconColor
         }
     }
 
@@ -140,11 +144,13 @@ Button {
                 ? "transparent"
                 : KodosiTheme.surfaceRaised
         }
-        border.width: root.activeFocus || root.selected || (!root.filled
+        border.width: root.activeFocus
+            || (root.selected && !root.tonalSelection)
+            || (!root.filled
             && root.variant !== "quiet" && root.variant !== "dangerQuiet") ? 1 : 0
         border.color: root.activeFocus
             ? KodosiTheme.focusRing
-            : root.selected
+            : root.selected && !root.tonalSelection
               ? KodosiTheme.accentMuted
               : root.variant === "dangerQuiet"
               ? Qt.rgba(

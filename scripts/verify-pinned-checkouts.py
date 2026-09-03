@@ -39,7 +39,7 @@ def main() -> None:
         fail(str(error))
     print(
         "Pinned runtime and Ghostty package verified clean: "
-        f"upstream={ghostty['upstreamCommit']} "
+        f"linux-upstream={ghostty['linuxUpstreamCommit']} "
         f"archive={ghostty['linuxVtArchiveSha256']}"
     )
 

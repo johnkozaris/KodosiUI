@@ -33,6 +33,7 @@ Item {
     property string shareSessionId
     property string shareSessionName
     signal sessionSelectionRequested(string sessionId, bool openRemote)
+    signal projectIntelligenceRequested(string sessionId)
 
     function selectDelegate(item) {
         if (!item)
@@ -684,6 +685,18 @@ Item {
                                 text: qsTr("Open Project")
                                 onTriggered: root.openSessionProject(
                                     sessionRow.sessionId)
+                            }
+
+                            KMenuItem {
+                                objectName:
+                                    "sidebar.session.projectIntelligence."
+                                    + sessionRow.sessionId
+                                Accessible.id: objectName
+                                text: qsTr("Project Intelligence")
+                                enabled: sessionRow.kind === "local"
+                                onTriggered:
+                                    root.projectIntelligenceRequested(
+                                        sessionRow.sessionId)
                             }
 
                             KMenuItem {

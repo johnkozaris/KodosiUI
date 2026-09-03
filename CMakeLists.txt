@@ -80,7 +80,7 @@ set(KODOSI_QT_SBOM_DIR "${CMAKE_PREFIX_PATH}/sbom")
 if(NOT EXISTS "${KODOSI_RUNTIME_MANIFEST}")
     message(FATAL_ERROR "Kodosi runtime manifest not found: ${KODOSI_RUNTIME_MANIFEST}")
 endif()
-if(NOT EXISTS "${KODOSI_GHOSTTY_ROOT}/Ghostty.ref")
+if(NOT EXISTS "${KODOSI_GHOSTTY_ROOT}/LinuxGhostty.ref")
     message(FATAL_ERROR "Verified kodosi-ghostty checkout not found: ${KODOSI_GHOSTTY_ROOT}")
 endif()
 
@@ -92,6 +92,17 @@ set(
     --runtime-root "${KODOSI_RUNTIME_ROOT}"
     --ghostty-package-root "${KODOSI_GHOSTTY_ROOT}"
 )
+option(
+    KODOSI_ALLOW_DIRTY_RUNTIME
+    "Allow a coordinated uncommitted sibling runtime for local development only"
+    OFF
+)
+if(KODOSI_ALLOW_DIRTY_RUNTIME)
+    set(
+        KODOSI_VERIFY_PINNED_SOURCES_COMMAND
+        "${CMAKE_COMMAND}" -E true
+    )
+endif()
 execute_process(
     COMMAND ${KODOSI_VERIFY_PINNED_SOURCES_COMMAND}
     OUTPUT_QUIET
@@ -301,6 +312,7 @@ install(
     FILES
         "${KODOSI_GHOSTTY_ROOT}/LICENSE"
         "${KODOSI_GHOSTTY_ROOT}/LICENSE-GHOSTTY"
+        "${KODOSI_GHOSTTY_ROOT}/LinuxGhostty.ref"
         "${KODOSI_GHOSTTY_ROOT}/THIRD_PARTY_NOTICES.md"
         "${KODOSI_GHOSTTY_ROOT}/ThirdPartyNotices/linux-vt-inventory.json"
     DESTINATION share/doc/kodosi/ghostty

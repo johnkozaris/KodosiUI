@@ -5,11 +5,11 @@ This package was built from KodosiQT together with the exact dependency pins
 recorded in /usr/share/doc/kodosi/provenance/dependencies.lock.json:
 
 - Qt 6.11.2
-- Kodosi runtime commit 698fe24f3c5137904128085a786a1ce777c6e153
-  (FFI ABI 5, desktop protocol 36)
+- Kodosi runtime commit b1970e5f103fad1a52f73d686ba2b5d98cb9ed4d
+  (FFI ABI 5, desktop protocol 37)
 - kodosi-ghostty package commit
-  77ebed9ed18de493296c5d4c2afc39b1d6d52e40
-- Ghostty commit 8af6897c0afc63037a8a3efee4162a380e3a4572
+  20b965e6f88d6a8c81d33a671bfe9b90f296ba2b
+- LinuxGhostty.ref commit 8af6897c0afc63037a8a3efee4162a380e3a4572
 
 The GUI statically incorporates the pinned Linux libghostty-vt archive. Its
 exact Linux dependency closure is recorded under

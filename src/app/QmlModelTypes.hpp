@@ -1,10 +1,12 @@
 #pragma once
 
 #include "models/AgentConversationModel.hpp"
+#include "models/AgentAutoModeRulesModel.hpp"
 #include "models/AgentCustomAgentsModel.hpp"
 #include "models/AgentGlobalModel.hpp"
 #include "models/AgentMemoryModel.hpp"
 #include "models/AgentSessionIntelModel.hpp"
+#include "models/ExternalDiscoveryModel.hpp"
 #include "models/AttentionModel.hpp"
 #include "models/AuthStateModel.hpp"
 #include "models/AuthActions.hpp"
@@ -16,6 +18,7 @@
 #include "models/MissionDetailModel.hpp"
 #include "models/MissionActions.hpp"
 #include "models/PendingPermissionsModel.hpp"
+#include "models/ProjectIntelligenceModel.hpp"
 #include "models/PeopleModel.hpp"
 #include "models/PeopleActions.hpp"
 #include "models/RuntimeDiagnosticsModel.hpp"
@@ -69,6 +72,22 @@ public:
     }
 };
 
+struct AgentAutoModeRulesModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::AgentAutoModeRulesModel)
+    QML_NAMED_ELEMENT(AgentAutoModeRules)
+    QML_SINGLETON
+
+public:
+    inline static kodosi::AgentAutoModeRulesModel* instance = nullptr;
+    static kodosi::AgentAutoModeRulesModel* create(
+        QQmlEngine* engine,
+        QJSEngine*)
+    {
+        return singleton(instance, engine);
+    }
+};
+
 struct AgentCustomAgentsModelForeign {
     Q_GADGET
     QML_FOREIGN(kodosi::AgentCustomAgentsModel)
@@ -110,6 +129,44 @@ struct AgentSessionIntelModelForeign {
 public:
     inline static kodosi::AgentSessionIntelModel* instance = nullptr;
     static kodosi::AgentSessionIntelModel* create(
+        QQmlEngine* engine,
+        QJSEngine*)
+    {
+        return singleton(instance, engine);
+    }
+};
+
+struct PresentationListModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::PresentationListModel)
+    QML_ANONYMOUS
+};
+
+struct ProjectIntelligenceModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::ProjectIntelligenceModel)
+    QML_NAMED_ELEMENT(ProjectIntelligence)
+    QML_SINGLETON
+
+public:
+    inline static kodosi::ProjectIntelligenceModel* instance = nullptr;
+    static kodosi::ProjectIntelligenceModel* create(
+        QQmlEngine* engine,
+        QJSEngine*)
+    {
+        return singleton(instance, engine);
+    }
+};
+
+struct ExternalDiscoveryModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::ExternalDiscoveryModel)
+    QML_NAMED_ELEMENT(ExternalDiscovery)
+    QML_SINGLETON
+
+public:
+    inline static kodosi::ExternalDiscoveryModel* instance = nullptr;
+    static kodosi::ExternalDiscoveryModel* create(
         QQmlEngine* engine,
         QJSEngine*)
     {
@@ -535,6 +592,7 @@ struct TerminalViewForeign {
 
 void configureModelInstances(
     AgentGlobalModel& agentGlobal,
+    AgentAutoModeRulesModel& agentAutoModeRules,
     AgentConversationModel& agentConversation,
     AgentCustomAgentsModel& agentCustomAgents,
     AgentMemoryModel& agentMemory,
@@ -547,10 +605,12 @@ void configureModelInstances(
     DesktopSettings& desktopSettings,
     DesktopStateModel& desktopState,
     DesktopFileIntegration& desktopFiles,
+    ExternalDiscoveryModel& externalDiscovery,
     MissionDirectoryModel& missions,
     MissionDetailModel& missionDetail,
     MissionActions& missionActions,
     PendingPermissionsModel& pendingPermissions,
+    ProjectIntelligenceModel& projectIntelligence,
     PeopleModel& people,
     PeopleActions& peopleActions,
     RuntimeDiagnosticsModel& runtimeDiagnostics,

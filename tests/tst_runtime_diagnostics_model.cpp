@@ -20,7 +20,7 @@ void RuntimeDiagnosticsModelTest::tracksHeartbeatErrorsAndHealth()
 {
     kodosi::RuntimeBridge runtime;
     kodosi::RuntimeDiagnosticsModel model(runtime);
-    QCOMPARE(model.protocolVersion(), 36U);
+    QCOMPARE(model.protocolVersion(), 37U);
     QCOMPARE(model.runtimeContract(), QStringLiteral("desktop-runtime"));
     QVERIFY(!model.systemReady());
     QVERIFY(!model.hasRuntimeHealth());

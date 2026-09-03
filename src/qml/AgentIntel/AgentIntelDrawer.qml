@@ -9,6 +9,8 @@ KPopover {
     id: root
     objectName: "panel.agentIntel"
 
+    signal openProjectIntelRequested(string sessionId)
+
     property string sessionId
     property string sessionName
     property string approvalIdentityToken
@@ -222,6 +224,17 @@ KPopover {
                         : root.intel.lifecycle === "failed"
                           ? KodosiTheme.danger
                           : KodosiTheme.warning
+                }
+
+                KButton {
+                    objectName: "panel.agentIntel.project"
+                    Accessible.id: objectName
+                    text: qsTr("Project")
+                    variant: "quiet"
+                    iconName: "folder"
+                    enabled: root.sessionId.length > 0
+                    Accessible.name: qsTr("Open Project Intelligence")
+                    onClicked: root.openProjectIntelRequested(root.sessionId)
                 }
 
                 KButton {

@@ -135,6 +135,46 @@ print(matches[0])
 ' "$1" "$2"
 }
 
+start_synthetic_app() {
+    local stem=$1
+    shift
+    stop_current_app
+    XDG_CONFIG_HOME="$config_dir" \
+        KODOSI_DATA_ROOT="$data_root" \
+        KODOSI_PRODUCTION_DATA_ROOT="$production_data_root" \
+        QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
+        "$app" "$@" >"$artifact_dir/$stem.log" 2>&1 &
+    app_pid=$!
+
+    local ready=false
+    for _ in $(seq 1 50); do
+        if "$probe" apps >"$artifact_dir/$stem-apps.json" 2>/dev/null; then
+            app_handle=$(
+                app_handle_for_pid "$app_pid" "Kodosi" \
+                    <"$artifact_dir/$stem-apps.json" || true
+            )
+        fi
+        if [[ -n "$app_handle" ]]; then
+            ready=true
+            break
+        fi
+        kill -0 "$app_pid"
+        sleep 0.1
+    done
+    if [[ "$ready" != true ]]; then
+        echo "$stem did not become visible through AT-SPI." >&2
+        return 4
+    fi
+    sleep 0.5
+}
+
+parity_only=${KODOSI_UI_PROBE_AGENT_PARITY_ONLY:-0}
+if [[ "$parity_only" != 0 && "$parity_only" != 1 ]]; then
+    echo "KODOSI_UI_PROBE_AGENT_PARITY_ONLY must be 0 or 1." >&2
+    exit 2
+fi
+
+if [[ "$parity_only" != 1 ]]; then
 XDG_CONFIG_HOME="$config_dir" \
     KODOSI_DATA_ROOT="$data_root" \
     KODOSI_PRODUCTION_DATA_ROOT="$production_data_root" \
@@ -464,6 +504,340 @@ if [[ "${KODOSI_UI_PROBE_SKIP_INTERACTIVE_PORTALS:-0}" != 1 \
         && "$screenshot_status" -ne 10 ]]; then
         exit "$screenshot_status"
     fi
+fi
+
+fi
+
+stop_current_app
+
+start_synthetic_app \
+    project-intel-wide \
+    --ui-probe-project-intel-populated \
+    --window-size 1240x800
+"$probe" wait --app "$app_handle" id=panel.projectIntel \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/project-intel-wide-panel.json"
+python3 -c '
+import json, sys
+bounds = json.load(sys.stdin)["element"]["bounds"]
+if not 1160 <= bounds["width"] <= 1240:
+    raise SystemExit("wide Project Intelligence does not use the window width")
+if not 720 <= bounds["height"] <= 800:
+    raise SystemExit("wide Project Intelligence does not use the window height")
+' <"$artifact_dir/project-intel-wide-panel.json"
+"$probe" find --app "$app_handle" \
+    --id panel.projectIntel.source.selected \
+    >"$artifact_dir/project-intel-source-selected.json"
+project_source_handle=$(
+    json_value matches.0.handle \
+        <"$artifact_dir/project-intel-source-selected.json"
+)
+"$probe" inspect "$project_source_handle" \
+    >"$artifact_dir/project-intel-source-focus.json"
+python3 -c '
+import json, sys
+element = json.load(sys.stdin)["element"]
+states = set(element.get("states", []))
+if "focused" not in states:
+    raise SystemExit("selected Project Intelligence source button lacks focus")
+if "selected" not in states:
+    raise SystemExit("selected Project Intelligence source lacks selected state")
+' <"$artifact_dir/project-intel-source-focus.json"
+
+for tab in sessions memory servers agents; do
+    "$probe" find --app "$app_handle" \
+        --id "panel.projectIntel.tab.$tab" \
+        >"$artifact_dir/project-intel-tab-$tab.json"
+    tab_handle=$(
+        json_value matches.0.handle \
+            <"$artifact_dir/project-intel-tab-$tab.json"
+    )
+    "$probe" click "$tab_handle" \
+        >"$artifact_dir/project-intel-tab-$tab-click.json"
+    "$probe" inspect "$tab_handle" \
+        >"$artifact_dir/project-intel-tab-$tab-inspect.json"
+    python3 -c '
+import json, sys
+if "selected" not in json.load(sys.stdin)["element"].get("states", []):
+    raise SystemExit("Project Intelligence tab is not selected")
+' <"$artifact_dir/project-intel-tab-$tab-inspect.json"
+    case "$tab" in
+        sessions) pane_id=panel.projectIntel.sessions.list ;;
+        memory) pane_id=panel.projectIntel.memory.list ;;
+        servers) pane_id=panel.projectIntel.servers.list ;;
+        agents) pane_id=panel.projectIntel.agents.list ;;
+    esac
+    "$probe" wait --app "$app_handle" --id "$pane_id" \
+        --state showing --timeout-ms 5000 \
+        >"$artifact_dir/project-intel-pane-$tab.json"
+done
+"$probe" find --app "$app_handle" \
+    --id panel.projectIntel.agent.open \
+    >"$artifact_dir/project-intel-agent-open.json"
+"$probe" find --app "$app_handle" \
+    --id panel.projectIntel.agents.detail.parseErrors \
+    >"$artifact_dir/project-intel-agent-errors.json"
+"$probe" find --app "$app_handle" \
+    --id panel.projectIntel.tab.memory \
+    >"$artifact_dir/project-intel-memory-tab.json"
+project_memory_tab_handle=$(
+    json_value matches.0.handle \
+        <"$artifact_dir/project-intel-memory-tab.json"
+)
+"$probe" click "$project_memory_tab_handle" \
+    >"$artifact_dir/project-intel-memory-tab-click.json"
+"$probe" find --app "$app_handle" \
+    --id panel.projectIntel.memory.open \
+    >"$artifact_dir/project-intel-memory-open.json"
+"$probe" find --app "$app_handle" \
+    --id panel.projectIntel.memory.copy \
+    >"$artifact_dir/project-intel-memory-copy.json"
+
+start_synthetic_app \
+    project-intel-empty \
+    --ui-probe-project-intel-empty \
+    --window-size 820x560
+"$probe" wait --app "$app_handle" id=panel.projectIntel \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/project-intel-empty-panel.json"
+python3 -c '
+import json, sys
+bounds = json.load(sys.stdin)["element"]["bounds"]
+if bounds["width"] > 820 or bounds["height"] > 560:
+    raise SystemExit("compact Project Intelligence exceeds the app window")
+' <"$artifact_dir/project-intel-empty-panel.json"
+for pair in \
+    sessions:panel.projectIntel.sessions.empty \
+    memory:panel.projectIntel.memory.empty \
+    servers:panel.projectIntel.servers.empty \
+    agents:panel.projectIntel.agents.empty; do
+    tab=${pair%%:*}
+    state_id=${pair#*:}
+    "$probe" find --app "$app_handle" \
+        --id "panel.projectIntel.tab.$tab" \
+        >"$artifact_dir/project-intel-empty-tab-$tab.json"
+    tab_handle=$(
+        json_value matches.0.handle \
+            <"$artifact_dir/project-intel-empty-tab-$tab.json"
+    )
+    "$probe" click "$tab_handle" \
+        >"$artifact_dir/project-intel-empty-tab-$tab-click.json"
+    "$probe" wait --app "$app_handle" --id "$state_id" \
+        --state showing --timeout-ms 5000 \
+        >"$artifact_dir/project-intel-empty-$tab.json"
+done
+
+start_synthetic_app \
+    project-intel-archive \
+    --ui-probe-project-intel-archive \
+    --window-size 820x560
+"$probe" wait --app "$app_handle" id=panel.projectIntel \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/project-intel-archive-panel.json"
+for pair in \
+    sessions:panel.projectIntel.sessions.empty \
+    servers:panel.projectIntel.servers.gate \
+    agents:panel.projectIntel.agents.gate; do
+    tab=${pair%%:*}
+    state_id=${pair#*:}
+    "$probe" find --app "$app_handle" \
+        --id "panel.projectIntel.tab.$tab" \
+        >"$artifact_dir/project-intel-archive-tab-$tab.json"
+    tab_handle=$(
+        json_value matches.0.handle \
+            <"$artifact_dir/project-intel-archive-tab-$tab.json"
+    )
+    "$probe" click "$tab_handle" \
+        >"$artifact_dir/project-intel-archive-tab-$tab-click.json"
+    "$probe" wait --app "$app_handle" --id "$state_id" \
+        --state showing --timeout-ms 5000 \
+        >"$artifact_dir/project-intel-archive-$tab.json"
+done
+python3 -c '
+import json, sys
+sessions = json.load(open(sys.argv[1]))["element"].get("name", "")
+servers = json.load(open(sys.argv[2]))["element"].get("name", "")
+agents = json.load(open(sys.argv[3]))["element"].get("name", "")
+if "No archived sessions for this project" not in sessions:
+    raise SystemExit("archive sessions empty copy drifted")
+if "MCP configuration requires an active project" not in servers:
+    raise SystemExit("archive MCP gate copy drifted")
+if "Agents browser is only available for active projects." not in agents:
+    raise SystemExit("archive Agents gate copy drifted")
+' "$artifact_dir/project-intel-archive-sessions.json" \
+    "$artifact_dir/project-intel-archive-servers.json" \
+    "$artifact_dir/project-intel-archive-agents.json"
+
+start_synthetic_app \
+    agent-settings-parity \
+    --ui-probe-agent-settings-populated \
+    --window-size 820x560
+"$probe" wait --app "$app_handle" id=panel.settings \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/agent-settings-panel.json"
+python3 -c '
+import json, sys
+bounds = json.load(sys.stdin)["element"]["bounds"]
+if bounds["width"] > 820 or bounds["height"] > 560:
+    raise SystemExit("compact Agents settings exceeds the app window")
+' <"$artifact_dir/agent-settings-panel.json"
+"$probe" wait --app "$app_handle" \
+    id=panel.settings.scroll --state showing --timeout-ms 5000 \
+    >"$artifact_dir/agent-settings-compact-scroll.json"
+"$probe" wait --app "$app_handle" \
+    id=panel.settings.agents.scope --state showing --timeout-ms 5000 \
+    >"$artifact_dir/agent-settings-compact-scope.json"
+"$probe" wait --app "$app_handle" \
+    id=panel.settings.apply --state showing --timeout-ms 5000 \
+    >"$artifact_dir/agent-settings-compact-footer-action.json"
+python3 -c '
+import json, sys
+panel = json.load(open(sys.argv[1]))["element"]["bounds"]
+scroll = json.load(open(sys.argv[2]))["element"]["bounds"]
+scope = json.load(open(sys.argv[3]))["element"]["bounds"]
+apply = json.load(open(sys.argv[4]))["element"]["bounds"]
+footer_top = panel["y"] + panel["height"] - 66
+if scroll["y"] + scroll["height"] > footer_top:
+    raise SystemExit("compact settings scroll viewport overlaps the 66px footer")
+if scope["y"] < scroll["y"] or scope["y"] + scope["height"] > scroll["y"] + scroll["height"]:
+    raise SystemExit("compact settings scope control is not fully visible on first paint")
+if apply["y"] < footer_top:
+    raise SystemExit("compact Apply & Save action escaped the footer")
+' "$artifact_dir/agent-settings-panel.json" \
+  "$artifact_dir/agent-settings-compact-scroll.json" \
+  "$artifact_dir/agent-settings-compact-scope.json" \
+  "$artifact_dir/agent-settings-compact-footer-action.json"
+"$probe" find --app "$app_handle" \
+    --id panel.settings.autoMode.allow \
+    >"$artifact_dir/agent-settings-auto-allow.json"
+auto_allow_handle=$(
+    json_value matches.0.handle \
+        <"$artifact_dir/agent-settings-auto-allow.json"
+)
+"$probe" focus "$auto_allow_handle" \
+    >"$artifact_dir/agent-settings-auto-allow-focus.json"
+"$probe" set-text "$auto_allow_handle" --text "unsaved probe draft" \
+    >"$artifact_dir/agent-settings-auto-allow-set.json"
+"$probe" find --app "$app_handle" \
+    --id panel.settings.autoMode.reload \
+    >"$artifact_dir/agent-settings-auto-reload.json"
+auto_reload_handle=$(
+    json_value matches.0.handle \
+        <"$artifact_dir/agent-settings-auto-reload.json"
+)
+"$probe" click "$auto_reload_handle" \
+    >"$artifact_dir/agent-settings-auto-reload-click.json"
+"$probe" wait --app "$app_handle" \
+    id=panel.settings.autoMode.reload.cancel \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/agent-settings-auto-reload-cancel.json"
+auto_cancel_handle=$(
+    json_value element.handle \
+        <"$artifact_dir/agent-settings-auto-reload-cancel.json"
+)
+"$probe" inspect "$auto_cancel_handle" \
+    >"$artifact_dir/agent-settings-auto-reload-cancel-inspect.json"
+python3 -c '
+import json, sys
+if "focused" not in json.load(sys.stdin)["element"].get("states", []):
+    raise SystemExit("Auto Mode replacement confirmation did not isolate focus")
+' <"$artifact_dir/agent-settings-auto-reload-cancel-inspect.json"
+"$probe" click "$auto_cancel_handle" \
+    >"$artifact_dir/agent-settings-auto-reload-cancel-click.json"
+"$probe" inspect "$auto_allow_handle" \
+    >"$artifact_dir/agent-settings-auto-allow-preserved.json"
+test "$(
+    json_value element.text.content \
+        <"$artifact_dir/agent-settings-auto-allow-preserved.json"
+)" = "unsaved probe draft"
+
+"$probe" find --app "$app_handle" --name "Copy Source Path" \
+    >"$artifact_dir/agent-settings-external-copy.json"
+external_copy_handle=$(
+    python3 -c '
+import json, sys
+matches = [
+    item for item in json.load(sys.stdin)["matches"]
+    if item.get("id", "").startswith("panel.settings.external.copy.")
+]
+if not matches:
+    raise SystemExit("external Copy Source Path action is missing")
+print(matches[0]["handle"])
+' <"$artifact_dir/agent-settings-external-copy.json"
+)
+"$probe" find --app "$app_handle" --name Open \
+    >"$artifact_dir/agent-settings-external-open.json"
+"$probe" find --app "$app_handle" --name "Reveal in File Manager" \
+    >"$artifact_dir/agent-settings-external-reveal.json"
+"$probe" focus "$external_copy_handle" \
+    >"$artifact_dir/agent-settings-external-copy-focus.json"
+sleep 0.1
+"$probe" click "$external_copy_handle" \
+    >"$artifact_dir/agent-settings-external-copy-click.json"
+"$probe" wait --app "$app_handle" \
+    id=panel.settings.externalDiscovery.status \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/agent-settings-external-status.json"
+if "$probe" inspect "$external_copy_handle" \
+    >"$artifact_dir/agent-settings-external-stale.json" 2>&1; then
+    python3 -c '
+import json, sys
+states = json.load(sys.stdin)["element"].get("states", [])
+if "showing" in states:
+    raise SystemExit("consumed external action handle remained actionable")
+' <"$artifact_dir/agent-settings-external-stale.json"
+fi
+
+"$probe" find --app "$app_handle" \
+    --id panel.settings.agents.openProjectBrowser \
+    >"$artifact_dir/agent-settings-open-project.json"
+settings_project_handle=$(
+    json_value matches.0.handle \
+        <"$artifact_dir/agent-settings-open-project.json"
+)
+"$probe" click "$settings_project_handle" \
+    >"$artifact_dir/agent-settings-open-project-click.json"
+"$probe" wait --app "$app_handle" id=panel.projectIntel \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/agent-settings-project-transfer.json"
+
+start_synthetic_app \
+    agent-settings-wide \
+    --ui-probe-agent-settings-populated \
+    --window-size 1240x800
+"$probe" wait --app "$app_handle" id=panel.settings \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/agent-settings-wide-panel.json"
+"$probe" wait --app "$app_handle" \
+    id=panel.settings.scroll --state showing --timeout-ms 5000 \
+    >"$artifact_dir/agent-settings-wide-scroll.json"
+"$probe" wait --app "$app_handle" \
+    id=panel.settings.agents.scope --state showing --timeout-ms 5000 \
+    >"$artifact_dir/agent-settings-wide-scope.json"
+"$probe" wait --app "$app_handle" \
+    id=panel.settings.apply --state showing --timeout-ms 5000 \
+    >"$artifact_dir/agent-settings-wide-footer-action.json"
+python3 -c '
+import json, sys
+panel = json.load(open(sys.argv[1]))["element"]["bounds"]
+scroll = json.load(open(sys.argv[2]))["element"]["bounds"]
+scope = json.load(open(sys.argv[3]))["element"]["bounds"]
+apply = json.load(open(sys.argv[4]))["element"]["bounds"]
+footer_top = panel["y"] + panel["height"] - 66
+if scroll["y"] + scroll["height"] > footer_top:
+    raise SystemExit("wide settings scroll viewport overlaps the 66px footer")
+if scope["y"] < scroll["y"] or scope["y"] + scope["height"] > scroll["y"] + scroll["height"]:
+    raise SystemExit("wide settings scope control is not fully visible on first paint")
+if apply["y"] < footer_top:
+    raise SystemExit("wide Apply & Save action escaped the footer")
+' "$artifact_dir/agent-settings-wide-panel.json" \
+  "$artifact_dir/agent-settings-wide-scroll.json" \
+  "$artifact_dir/agent-settings-wide-scope.json" \
+  "$artifact_dir/agent-settings-wide-footer-action.json"
+
+if [[ "$parity_only" == 1 ]]; then
+    echo "kodosi-ui-probe agent parity smoke passed (PID $app_pid)"
+    exit 0
 fi
 
 stop_current_app

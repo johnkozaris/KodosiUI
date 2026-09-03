@@ -25,7 +25,7 @@ dependencies, runtime integration, or feature coverage.
   models.
 - Semantic checkpoint installation is synchronous and must finish before raw
   continuation is admitted.
-- Preserve FFI ABI 5 and desktop protocol 36.
+- Preserve FFI ABI 5 and desktop protocol 37.
 - Add a shared Rust projection interface only in `../Kodosi`, additively, after
   shadow parity against Swift. Do not invent a Qt-only projection authority.
 - Use stable IDs plus account/session incarnation identity. Never use a QML row
@@ -34,6 +34,9 @@ dependencies, runtime integration, or feature coverage.
 ## Dependencies
 
 - Build with the exact versions in `dependencies.lock.json`.
+- The shipped Linux VT source authority is
+  `../kodosi-ghostty/LinuxGhostty.ref`; never infer it from the macOS pin or a
+  compatibility alias.
 - Before changing a framework or library, review its latest release and the
   preceding 6-7 months of primary release notes.
 - Do not add direct dependencies from obscure or low-confidence projects or

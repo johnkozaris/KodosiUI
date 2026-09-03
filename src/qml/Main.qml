@@ -15,6 +15,7 @@ ApplicationWindow {
         settingsDrawer.opened
         || attentionPanel.opened
         || agentIntelDrawer.opened
+        || projectIntelModal.opened
         || diagnosticsDrawer.opened
         || authOverlay.visible
 
@@ -77,6 +78,34 @@ ApplicationWindow {
             sessionId,
             session.name,
             approvalIdentityToken || "")
+        return true
+    }
+
+    function openProjectIntelForSession(sessionId) {
+        if (sessionId.length === 0)
+            return false
+        attentionPanel.close()
+        settingsDrawer.close()
+        diagnosticsDrawer.close()
+        agentIntelDrawer.close()
+        projectIntelModal.openForSession(sessionId)
+        return true
+    }
+
+    function openProjectIntelSource(sourceId) {
+        attentionPanel.close()
+        settingsDrawer.close()
+        diagnosticsDrawer.close()
+        agentIntelDrawer.close()
+        projectIntelModal.openForSource(sourceId)
+        return true
+    }
+
+    function openAgentSettings() {
+        attentionPanel.close()
+        agentIntelDrawer.close()
+        diagnosticsDrawer.close()
+        settingsDrawer.openAgents()
         return true
     }
 
@@ -377,6 +406,8 @@ ApplicationWindow {
                     Layout.preferredWidth: KodosiTheme.sidebarWidth
                     onSessionSelectionRequested: (sessionId, openRemote) =>
                         window.requestSessionSelection(sessionId, openRemote)
+                    onProjectIntelligenceRequested: sessionId =>
+                        window.openProjectIntelForSession(sessionId)
                 }
 
                 Rectangle {
@@ -555,10 +586,23 @@ ApplicationWindow {
                     "")
         }
         onOpenDiagnosticsRequested: window.toggleDiagnostics()
+        onOpenProjectIntelRequested: function(sourceId) {
+            settingsDrawer.close()
+            if (sourceId.length > 0)
+                projectIntelModal.openForSource(sourceId)
+            else
+                projectIntelModal.openBrowser()
+        }
     }
 
     AgentIntelDrawer {
         id: agentIntelDrawer
+        onOpenProjectIntelRequested:
+            window.openProjectIntelForSession(sessionId)
+    }
+
+    ProjectIntelligenceModal {
+        id: projectIntelModal
     }
 
     DiagnosticsDrawer {

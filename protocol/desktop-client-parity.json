@@ -2,16 +2,16 @@
   "schemaVersion": 1,
   "baseline": {
     "runtimeRepository": "johnkozaris/Kodosi",
-    "runtimeCommit": "698fe24f3c5137904128085a786a1ce777c6e153",
+    "runtimeCommit": "b1970e5f103fad1a52f73d686ba2b5d98cb9ed4d",
     "swiftRepository": "johnkozaris/kodosiSwift",
-    "swiftCommit": "5862580428b5219675c36e6e5c1cf875e94eedac",
+    "swiftCommit": "b0363e80fa47360943211c860fdfa0cd96c099d0",
     "ffiAbiVersion": 5,
-    "desktopProtocolVersion": 36
+    "desktopProtocolVersion": 37
   },
   "authorities": {
     "desktopRuntime": {
-      "path": "protocol/versions/v36.json",
-      "sha256": "cd5a3d5db53cbc5bf7c73c2160899058e6f9d1c3c0979c8677884e46d85928a6"
+      "path": "protocol/versions/v37.json",
+      "sha256": "a07322d89b07aee5cf3574f8f15a50cf157fb056386f861b98c472679b5b560a"
     },
     "roomInput": {
       "path": "protocol/room-input-rules.json",
@@ -70,6 +70,10 @@
     {"id": "agent.intel", "owner": "rust", "qtRole": "presentation"},
     {"id": "agent.project-memory", "owner": "rust", "qtRole": "typed-adapter"},
     {"id": "agent.custom-agents", "owner": "rust", "qtRole": "typed-adapter"},
+    {"id": "agent.project-intelligence", "owner": "rust", "qtRole": "typed-adapter"},
+    {"id": "agent.settings-tree", "owner": "rust", "qtRole": "typed-adapter"},
+    {"id": "agent.auto-mode-rules", "owner": "rust", "qtRole": "typed-adapter"},
+    {"id": "agent.external-discovery", "owner": "rust", "qtRole": "typed-adapter"},
     {"id": "permissions.snapshot", "owner": "rust", "qtRole": "presentation"},
     {"id": "permissions.decision", "owner": "rust", "qtRole": "presentation"},
     {"id": "attention", "owner": "parity-with-swift", "qtRole": "presentation"},

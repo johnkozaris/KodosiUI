@@ -363,6 +363,9 @@ AgentMcpModel* AgentGlobalModel::mcpServers() noexcept
 
 bool AgentGlobalModel::refresh(const QString& cwd)
 {
+    if (m_syntheticFixture) {
+        return true;
+    }
     constexpr quint64 maximumExactJsonInteger = 9'007'199'254'740'991ULL;
     if (m_nextGeneration >= maximumExactJsonInteger) {
         return false;
@@ -414,6 +417,98 @@ bool AgentGlobalModel::refresh(const QString& cwd)
         failExpiredRefreshes();
     }
     return false;
+}
+
+void AgentGlobalModel::installSyntheticFixture()
+{
+    m_syntheticFixture = true;
+    m_refreshes.clear();
+    m_timeoutTimer.stop();
+
+    beginResetModel();
+    m_statuses = {
+        {
+            .vendor = QStringLiteral("claude"),
+            .cwd = {},
+            .version = QStringLiteral("2.1.0"),
+            .error = {},
+            .notices = {},
+            .pluginCount = 2,
+            .skillCount = 3,
+            .agentCount = 1,
+            .mcpCount = 1,
+            .refreshState = RefreshState::Loaded,
+        },
+        {
+            .vendor = QStringLiteral("copilot"),
+            .cwd = {},
+            .version = QStringLiteral("0.0.400"),
+            .error = {},
+            .notices = {},
+            .pluginCount = 0,
+            .skillCount = 0,
+            .agentCount = 1,
+            .mcpCount = 1,
+            .refreshState = RefreshState::Loaded,
+        },
+    };
+    endResetModel();
+    emit countChanged();
+
+    m_catalog.replace(QStringLiteral("claude"), {}, {
+        {
+            .vendor = QStringLiteral("claude"),
+            .cwd = {},
+            .kind = AgentCatalogModel::Kind::Plugin,
+            .name = QStringLiteral("code-review"),
+            .source = QStringLiteral("installed"),
+            .scope = QStringLiteral("user"),
+            .sourcePath = {},
+            .tools = {},
+        },
+        {
+            .vendor = QStringLiteral("claude"),
+            .cwd = {},
+            .kind = AgentCatalogModel::Kind::Skill,
+            .name = QStringLiteral("validate-api"),
+            .source = QStringLiteral("loaded"),
+            .scope = QStringLiteral("user"),
+            .sourcePath = {},
+            .tools = {},
+        },
+        {
+            .vendor = QStringLiteral("claude"),
+            .cwd = {},
+            .kind = AgentCatalogModel::Kind::Agent,
+            .name = QStringLiteral("security-reviewer"),
+            .source = QStringLiteral("project"),
+            .scope = QStringLiteral("project"),
+            .sourcePath = {},
+            .tools = {QStringLiteral("Read"), QStringLiteral("Grep")},
+        },
+    });
+    m_mcpServers.replaceEmbedded(QStringLiteral("claude"), {}, {
+        {
+            .vendor = QStringLiteral("claude"),
+            .cwd = {},
+            .scope = QStringLiteral("project"),
+            .name = QStringLiteral("github"),
+            .sourcePath = {},
+            .healthKind = QStringLiteral("healthy"),
+            .healthReason = {},
+        },
+    });
+    m_mcpServers.replaceEmbedded(QStringLiteral("copilot"), {}, {
+        {
+            .vendor = QStringLiteral("copilot"),
+            .cwd = {},
+            .scope = QStringLiteral("user"),
+            .name = QStringLiteral("filesystem"),
+            .sourcePath = {},
+            .healthKind = QStringLiteral("healthy"),
+            .healthReason = {},
+        },
+    });
 }
 
 void AgentGlobalModel::ingestAgentGlobalEvent(QByteArray json)

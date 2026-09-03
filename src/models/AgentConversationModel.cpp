@@ -325,6 +325,28 @@ bool AgentConversationModel::inspect(const QString& sessionId)
     return beginResolve();
 }
 
+bool AgentConversationModel::inspect(
+    const QString& sessionId,
+    const QString& expectedRuntimeIncarnationId)
+{
+    const auto context = m_sessions.conversationContext(sessionId);
+    if (expectedRuntimeIncarnationId.isEmpty()
+        || !canonicalUuidV7(expectedRuntimeIncarnationId)
+        || !context
+        || context->kind != QStringLiteral("local")
+        || context->incarnationId != expectedRuntimeIncarnationId) {
+        ++m_selectionGeneration;
+        clearAuthority(true);
+        setState(
+            false,
+            QStringLiteral(
+                "The selected session incarnation is no longer current."),
+            {});
+        return false;
+    }
+    return inspect(sessionId);
+}
+
 void AgentConversationModel::close()
 {
     ++m_selectionGeneration;

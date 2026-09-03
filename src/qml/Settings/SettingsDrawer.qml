@@ -12,6 +12,7 @@ KPopover {
     signal openDevicesRequested()
     signal openAgentIntelRequested()
     signal openDiagnosticsRequested()
+    signal openProjectIntelRequested(string sourceId)
 
     property string selectedCategory: "terminal"
     property bool agentIntelAvailable: false
@@ -19,6 +20,8 @@ KPopover {
     property string directoryPickerRequestId
     property string openPathRequestId
     property string desktopFileError
+    property bool transferringProjectIntel: false
+    property bool agentsVisitActive: false
     readonly property bool compact: width < 760 || height < 580
     readonly property var categories: [
         {
@@ -72,6 +75,65 @@ KPopover {
         cursorBlink.checked = Models.DesktopSettings.cursorBlink
     }
 
+    function openAgents() {
+        selectedCategory = "agents"
+        resetDraft()
+        open()
+    }
+
+    function acquireAgentsVisit() {
+        if (!opened || selectedCategory !== "agents"
+                || agentsVisitActive)
+            return
+        agentsVisitActive = true
+        Models.ProjectIntelligence.refreshSources(false)
+        Models.AgentAutoModeRules.refresh(false)
+        Models.ExternalDiscovery.refresh(false)
+        Models.AgentGlobal.refresh()
+    }
+
+    function releaseAgentsVisit(preserveProjectIntel) {
+        if (!agentsVisitActive)
+            return
+        agentsVisitActive = false
+        Models.AgentAutoModeRules.close()
+        Models.ExternalDiscovery.close()
+        if (!preserveProjectIntel)
+            Models.ProjectIntelligence.closeSource()
+    }
+
+    function focusCategory(index) {
+        const bounded = Math.max(
+            0,
+            Math.min(categories.length - 1, index))
+        const button = categoryRepeater.itemAt(bounded)
+        if (!button)
+            return
+        selectedCategory = categories[bounded].key
+        button.forceActiveFocus(Qt.TabFocusReason)
+    }
+
+    function keepSettingControlVisible(item) {
+        const viewport = scrollView.contentItem as Flickable
+        if (!opened || !item || !viewport)
+            return
+        const margin = 12
+        const position = item.mapToItem(scrollView, 0, 0)
+        let nextY = viewport.contentY
+        if (position.y < margin)
+            nextY += position.y - margin
+        else if (position.y + item.height
+                > scrollView.availableHeight - margin)
+            nextY += position.y + item.height
+                - scrollView.availableHeight + margin
+        const maximum = Math.max(
+            0,
+            viewport.contentHeight - scrollView.availableHeight)
+        viewport.contentY = Math.max(
+            0,
+            Math.min(maximum, nextY))
+    }
+
     function resetDraft() {
         resetTerminalDraft()
         toolApprovalAlerts.checked =
@@ -122,9 +184,19 @@ KPopover {
     }
 
     onOpened: {
-        selectedCategory = "terminal"
+        if (selectedCategory !== "agents")
+            selectedCategory = "terminal"
         resetDraft()
         closeButton.forceActiveFocus()
+        acquireAgentsVisit()
+    }
+    onSelectedCategoryChanged: {
+        if (!opened)
+            return
+        if (selectedCategory === "agents")
+            acquireAgentsVisit()
+        else
+            releaseAgentsVisit(false)
     }
     onClosed: {
         if (directoryPickerRequestId.length > 0) {
@@ -134,6 +206,8 @@ KPopover {
         }
         openPathRequestId = ""
         desktopFileError = ""
+        releaseAgentsVisit(transferringProjectIntel)
+        transferringProjectIntel = false
         resetDraft()
     }
     Component.onDestruction: {
@@ -142,6 +216,7 @@ KPopover {
                 directoryPickerRequestId,
                 Models.DesktopFiles.SettingsWorkingDirectory)
         }
+        releaseAgentsVisit(false)
     }
 
     Connections {
@@ -288,10 +363,12 @@ KPopover {
                     spacing: 4
 
                     Repeater {
+                        id: categoryRepeater
                         model: root.categories
 
                         delegate: KButton {
                             id: categoryButton
+                            required property int index
                             required property var modelData
                             Layout.fillWidth: true
                             implicitHeight: root.compact ? 48 : 58
@@ -300,12 +377,24 @@ KPopover {
                             Accessible.id: objectName
                             Accessible.name: modelData.title + ", "
                                 + modelData.detail
+                            Accessible.role: Accessible.ListItem
                             Accessible.selected: root.selectedCategory
                                 === modelData.key
                             variant: root.selectedCategory === modelData.key
                                 ? "secondary"
                                 : "quiet"
+                            tonalSelection: true
                             onClicked: root.selectedCategory = modelData.key
+                            Accessible.onPressAction:
+                                root.selectedCategory = modelData.key
+                            Keys.onUpPressed: event => {
+                                root.focusCategory(index - 1)
+                                event.accepted = true
+                            }
+                            Keys.onDownPressed: event => {
+                                root.focusCategory(index + 1)
+                                event.accepted = true
+                            }
 
                             contentItem: RowLayout {
                                 spacing: 11
@@ -402,6 +491,7 @@ KPopover {
         ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.minimumHeight: 0
             spacing: 0
 
             KScrollView {
@@ -410,6 +500,7 @@ KPopover {
                 Accessible.id: objectName
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.minimumHeight: 0
                 clip: true
                 contentWidth: availableWidth
 
@@ -722,96 +813,59 @@ KPopover {
                         Layout.rightMargin: root.compact ? 18 : 28
                         spacing: 12
 
-                        Rectangle {
+                        AgentsSettingsSurface {
                             Layout.fillWidth: true
-                            implicitHeight: agentContent.implicitHeight + 28
-                            radius: KodosiTheme.radiusLarge
-                            color: KodosiTheme.surfaceRaised
-                            border.width: 1
-                            border.color: KodosiTheme.seam
-                            ColumnLayout {
-                                id: agentContent
+                            onEnsureVisible: function(item) {
+                                root.keepSettingControlVisible(item)
+                            }
+                            onOpenProjectIntel: function(sourceId) {
+                                root.transferringProjectIntel = true
+                                root.openProjectIntelRequested(sourceId)
+                            }
+                        }
+
+                        SurfaceCard {
+                            Layout.fillWidth: true
+                            implicitHeight: selectedSessionActions.implicitHeight + 24
+
+                            RowLayout {
+                                id: selectedSessionActions
                                 anchors.fill: parent
-                                anchors.margins: 14
-                                spacing: 8
-                                KIcon {
-                                    Layout.preferredWidth: 28
-                                    Layout.preferredHeight: 28
-                                    name: "cpu"
-                                    color: KodosiTheme.accent
-                                }
-                                PlainLabel {
-                                    text: qsTr("Local agent intelligence")
-                                    color: KodosiTheme.textPrimary
-                                    font.pixelSize: 14
-                                    font.weight: Font.DemiBold
-                                }
-                                PlainLabel {
+                                anchors.margins: 12
+                                spacing: 10
+                                ColumnLayout {
                                     Layout.fillWidth: true
-                                    text: root.agentIntelAvailable
-                                        ? qsTr("Inspect conversations, custom agents, memory, history, and local integrations for the selected session.")
-                                        : qsTr("Select a session in My Agents to inspect its conversations, memory, history, and local integrations.")
-                                    color: KodosiTheme.textSecondary
-                                    font.pixelSize: 11
-                                    wrapMode: Text.Wrap
+                                    spacing: 2
+                                    PlainLabel {
+                                        text: qsTr("Selected-session Agent Intel")
+                                        color: KodosiTheme.textPrimary
+                                        font.weight: Font.DemiBold
+                                    }
+                                    PlainLabel {
+                                        Layout.fillWidth: true
+                                        text: root.agentIntelAvailable
+                                            ? qsTr("Keep the live session overview, conversation, memory, and Custom Agents close at hand.")
+                                            : qsTr("Select a session in My Agents to open its live Agent Intel.")
+                                        color: KodosiTheme.textSecondary
+                                        wrapMode: Text.Wrap
+                                    }
                                 }
                                 KButton {
-                                    objectName:
-                                        "panel.settings.agents.openIntel"
+                                    objectName: "panel.settings.agents.openIntel"
                                     Accessible.id: objectName
-                                    variant: "directional"
-                                    iconName: "chevron-right"
                                     text: root.agentIntelAvailable
                                         ? qsTr("Open Agent Intel")
                                         : qsTr("No session selected")
                                     enabled: root.agentIntelAvailable
-                                    Accessible.name: text
-                                    onClicked:
-                                        root.openAgentIntelRequested()
+                                    onClicked: root.openAgentIntelRequested()
                                 }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 1
-                                    color: KodosiTheme.seam
-                                }
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: KodosiTheme.spacing3
-                                    KIcon {
-                                        Layout.preferredWidth: 18
-                                        Layout.preferredHeight: 18
-                                        name: "diagnostics"
-                                        color: KodosiTheme.textSecondary
-                                    }
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 1
-                                        PlainLabel {
-                                            text: qsTr("Runtime Diagnostics")
-                                            color: KodosiTheme.textPrimary
-                                            font.pixelSize: 11
-                                            font.weight: Font.DemiBold
-                                        }
-                                        PlainLabel {
-                                            Layout.fillWidth: true
-                                            text: qsTr("Inspect runtime readiness, product state, and MCP server health.")
-                                            color: KodosiTheme.textSecondary
-                                            font.pixelSize: 9
-                                            wrapMode: Text.Wrap
-                                        }
-                                    }
-                                    KButton {
-                                        objectName:
-                                            "panel.settings.agents.openDiagnostics"
-                                        Accessible.id: objectName
-                                        text: qsTr("Open")
-                                        Accessible.name:
-                                            qsTr("Open Runtime Diagnostics")
-                                        onClicked:
-                                            root.openDiagnosticsRequested()
-                                    }
+                                KButton {
+                                    objectName:
+                                        "panel.settings.agents.openDiagnostics"
+                                    Accessible.id: objectName
+                                    text: qsTr("Diagnostics")
+                                    variant: "quiet"
+                                    onClicked: root.openDiagnosticsRequested()
                                 }
                             }
                         }
@@ -934,6 +988,8 @@ KPopover {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 66
+                Layout.minimumHeight: 66
+                Layout.maximumHeight: 66
                 color: KodosiTheme.surfaceRaised
                 bottomRightRadius: KodosiTheme.radiusModal
 

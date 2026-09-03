@@ -5,9 +5,11 @@ KButton {
 
     required property string glyph
     property int size: KodosiTheme.iconButtonSize
+    property color glyphColor: KodosiTheme.textSecondary
 
     text: ""
     iconName: glyph
+    iconColor: enabled ? glyphColor : KodosiTheme.disabled
     variant: "quiet"
     compact: true
     implicitWidth: size

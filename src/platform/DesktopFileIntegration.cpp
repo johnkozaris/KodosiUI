@@ -10,12 +10,17 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QPointer>
+#include <QRegularExpression>
+#include <QTimer>
 #include <QWindow>
 
 #if defined(Q_OS_LINUX)
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
+#include <chrono>
 #include <optional>
 #include <utility>
 
@@ -26,6 +31,11 @@ QString translated(const char* source)
 {
     return QCoreApplication::translate("DesktopFileIntegration", source);
 }
+
+#if defined(Q_OS_LINUX)
+constexpr auto boundHandoffGracePeriod = std::chrono::seconds(30);
+constexpr qsizetype maximumRetainedBoundHandoffs = 64;
+#endif
 
 QString nearestUsableDirectory(QString path)
 {
@@ -173,6 +183,11 @@ DesktopFileIntegration::DesktopFileIntegration(
     Q_ASSERT(static_cast<bool>(m_opener));
 }
 
+DesktopFileIntegration::~DesktopFileIntegration()
+{
+    m_retainedBoundHandoffs.clear();
+}
+
 bool DesktopFileIntegration::busy() const noexcept
 {
     return m_busy;
@@ -289,6 +304,7 @@ bool DesktopFileIntegration::openPath(
             requestValidation.errorMessage);
         return false;
     }
+
     if (purpose != Purpose::SettingsOpenWorkingDirectory) {
         fail(
             requestId,
@@ -303,6 +319,197 @@ bool DesktopFileIntegration::openPath(
         requestId,
         purpose,
         false);
+}
+
+bool DesktopFileIntegration::openBoundHandoff(
+    const QString& handoffPath,
+    const QString& requestId,
+    const Purpose purpose)
+{
+    const auto requestValidation = validateRequestId(requestId);
+    if (!requestValidation.valid()) {
+        fail(
+            requestId,
+            purpose,
+            requestValidation.errorCode,
+            requestValidation.errorMessage);
+        return false;
+    }
+    if (!isBoundHandoffPurpose(purpose)) {
+        fail(
+            requestId,
+            purpose,
+            ErrorCode::InvalidRequest,
+            translated("This request cannot open a bound filesystem handoff."));
+        return false;
+    }
+#if defined(Q_OS_LINUX)
+    const QFileInfo artifactInfo(handoffPath);
+    const QFileInfo parentInfo(artifactInfo.absolutePath());
+    if (!QDir::isAbsolutePath(handoffPath)
+        || QDir::cleanPath(handoffPath) != handoffPath
+        || artifactInfo.fileName() != QStringLiteral("handoff")
+        || !parentInfo.fileName().startsWith(
+            QStringLiteral("kodosi-open-"))
+        || handoffPath.size() > maximumPathLength
+        || handoffPath.contains(QChar::Null)) {
+        fail(
+            requestId,
+            purpose,
+            ErrorCode::InvalidRequest,
+            translated("The bound filesystem handoff is invalid."));
+        return false;
+    }
+    if (m_retainedBoundHandoffs.size()
+        >= maximumRetainedBoundHandoffs) {
+        fail(
+            requestId,
+            purpose,
+            ErrorCode::Busy,
+            translated(
+                "Too many filesystem handoffs are still being opened."));
+        return false;
+    }
+    const auto encodedPath = QFile::encodeName(handoffPath);
+    const auto encodedParent = QFile::encodeName(parentInfo.absoluteFilePath());
+    struct stat parentStatus {};
+    struct stat artifactStatus {};
+    if (::lstat(encodedParent.constData(), &parentStatus) != 0
+        || !S_ISDIR(parentStatus.st_mode)
+        || parentStatus.st_uid != ::geteuid()
+        || (parentStatus.st_mode & 0077) != 0
+        || ::lstat(encodedPath.constData(), &artifactStatus) != 0
+        || !S_ISLNK(artifactStatus.st_mode)
+        || artifactStatus.st_uid != ::geteuid()) {
+        fail(
+            requestId,
+            purpose,
+            ErrorCode::InvalidRequest,
+            translated("The bound filesystem handoff is invalid."));
+        return false;
+    }
+    const auto ownedDescriptor = ::open(
+        encodedPath.constData(),
+        O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    if (ownedDescriptor < 0) {
+        fail(
+            requestId,
+            purpose,
+            ErrorCode::MissingPath,
+            translated("The bound filesystem handoff is no longer available."));
+        return false;
+    }
+    struct stat status {};
+    if (::fstat(ownedDescriptor, &status) != 0) {
+        (void)::close(ownedDescriptor);
+        fail(
+            requestId,
+            purpose,
+            ErrorCode::MissingPath,
+            translated("The bound filesystem handoff is no longer available."));
+        return false;
+    }
+    if (!S_ISREG(status.st_mode) && !S_ISDIR(status.st_mode)) {
+        (void)::close(ownedDescriptor);
+        fail(
+            requestId,
+            purpose,
+            ErrorCode::UnsupportedFileType,
+            translated("The bound filesystem handoff is not a regular file."));
+        return false;
+    }
+    auto ownedFile = std::make_shared<QFile>();
+    if (!ownedFile->open(
+            ownedDescriptor,
+            QIODevice::ReadOnly,
+            QFileDevice::AutoCloseHandle)) {
+        (void)::close(ownedDescriptor);
+        fail(
+            requestId,
+            purpose,
+            ErrorCode::MissingPath,
+            translated("The bound filesystem handoff is no longer available."));
+        return false;
+    }
+    const auto qtHandoffPath = QStringLiteral("/proc/%1/fd/%2")
+        .arg(QCoreApplication::applicationPid())
+        .arg(ownedFile->handle());
+    if (!m_opener(QUrl::fromLocalFile(qtHandoffPath))) {
+        ownedFile->close();
+        fail(
+            requestId,
+            purpose,
+            ErrorCode::LaunchFailed,
+            translated("The system could not open the selected item."));
+        return false;
+    }
+    const auto retainedId = ++m_nextBoundHandoffId;
+    m_retainedBoundHandoffs.insert(retainedId, std::move(ownedFile));
+    QTimer::singleShot(
+        boundHandoffGracePeriod,
+        this,
+        [this, retainedId] {
+            m_retainedBoundHandoffs.remove(retainedId);
+        });
+    clearErrorState();
+    return true;
+#else
+    Q_UNUSED(handoffPath)
+    fail(
+        requestId,
+        purpose,
+        ErrorCode::UnsupportedFileType,
+        translated("Bound filesystem handoffs are unavailable on this platform."));
+    return false;
+#endif
+}
+
+bool DesktopFileIntegration::revealBoundSource(
+    const QString& sourcePath,
+    const QString& requestId,
+    const Purpose purpose)
+{
+    const auto requestValidation = validateRequestId(requestId);
+    if (!requestValidation.valid()) {
+        fail(
+            requestId,
+            purpose,
+            requestValidation.errorCode,
+            requestValidation.errorMessage);
+        return false;
+    }
+    if (purpose != Purpose::ExternalSource) {
+        fail(
+            requestId,
+            purpose,
+            ErrorCode::InvalidRequest,
+            translated("This request cannot reveal an external source."));
+        return false;
+    }
+    const auto validation = validateOpenPath(sourcePath);
+    if (!validation.valid()) {
+        fail(
+            requestId,
+            purpose,
+            validation.errorCode,
+            validation.errorMessage);
+        return false;
+    }
+    const QFileInfo source(validation.canonicalPath);
+    auto revealDirectory = source.absolutePath();
+    if (revealDirectory.isEmpty()) {
+        revealDirectory = validation.canonicalPath;
+    }
+    if (!m_opener(QUrl::fromLocalFile(revealDirectory))) {
+        fail(
+            requestId,
+            purpose,
+            ErrorCode::LaunchFailed,
+            translated("The system could not reveal the selected source."));
+        return false;
+    }
+    clearErrorState();
+    return true;
 }
 
 bool DesktopFileIntegration::openSessionProject(
@@ -671,6 +878,14 @@ bool DesktopFileIntegration::isSessionProjectPurpose(
 {
     return purpose == Purpose::SessionProject
         || purpose == Purpose::TerminalProject;
+}
+
+bool DesktopFileIntegration::isBoundHandoffPurpose(
+    const Purpose purpose) noexcept
+{
+    return purpose == Purpose::ProjectMemory
+        || purpose == Purpose::ProjectCustomAgent
+        || purpose == Purpose::ExternalSource;
 }
 
 void DesktopFileIntegration::finishPicker()

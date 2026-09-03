@@ -4,6 +4,7 @@
 #include "bridge/RuntimeBridge.hpp"
 #include "logging/ApplicationLogStore.hpp"
 #include "models/AgentConversationModel.hpp"
+#include "models/AgentAutoModeRulesModel.hpp"
 #include "models/AgentCustomAgentsModel.hpp"
 #include "models/AgentGlobalModel.hpp"
 #include "models/AgentMemoryModel.hpp"
@@ -21,6 +22,7 @@
 #include "models/DeviceActions.hpp"
 #include "models/DesktopSettings.hpp"
 #include "models/DesktopStateModel.hpp"
+#include "models/ExternalDiscoveryModel.hpp"
 #include "models/MissionDirectoryModel.hpp"
 #include "models/MissionDetailModel.hpp"
 #include "models/MissionActions.hpp"
@@ -28,6 +30,7 @@
 #include "models/PeopleActions.hpp"
 #include "models/RuntimeDiagnosticsModel.hpp"
 #include "models/PendingPermissionsModel.hpp"
+#include "models/ProjectIntelligenceModel.hpp"
 #include "models/TrustModel.hpp"
 #include "platform/FreedesktopNotificationDriver.hpp"
 #include "platform/DesktopFileIntegration.hpp"
@@ -162,6 +165,12 @@ int main(int argc, char* argv[])
     const auto agentIntelSmokeTest =
         arguments.contains(
             QStringLiteral("--smoke-test-agent-intel"));
+    const auto projectIntelSmokeTest =
+        arguments.contains(
+            QStringLiteral("--smoke-test-project-intel"));
+    const auto agentSettingsSmokeTest =
+        arguments.contains(
+            QStringLiteral("--smoke-test-agent-settings"));
     const auto attentionSmokeTest =
         arguments.contains(
             QStringLiteral("--smoke-test-attention"));
@@ -183,11 +192,25 @@ int main(int argc, char* argv[])
     const auto agentIntelProbeOpen =
         arguments.contains(
             QStringLiteral("--ui-probe-open-agent-intel"));
+    const auto projectIntelProbePopulated =
+        arguments.contains(
+            QStringLiteral("--ui-probe-project-intel-populated"));
+    const auto projectIntelProbeEmpty =
+        arguments.contains(
+            QStringLiteral("--ui-probe-project-intel-empty"));
+    const auto projectIntelProbeArchive =
+        arguments.contains(
+            QStringLiteral("--ui-probe-project-intel-archive"));
+    const auto agentSettingsProbePopulated =
+        arguments.contains(
+            QStringLiteral("--ui-probe-agent-settings-populated"));
     const auto authProbeError =
         arguments.contains(
             QStringLiteral("--ui-probe-auth-error"));
     const auto smokeTest = settingsSmokeTest
         || agentIntelSmokeTest
+        || projectIntelSmokeTest
+        || agentSettingsSmokeTest
         || attentionSmokeTest
         || diagnosticsSmokeTest
         || desktopStateSmokeTest
@@ -264,6 +287,24 @@ int main(int argc, char* argv[])
     kodosi::DesktopFileIntegration desktopFiles(
         sessionCatalog,
         &applicationLog);
+    kodosi::AgentAutoModeRulesModel agentAutoModeRules(runtime);
+    kodosi::ExternalDiscoveryModel externalDiscovery(runtime, desktopFiles);
+    kodosi::ProjectIntelligenceModel projectIntelligence(
+        runtime,
+        agentConversation,
+        desktopFiles);
+    if (projectIntelProbeEmpty || projectIntelProbeArchive) {
+        projectIntelligence.installSyntheticEmptyFixture(
+            projectIntelProbeArchive);
+    } else if (projectIntelSmokeTest || agentSettingsSmokeTest
+        || projectIntelProbePopulated || agentSettingsProbePopulated) {
+        projectIntelligence.installSyntheticFixture();
+        agentAutoModeRules.installSyntheticFixture();
+        externalDiscovery.installSyntheticFixture();
+        if (agentSettingsSmokeTest || agentSettingsProbePopulated) {
+            agentGlobal.installSyntheticFixture();
+        }
+    }
     kodosi::TerminalTilingLayoutModel terminalTiling;
     if (desktopStateSmokeTest) {
         desktopState.setActiveView(2);
@@ -482,6 +523,7 @@ int main(int argc, char* argv[])
         &kodosi::RuntimeBridge::eventReceived,
         &sessionCatalog,
         [&agentGlobal,
+         &agentAutoModeRules,
          &agentConversation,
          &agentCustomAgents,
          &agentMemory,
@@ -490,11 +532,13 @@ int main(int argc, char* argv[])
          &authState,
          &desktopState,
          &devices,
+         &externalDiscovery,
          &missions,
          &missionDetail,
          &missionActions,
          &pendingPermissions,
          &people,
+         &projectIntelligence,
          &runtimeDiagnostics,
          &sessionCatalog,
          &sessionAccess,
@@ -506,6 +550,7 @@ int main(int argc, char* argv[])
             QByteArray json) {
             if (lane == kodosi::EventLane::Auth) {
                 authActions.ingestAuthEvent(json);
+                agentAutoModeRules.ingestAuthEvent(json);
                 agentConversation.ingestAuthEvent(json);
                 agentCustomAgents.ingestAuthEvent(json);
                 agentMemory.ingestAuthEvent(json);
@@ -518,11 +563,13 @@ int main(int argc, char* argv[])
                 sessionShareScope.ingestAuthEvent(json);
                 steering.ingestAuthEvent(json);
                 devices.ingestAuthEvent(json);
+                externalDiscovery.ingestAuthEvent(json);
                 missions.ingestAuthEvent(json);
                 missionDetail.ingestAuthEvent(json);
                 missionActions.ingestAuthEvent(json);
                 pendingPermissions.ingestAuthEvent(json);
                 people.ingestAuthEvent(json);
+                projectIntelligence.ingestAuthEvent(json);
                 trust.ingestAuthEvent(json);
             } else if (lane == kodosi::EventLane::Devices) {
                 devices.ingestDevicesEvent(std::move(json));
@@ -532,10 +579,13 @@ int main(int argc, char* argv[])
                 runtimeDiagnostics.ingestSystemEvent(std::move(json));
             } else if (lane == kodosi::EventLane::AgentIntel) {
                 agentConversation.ingestAgentIntelEvent(json);
+                agentAutoModeRules.ingestAgentIntelEvent(json);
                 agentCustomAgents.ingestAgentIntelEvent(json);
                 agentMemory.ingestAgentIntelEvent(json);
                 agentSessionIntel.ingestAgentIntelEvent(json);
                 pendingPermissions.ingestAgentIntelEvent(json);
+                projectIntelligence.ingestAgentIntelEvent(json);
+                externalDiscovery.ingestAgentIntelEvent(json);
                 steering.ingestAgentIntelEvent(std::move(json));
             } else if (lane == kodosi::EventLane::Friends) {
                 people.ingestFriendsEvent(std::move(json));
@@ -557,6 +607,7 @@ int main(int argc, char* argv[])
         &kodosi::RuntimeBridge::runningChanged,
         &application,
         [&authActions,
+         &agentAutoModeRules,
          &agentConversation,
          &agentCustomAgents,
          &agentMemory,
@@ -564,11 +615,13 @@ int main(int argc, char* argv[])
          &authState,
          &desktopState,
          &devices,
+         &externalDiscovery,
          &missions,
          &missionDetail,
          &missionActions,
          &pendingPermissions,
          &people,
+         &projectIntelligence,
          &sessionCatalog,
          &sessionAccess,
          &sessionActions,
@@ -581,16 +634,19 @@ int main(int argc, char* argv[])
             authState.resetRuntimeAuthority();
             desktopState.resetRuntimeAuthority();
             agentConversation.resetRuntimeAuthority();
+            agentAutoModeRules.resetRuntimeAuthority();
             agentCustomAgents.resetRuntimeAuthority();
             agentMemory.resetRuntimeAuthority();
             agentSessionIntel.resetRuntimeAuthority();
             authActions.resetRuntimeAuthority();
             devices.resetRuntimeAuthority();
+            externalDiscovery.resetRuntimeAuthority();
             missions.resetRuntimeAuthority();
             missionDetail.resetRuntimeAuthority();
             missionActions.resetRuntimeAuthority();
             pendingPermissions.resetRuntimeAuthority();
             people.resetRuntimeAuthority();
+            projectIntelligence.resetRuntimeAuthority();
             sessionCatalog.resetRuntimeAuthority();
             sessionAccess.resetRuntimeAuthority();
             sessionActions.resetRuntimeAuthority();
@@ -600,6 +656,7 @@ int main(int argc, char* argv[])
         });
     kodosi::qml::configureModelInstances(
         agentGlobal,
+        agentAutoModeRules,
         agentConversation,
         agentCustomAgents,
         agentMemory,
@@ -612,10 +669,12 @@ int main(int argc, char* argv[])
         desktopSettings,
         desktopState,
         desktopFiles,
+        externalDiscovery,
         missions,
         missionDetail,
         missionActions,
         pendingPermissions,
+        projectIntelligence,
         people,
         peopleActions,
         runtimeDiagnostics,
@@ -673,6 +732,46 @@ int main(int argc, char* argv[])
                     || !opened.toBool()) {
                     qCritical()
                         << "The Agent Intelligence probe surface could not be opened.";
+                    QCoreApplication::exit(EXIT_FAILURE);
+                }
+            });
+    }
+    if (projectIntelSmokeTest || projectIntelProbePopulated
+        || projectIntelProbeEmpty || projectIntelProbeArchive) {
+        QTimer::singleShot(
+            0,
+            rootObject,
+            [rootObject, &projectIntelligence] {
+                QVariant opened;
+                if (!QMetaObject::invokeMethod(
+                        rootObject,
+                        "openProjectIntelSource",
+                        Qt::DirectConnection,
+                        Q_RETURN_ARG(QVariant, opened),
+                        Q_ARG(
+                            QVariant,
+                            QVariant::fromValue(
+                                projectIntelligence.selectedSourceId())))
+                    || !opened.toBool()) {
+                    qCritical()
+                        << "The Project Intelligence smoke surface could not be opened.";
+                    QCoreApplication::exit(EXIT_FAILURE);
+                }
+            });
+    } else if (agentSettingsSmokeTest || agentSettingsProbePopulated) {
+        QTimer::singleShot(
+            0,
+            rootObject,
+            [rootObject] {
+                QVariant opened;
+                if (!QMetaObject::invokeMethod(
+                        rootObject,
+                        "openAgentSettings",
+                        Qt::DirectConnection,
+                        Q_RETURN_ARG(QVariant, opened))
+                    || !opened.toBool()) {
+                    qCritical()
+                        << "The Agent Settings smoke surface could not be opened.";
                     QCoreApplication::exit(EXIT_FAILURE);
                 }
             });
@@ -1215,8 +1314,10 @@ int main(int argc, char* argv[])
             qCritical() << "The approval review surface contract is invalid.";
             return EXIT_FAILURE;
         }
-        const auto panelName = settingsSmokeTest
+        const auto panelName = settingsSmokeTest || agentSettingsSmokeTest
             ? QStringLiteral("panel.settings")
+            : projectIntelSmokeTest
+            ? QStringLiteral("panel.projectIntel")
             : agentIntelSmokeTest
             ? QStringLiteral("panel.agentIntel")
             : attentionSmokeTest
@@ -1451,6 +1552,217 @@ int main(int argc, char* argv[])
                             });
                     });
             });
+        } else if (projectIntelSmokeTest) {
+            QTimer::singleShot(
+                100,
+                &application,
+                [panel, rootObject, &projectIntelligence] {
+                    const QStringList requiredObjects {
+                        QStringLiteral("panel.projectIntel"),
+                        QStringLiteral("panel.projectIntel.close"),
+                        QStringLiteral("panel.projectIntel.refresh"),
+                        QStringLiteral("panel.projectIntel.sources"),
+                        QStringLiteral("panel.projectIntel.tabs"),
+                        QStringLiteral("panel.projectIntel.tab.sessions"),
+                        QStringLiteral("panel.projectIntel.tab.memory"),
+                        QStringLiteral("panel.projectIntel.tab.servers"),
+                        QStringLiteral("panel.projectIntel.tab.agents"),
+                        QStringLiteral("panel.projectIntel.sessions.list"),
+                        QStringLiteral("panel.projectIntel.memory.list"),
+                        QStringLiteral("panel.projectIntel.memory.open"),
+                        QStringLiteral("panel.projectIntel.memory.copy"),
+                        QStringLiteral("panel.projectIntel.servers.list"),
+                        QStringLiteral("panel.projectIntel.agents.list"),
+                        QStringLiteral("panel.projectIntel.agent.open"),
+                        QStringLiteral(
+                            "panel.projectIntel.agents.detail.parseErrors"),
+                        QStringLiteral(
+                            "panel.projectIntel.agents.detail.frontmatter"),
+                        QStringLiteral(
+                            "panel.projectIntel.agents.detail.prompt"),
+                    };
+                    for (const auto& objectName : requiredObjects) {
+                        if (rootObject->findChild<QObject*>(objectName)
+                            == nullptr) {
+                            qCritical()
+                                << "The Project Intelligence smoke contract is incomplete:"
+                                << objectName;
+                            QCoreApplication::exit(EXIT_FAILURE);
+                            return;
+                        }
+                    }
+                    auto* sources = rootObject->findChild<QObject*>(
+                        QStringLiteral("panel.projectIntel.sources"));
+                    auto* focusedItem = QGuiApplication::focusObject();
+                    const auto selectedSourceName =
+                        QStringLiteral(
+                            "panel.projectIntel.source.selected");
+                    if (panel->property("width").toReal() > 820
+                        || panel->property("height").toReal() > 560
+                        || sources == nullptr
+                        || focusedItem == nullptr
+                        || focusedItem->objectName()
+                            != selectedSourceName
+                        || projectIntelligence.sources()->rowCount() < 2
+                        || projectIntelligence.sessions()->rowCount() < 2
+                        || projectIntelligence.memories()->rowCount() < 2
+                        || projectIntelligence.agents()->rowCount() < 1
+                        || projectIntelligence.customizations()->rowCount() < 1) {
+                        qCritical()
+                            << "Project Intelligence did not expose its populated"
+                            << "minimum-size state or initial focus."
+                            << "size" << panel->property("width")
+                            << panel->property("height")
+                            << "sourceList" << sources
+                            << (sources == nullptr
+                                    ? QVariant {}
+                                    : sources->property("activeFocus"))
+                            << "focusedItem" << focusedItem
+                            << (focusedItem == nullptr
+                                    ? QString {}
+                                    : focusedItem->objectName())
+                            << "expected" << selectedSourceName
+                            << "rows"
+                            << projectIntelligence.sources()->rowCount()
+                            << projectIntelligence.sessions()->rowCount()
+                            << projectIntelligence.memories()->rowCount()
+                            << projectIntelligence.agents()->rowCount()
+                            << projectIntelligence.customizations()->rowCount();
+                        QCoreApplication::exit(EXIT_FAILURE);
+                        return;
+                    }
+                    for (auto tab = 0; tab < 4; ++tab) {
+                        if (!QMetaObject::invokeMethod(
+                                panel,
+                                "activateTab",
+                                Qt::DirectConnection,
+                                Q_ARG(QVariant, QVariant::fromValue(tab)),
+                                Q_ARG(QVariant, QVariant::fromValue(false)))
+                            || panel->property("activeTab").toInt() != tab) {
+                            qCritical()
+                                << "Project Intelligence tab navigation failed:"
+                                << tab;
+                            QCoreApplication::exit(EXIT_FAILURE);
+                            return;
+                        }
+                    }
+                    QCoreApplication::quit();
+                });
+        } else if (agentSettingsSmokeTest) {
+            QTimer::singleShot(
+                100,
+                &application,
+                [panel,
+                 rootObject,
+                 &agentAutoModeRules,
+                 &projectIntelligence,
+                 &externalDiscovery] {
+                    const QStringList requiredObjects {
+                        QStringLiteral("panel.settings"),
+                        QStringLiteral("panel.settings.close"),
+                        QStringLiteral("panel.settings.agents.surface"),
+                        QStringLiteral("panel.settings.agents.refresh"),
+                        QStringLiteral("panel.settings.agents.workspace"),
+                        QStringLiteral("panel.settings.agents.integration"),
+                        QStringLiteral("panel.settings.agents.tree"),
+                        QStringLiteral("panel.settings.agents.sources"),
+                        QStringLiteral("panel.settings.autoMode.reload"),
+                        QStringLiteral("panel.settings.autoMode.save"),
+                        QStringLiteral(
+                            "panel.settings.autoMode.reload.confirm"),
+                        QStringLiteral(
+                            "panel.settings.autoMode.reload.cancel"),
+                        QStringLiteral(
+                            "panel.settings.autoMode.reload.replace"),
+                        QStringLiteral("panel.settings.externalDiscovery.refresh"),
+                        QStringLiteral(
+                            "panel.settings.externalDiscovery.mcp.title"),
+                        QStringLiteral(
+                            "panel.settings.externalDiscovery.sessions.title"),
+                    };
+                    for (const auto& objectName : requiredObjects) {
+                        if (rootObject->findChild<QObject*>(objectName)
+                            == nullptr) {
+                            qCritical()
+                                << "The Agent Settings smoke contract is incomplete:"
+                                << objectName;
+                            for (auto* object :
+                                 rootObject->findChildren<QObject*>()) {
+                                const auto candidate =
+                                    object->objectName();
+                                if (candidate.startsWith(
+                                        QStringLiteral(
+                                            "panel.settings.externalDiscovery"))) {
+                                    qCritical() << "Available:" << candidate;
+                                }
+                            }
+                            QCoreApplication::exit(EXIT_FAILURE);
+                            return;
+                        }
+                    }
+                    auto* close = rootObject->findChild<QObject*>(
+                        QStringLiteral("panel.settings.close"));
+                    if (panel->property("width").toReal() > 820
+                        || panel->property("height").toReal() > 560
+                        || panel->property("selectedCategory").toString()
+                            != QStringLiteral("agents")
+                        || close == nullptr
+                        || !close->property("activeFocus").toBool()
+                        || projectIntelligence.settingsTree()->rowCount() < 3
+                        || externalDiscovery.servers()->rowCount() < 1
+                        || externalDiscovery.sessions()->rowCount() < 1) {
+                        qCritical()
+                            << "Agent Settings did not expose settings,"
+                            << "rules, discovery, or initial focus.";
+                        QCoreApplication::exit(EXIT_FAILURE);
+                        return;
+                    }
+                    agentAutoModeRules.setAllowText(
+                        QStringLiteral("unsaved smoke draft"));
+                    auto* surface = rootObject->findChild<QObject*>(
+                        QStringLiteral("panel.settings.agents.surface"));
+                    if (surface == nullptr
+                        || !QMetaObject::invokeMethod(
+                            surface,
+                            "requestAutoModeReload",
+                            Qt::DirectConnection)) {
+                        qCritical()
+                            << "The Auto Mode reload confirmation could not be opened.";
+                        QCoreApplication::exit(EXIT_FAILURE);
+                        return;
+                    }
+                    QTimer::singleShot(
+                        50,
+                        panel,
+                        [rootObject, &agentAutoModeRules] {
+                            auto* confirmation =
+                                rootObject->findChild<QObject*>(
+                                    QStringLiteral(
+                                        "panel.settings.autoMode.reload.confirm"));
+                            auto* cancel =
+                                rootObject->findChild<QObject*>(
+                                    QStringLiteral(
+                                        "panel.settings.autoMode.reload.cancel"));
+                            if (confirmation == nullptr
+                                || !confirmation->property("opened").toBool()
+                                || cancel == nullptr
+                                || !cancel->property("activeFocus").toBool()
+                                || agentAutoModeRules.allowText()
+                                    != QStringLiteral(
+                                        "unsaved smoke draft")) {
+                                qCritical()
+                                    << "The Auto Mode reload confirmation did not"
+                                    << "isolate focus or preserve the draft.";
+                                QCoreApplication::exit(EXIT_FAILURE);
+                                return;
+                            }
+                            (void)QMetaObject::invokeMethod(
+                                confirmation,
+                                "close",
+                                Qt::DirectConnection);
+                            QCoreApplication::quit();
+                        });
+                });
         } else if (attentionSmokeTest) {
             rootObject->setProperty("width", 820);
             rootObject->setProperty("height", 560);
@@ -1654,8 +1966,10 @@ int main(int argc, char* argv[])
                         });
                 });
         }
-    } else if (tilingProbeSynthetic) {
-        qInfo() << "Synthetic terminal tiling probe is ready.";
+    } else if (tilingProbeSynthetic || projectIntelProbePopulated
+        || projectIntelProbeEmpty || projectIntelProbeArchive
+        || agentSettingsProbePopulated) {
+        qInfo() << "Synthetic presentation probe is ready.";
     } else if (auto result = runtime.start(); !result) {
         qCritical().noquote() << result.error().message;
         QTimer::singleShot(0, &application, [] { QCoreApplication::exit(EXIT_FAILURE); });

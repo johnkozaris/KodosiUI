@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 SOURCE_IDENTITY_PATH = "usr/share/doc/kodosi/provenance/source-identity.json"
 ARTIFACT_SUFFIXES = (".deb", ".tar.gz", ".pkg.tar.zst")
 SOURCE_NAMES = ("client", "runtime", "ghosttyPackage")
-GHOSTTY_REF_PATH = Path("Ghostty.ref")
+LINUX_GHOSTTY_REF_PATH = Path("LinuxGhostty.ref")
 GHOSTTY_ARCHIVE_PATH = Path(
     "Vendor/GhosttyVt/linux-x86_64/lib/libghostty-vt.a"
 )
@@ -351,7 +351,7 @@ def validate_source_identity(value: object) -> dict[str, object]:
 
 def ghostty_measurements(ghostty_package_root: Path) -> dict[str, str]:
     root = ghostty_package_root.resolve(strict=True)
-    ref_path = root / GHOSTTY_REF_PATH
+    ref_path = root / LINUX_GHOSTTY_REF_PATH
     archive_path = root / GHOSTTY_ARCHIVE_PATH
     try:
         ref_payload = ref_path.read_bytes()
@@ -360,13 +360,17 @@ def ghostty_measurements(ghostty_package_root: Path) -> dict[str, str]:
     if ref_payload.endswith(b"\n"):
         ref_payload = ref_payload[:-1]
     if not re.fullmatch(rb"[0-9a-f]{40}", ref_payload):
-        raise ValueError("Ghostty.ref must contain one lowercase commit and newline")
+        raise ValueError(
+            "LinuxGhostty.ref must contain one lowercase commit and newline"
+        )
     if ref_path.read_bytes() != ref_payload + b"\n":
-        raise ValueError("Ghostty.ref must contain one lowercase commit and newline")
+        raise ValueError(
+            "LinuxGhostty.ref must contain one lowercase commit and newline"
+        )
     if archive_path.is_symlink() or not archive_path.is_file():
         raise ValueError("pinned Linux libghostty-vt archive is not a regular file")
     return {
-        "upstreamCommit": ref_payload.decode("ascii"),
+        "linuxUpstreamCommit": ref_payload.decode("ascii"),
         "linuxVtArchiveSha256": file_sha256(archive_path),
     }
 
@@ -404,8 +408,10 @@ def verify_source_pins(
     if require_client_clean and measured["client"]["dirty"]:
         raise ValueError("client checkout is dirty")
     measurements = ghostty_measurements(ghostty_package_root)
-    if measurements["upstreamCommit"] != ghostty.get("commit"):
-        raise ValueError("Ghostty.ref differs from the upstream dependency pin")
+    if measurements["linuxUpstreamCommit"] != ghostty.get("commit"):
+        raise ValueError(
+            "LinuxGhostty.ref differs from the Linux upstream dependency pin"
+        )
     if (
         measurements["linuxVtArchiveSha256"]
         != ghostty.get("linuxVtArchiveSha256")

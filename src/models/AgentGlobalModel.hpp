@@ -157,6 +157,7 @@ public:
     [[nodiscard]] AgentMcpModel* mcpServers() noexcept;
 
     Q_INVOKABLE [[nodiscard]] bool refresh(const QString& cwd = {});
+    void installSyntheticFixture();
 
 public slots:
     void ingestAgentGlobalEvent(QByteArray json);
@@ -199,6 +200,7 @@ private:
     QHash<QString, Refresh> m_refreshes;
     QTimer m_timeoutTimer;
     quint64 m_nextGeneration = 0;
+    bool m_syntheticFixture = false;
 
     [[nodiscard]] static QString normalizeCwd(const QString& cwd);
     [[nodiscard]] static std::optional<DecodedStatus> decodeStatus(

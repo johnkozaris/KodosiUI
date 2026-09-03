@@ -14,7 +14,7 @@ desktop integration.
 - CMake 4.4.3
 - C++23
 - Kodosi FFI ABI 5
-- Kodosi desktop protocol 36
+- Kodosi desktop protocol 37
 
 The exact source and protocol baselines are recorded in `dependencies.lock.json`
 and `protocol/desktop-client-parity.json`.
@@ -85,11 +85,17 @@ staged session; focus mode hides rather than destroys the other tile delegates.
 Agent Intelligence Project Memory is acquired on demand through a native
 model. QML supplies only the stable session ID and presentation selections;
 the model privately resolves the current local Claude identity and retains
-protocol 36 bound-selection authority.
+protocol 37 filesystem-identity-bound authority.
 
 Custom Agents use the same demand boundary. Native code asks Rust for bounded,
 path-free summaries and keeps Rust's one-shot detail selections private. QML
 receives only opaque presentation identities and bounded detail text.
+
+Project Intelligence, Agent Settings, Auto Mode rules, and external discovery
+use protocol 37 source capabilities bound to Rust-held filesystem identities.
+The Qt models retain source paths, one-shot tokens, revisions, mutation IDs,
+and native `/proc/<pid>/fd` handoffs privately; QML receives typed trees,
+bounded display text, action availability, and opaque presentation IDs only.
 
 ## Development
 
@@ -219,8 +225,9 @@ source identities. The Swift parity checkout remains pinned by the parity gate
 but is not package provenance because it is neither compiled nor installed.
 The independent verifier rejects path traversal, symlinks, duplicate names,
 unexpected or oversized artifacts, hash changes, pin drift, dirty siblings,
-artifacts from stale sibling commits, a changed `Ghostty.ref`, and substitution
-of the pinned Linux Ghostty archive.
+artifacts from stale sibling commits, a changed `LinuxGhostty.ref`, and
+substitution of the pinned Linux Ghostty archive. The installed provenance
+payload includes that platform ref beside the Linux VT notice inventory.
 
 `SOURCE_DATE_EPOCH` is the clean KodosiQT source commit time. It is passed to
 the Rust release builds and CPack, embedded in source identity, and used for

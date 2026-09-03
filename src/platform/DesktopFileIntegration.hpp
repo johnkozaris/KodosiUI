@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QFile>
+#include <QHash>
 #include <QObject>
 #include <QPointer>
 #include <QString>
@@ -59,6 +61,9 @@ public:
         SessionProject,
         TerminalProject,
         DiagnosticsLogDirectory,
+        ProjectMemory,
+        ProjectCustomAgent,
+        ExternalSource,
     };
     Q_ENUM(Purpose)
 
@@ -102,6 +107,7 @@ public:
         UrlOpener opener,
         ApplicationLogStore* applicationLog = nullptr,
         QObject* parent = nullptr);
+    ~DesktopFileIntegration() override;
 
     [[nodiscard]] bool busy() const noexcept;
     [[nodiscard]] ErrorCode errorCode() const noexcept;
@@ -131,6 +137,14 @@ public:
         const QString& sessionId) const;
     Q_INVOKABLE void clearError();
     void setTransientParent(QWindow* transientParent);
+    [[nodiscard]] bool openBoundHandoff(
+        const QString& handoffPath,
+        const QString& requestId,
+        Purpose purpose);
+    [[nodiscard]] bool revealBoundSource(
+        const QString& sourcePath,
+        const QString& requestId,
+        Purpose purpose);
 
     [[nodiscard]] static ValidationResult validateDirectory(
         const QString& path);
@@ -172,6 +186,8 @@ private:
     QString m_errorMessage;
     QString m_errorRequestId;
     Purpose m_errorPurpose = Purpose::NewSessionWorkingDirectory;
+    QHash<quint64, std::shared_ptr<QFile>> m_retainedBoundHandoffs;
+    quint64 m_nextBoundHandoffId = 0;
     bool m_busy = false;
 
     [[nodiscard]] static ValidationResult validatePath(
@@ -181,6 +197,8 @@ private:
         const QString& requestId);
     [[nodiscard]] static bool isPickerPurpose(Purpose purpose) noexcept;
     [[nodiscard]] static bool isSessionProjectPurpose(
+        Purpose purpose) noexcept;
+    [[nodiscard]] static bool isBoundHandoffPurpose(
         Purpose purpose) noexcept;
     [[nodiscard]] bool openValidatedPath(
         const QString& path,

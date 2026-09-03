@@ -55,6 +55,7 @@ private slots:
     void settlesImmediateDispatchFailure();
     void acceptsToollessCopilotAgentsAndScopedClaudePlugins();
     void integrationRowsExposeUniqueAccessibleIds();
+    void syntheticFixtureStaysPopulatedWithoutDispatch();
 };
 
 namespace {
@@ -453,6 +454,23 @@ void AgentGlobalModelTest::integrationRowsExposeUniqueAccessibleIds()
         "                    ? qsTr(\"Claude Code integration\")\n"
         "                    : qsTr(\"GitHub Copilot CLI integration\")\n"
         "                Accessible.role: Accessible.ListItem")));
+}
+
+void AgentGlobalModelTest::syntheticFixtureStaysPopulatedWithoutDispatch()
+{
+    FakeAgentGlobalDispatcher dispatcher;
+    kodosi::AgentGlobalModel model(dispatcher);
+
+    model.installSyntheticFixture();
+
+    QCOMPARE(model.rowCount(), 2);
+    QCOMPARE(model.mcpServers()->rowCount(), 2);
+    QVERIFY(model.refresh());
+    QVERIFY(dispatcher.commands.isEmpty());
+    QCOMPARE(
+        model.data(model.index(0), kodosi::AgentGlobalModel::RefreshStateRole)
+            .value<kodosi::AgentGlobalModel::RefreshState>(),
+        kodosi::AgentGlobalModel::RefreshState::Loaded);
 }
 
 QTEST_GUILESS_MAIN(AgentGlobalModelTest)

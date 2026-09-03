@@ -12,6 +12,7 @@ Item {
         switch (name) {
         case "plus": return "M12 5 V19 M5 12 H19"
         case "folder": return "M3 7.5 Q3 6 4.5 6 H9 L11 8 H19.5 Q21 8 21 9.5 V18 Q21 20 19 20 H5 Q3 20 3 18 Z"
+        case "archive": return "M4 7 H20 V20 H4 Z M3 4 H21 V8 H3 Z M9 12 H15"
         case "clock": return "M12 3 A9 9 0 1 1 5.64 5.64 M12 7 V12 L16 14"
         case "command": return "M9 7 A3 3 0 1 0 6 10 H18 A3 3 0 1 0 15 7 V17 A3 3 0 1 0 18 14 H6 A3 3 0 1 0 9 17 Z"
         case "people": return "M8.5 11 A3 3 0 1 0 8.5 5 A3 3 0 1 0 8.5 11 M15.5 10 A2.5 2.5 0 1 0 15.5 5 A2.5 2.5 0 1 0 15.5 10 M3.5 19 Q3.5 13.5 8.5 13.5 Q13.5 13.5 13.5 19 M13 13 Q20.5 12.5 20.5 18"
@@ -27,6 +28,8 @@ Item {
         case "more": return "M6 12 A1 1 0 1 0 6 12.1 M12 12 A1 1 0 1 0 12 12.1 M18 12 A1 1 0 1 0 18 12.1"
         case "terminal": return "M4 5 H20 V19 H4 Z M7 9 L10 12 L7 15 M12 15 H17"
         case "sessions": return "M6 5 H20 V17 H6 Z M3 8 V20 H17"
+        case "server": return "M5 4 H19 V9 H5 Z M5 10 H19 V15 H5 Z M5 16 H19 V21 H5 Z M8 6.5 H8.1 M8 12.5 H8.1 M8 18.5 H8.1 M11 6.5 H17 M11 12.5 H17 M11 18.5 H17"
+        case "agents": return "M12 4 A4 4 0 1 0 12 12 A4 4 0 1 0 12 4 M5 21 Q5.5 15 12 15 Q18.5 15 19 21 M19 6 V10 M17 8 H21"
         case "shield": return "M12 3 L20 6 V11 Q20 17 12 21 Q4 17 4 11 V6 Z M8.5 12 L11 14.5 L16 9"
         case "cpu": return "M7 7 H17 V17 H7 Z M10 10 H14 V14 H10 Z M9 3 V7 M15 3 V7 M9 17 V21 M15 17 V21 M3 9 H7 M17 9 H21 M3 15 H7 M17 15 H21"
         case "refresh": return "M19 8 A8 8 0 1 0 20 14 M19 4 V8 H15"

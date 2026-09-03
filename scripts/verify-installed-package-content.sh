@@ -32,6 +32,8 @@ cmp ../kodosi-ghostty/THIRD_PARTY_NOTICES.md \
     "$root/usr/share/doc/kodosi/ghostty/THIRD_PARTY_NOTICES.md"
 cmp ../kodosi-ghostty/ThirdPartyNotices/linux-vt-inventory.json \
     "$root/usr/share/doc/kodosi/ghostty/linux-vt-inventory.json"
+cmp ../kodosi-ghostty/LinuxGhostty.ref \
+    "$root/usr/share/doc/kodosi/ghostty/LinuxGhostty.ref"
 python3 scripts/verify-rust-license-inventory.py \
     --tree "$root/usr/share/doc/kodosi/rust" \
     --expected-tree build/release/generated/rust-dependency-licenses
@@ -59,9 +61,9 @@ for notice in "${notice_names[@]}"; do
         "$root/usr/share/doc/kodosi/ghostty/ThirdPartyNotices/licenses/$notice"
 done
 
-grep -Fq '698fe24f3c5137904128085a786a1ce777c6e153' \
+grep -Fq 'b1970e5f103fad1a52f73d686ba2b5d98cb9ed4d' \
     "$root/usr/share/doc/kodosi/NATIVE-DESKTOP-INTEGRATION-NOTICE.txt"
-grep -Fq '77ebed9ed18de493296c5d4c2afc39b1d6d52e40' \
+grep -Fq '20b965e6f88d6a8c81d33a671bfe9b90f296ba2b' \
     "$root/usr/share/doc/kodosi/NATIVE-DESKTOP-INTEGRATION-NOTICE.txt"
 grep -Fq '8af6897c0afc63037a8a3efee4162a380e3a4572' \
     "$root/usr/share/doc/kodosi/NATIVE-DESKTOP-INTEGRATION-NOTICE.txt"

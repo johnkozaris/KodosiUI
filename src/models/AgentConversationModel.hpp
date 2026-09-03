@@ -52,6 +52,9 @@ public:
     [[nodiscard]] bool hasEarlier() const noexcept;
 
     Q_INVOKABLE [[nodiscard]] bool inspect(const QString& sessionId);
+    [[nodiscard]] bool inspect(
+        const QString& sessionId,
+        const QString& expectedRuntimeIncarnationId);
     Q_INVOKABLE void close();
     Q_INVOKABLE [[nodiscard]] bool retry();
     Q_INVOKABLE [[nodiscard]] bool loadEarlier();

@@ -17,6 +17,8 @@ private slots:
     void dependencyBaselineIsCurrent();
     void desktopStateQmlContractIsNativeOwned();
     void desktopFileIntegrationContractIsNativeOwned();
+    void applicationLogUrlRedactionUsesTypedQStringSetters();
+    void projectIntelligenceQmlContractIsProductSafe();
     void runtimeBridgeStartsAndStopsPinnedAbi();
 };
 
@@ -40,7 +42,7 @@ void ContractTest::dependencyBaselineIsCurrent()
 
     const auto kodosi = root.value(QStringLiteral("kodosi")).toObject();
     QCOMPARE(kodosi.value(QStringLiteral("ffiAbiVersion")).toInt(), 5);
-    QCOMPARE(kodosi.value(QStringLiteral("desktopProtocolVersion")).toInt(), 36);
+    QCOMPARE(kodosi.value(QStringLiteral("desktopProtocolVersion")).toInt(), 37);
 }
 
 void ContractTest::desktopStateQmlContractIsNativeOwned()
@@ -277,6 +279,18 @@ void ContractTest::desktopStateQmlContractIsNativeOwned()
         ">\"$artifact_dir/tiling-ready-tree.json\""));
     QVERIFY(smokeSource.contains(
         "native terminal accessible text is empty"));
+    QVERIFY(smokeSource.contains(
+        "KODOSI_UI_PROBE_AGENT_PARITY_ONLY"));
+    QVERIFY(smokeSource.contains(
+        "--ui-probe-project-intel-empty"));
+    QVERIFY(smokeSource.contains(
+        "--ui-probe-project-intel-archive"));
+    QVERIFY(smokeSource.contains(
+        "panel.projectIntel.source.selected"));
+    QVERIFY(smokeSource.contains(
+        "panel.settings.autoMode.reload.cancel"));
+    QVERIFY(smokeSource.contains(
+        "agent-settings-external-stale.json"));
 }
 
 void ContractTest::desktopFileIntegrationContractIsNativeOwned()
@@ -443,7 +457,209 @@ void ContractTest::desktopFileIntegrationContractIsNativeOwned()
     QVERIFY(rootCMakeText.contains(
         "\"${KODOSI_GHOSTTY_ROOT}/LICENSE\""));
     QVERIFY(rootCMakeText.contains("LICENSE-GHOSTTY"));
+    QVERIFY(rootCMakeText.contains("LinuxGhostty.ref"));
     QVERIFY(rootCMakeText.contains("linux-vt-inventory.json"));
+}
+
+void ContractTest::applicationLogUrlRedactionUsesTypedQStringSetters()
+{
+    QFile source(
+        QStringLiteral(
+            KODOSI_SOURCE_DIR "/src/logging/ApplicationLogStore.cpp"));
+    QVERIFY2(source.open(QIODevice::ReadOnly), qPrintable(source.errorString()));
+    const auto contents = source.readAll();
+    for (const auto setter : {
+             QByteArrayLiteral("url.setUserName(QString {});"),
+             QByteArrayLiteral("url.setPassword(QString {});"),
+             QByteArrayLiteral("url.setQuery(QString {});"),
+             QByteArrayLiteral("url.setFragment(QString {});"),
+         }) {
+        QVERIFY2(contents.contains(setter), setter.constData());
+    }
+    QVERIFY(!contents.contains("url.setUserName({});"));
+    QVERIFY(!contents.contains("url.setPassword({});"));
+    QVERIFY(!contents.contains("url.setQuery({});"));
+    QVERIFY(!contents.contains("url.setFragment({});"));
+}
+
+void ContractTest::projectIntelligenceQmlContractIsProductSafe()
+{
+    QFile projectModal(
+        QStringLiteral(
+            KODOSI_SOURCE_DIR
+            "/src/qml/AgentIntel/ProjectIntelligenceModal.qml"));
+    QVERIFY2(
+        projectModal.open(QIODevice::ReadOnly),
+        qPrintable(projectModal.errorString()));
+    const auto projectSource = projectModal.readAll();
+
+    for (const auto copy : {
+             QByteArrayLiteral("qsTr(\"Sessions\")"),
+             QByteArrayLiteral("qsTr(\"Memory\")"),
+             QByteArrayLiteral("qsTr(\"MCP Servers\")"),
+             QByteArrayLiteral("qsTr(\"Agents\")"),
+             QByteArrayLiteral("qsTr(\"Project intelligence\")"),
+             QByteArrayLiteral("qsTr(\"Claude project archive\")"),
+             QByteArrayLiteral("qsTr(\"Copilot repository archive\")"),
+             QByteArrayLiteral("qsTr(\"No sessions for this project\")"),
+             QByteArrayLiteral("qsTr(\"No archived sessions for this project\")"),
+             QByteArrayLiteral("qsTr(\"No memory files for this project\")"),
+             QByteArrayLiteral("qsTr(\"Select a file to preview\")"),
+             QByteArrayLiteral("qsTr(\"Copy to project…\")"),
+             QByteArrayLiteral(
+                 "\"panel.projectIntel.memory.retry\""),
+             QByteArrayLiteral("qsTr(\"MCP configuration requires an active project\")"),
+             QByteArrayLiteral("qsTr(\"No MCP servers configured\")"),
+             QByteArrayLiteral("Agents browser is only available for active projects."),
+             QByteArrayLiteral("qsTr(\"No custom agents defined\")"),
+             QByteArrayLiteral(
+                 "\"panel.projectIntel.agent.retry\""),
+             QByteArrayLiteral("qsTr(\"Parse errors\")"),
+             QByteArrayLiteral("qsTr(\"Frontmatter\")"),
+             QByteArrayLiteral("qsTr(\"System prompt\")"),
+         }) {
+        QVERIFY2(projectSource.contains(copy), copy.constData());
+    }
+    QVERIFY(projectSource.contains(
+        "selectedSourceButton.forceActiveFocus("));
+    QVERIFY(!projectSource.contains("sourceList.forceActiveFocus("));
+    QVERIFY(projectSource.contains("Accessible.PageTab"));
+    QVERIFY(projectSource.contains("Keys.onLeftPressed"));
+    QVERIFY(projectSource.contains("Keys.onRightPressed"));
+    QVERIFY(projectSource.contains("Keys.onUpPressed"));
+    QVERIFY(projectSource.contains("Keys.onDownPressed"));
+    QVERIFY(projectSource.contains("tonalSelection: true"));
+    QVERIFY(projectSource.contains(
+        "A current matching session incarnation is required."));
+    QVERIFY(projectSource.contains(
+        "objectName: \"panel.projectIntel.actionMessage\""));
+    QVERIFY(projectSource.contains(
+        "function onSourceChanged() {\n"
+        "            root.conversationOpen = false"));
+    QVERIFY(!projectSource.contains("No sessions for this source"));
+    QVERIFY(!projectSource.contains("No MCP servers or customizations"));
+    QVERIFY(!projectSource.contains("Open in editor"));
+    QVERIFY(!projectSource.contains("selectionToken"));
+    QVERIFY(!projectSource.contains("runtimeIncarnationId"));
+    QVERIFY(!projectSource.contains("mutationId"));
+    QVERIFY(!projectSource.contains("requestId"));
+
+    QFile agentsSettings(
+        QStringLiteral(
+            KODOSI_SOURCE_DIR
+            "/src/qml/Settings/AgentsSettingsSurface.qml"));
+    QVERIFY2(
+        agentsSettings.open(QIODevice::ReadOnly),
+        qPrintable(agentsSettings.errorString()));
+    const auto agentsSource = agentsSettings.readAll();
+    QVERIFY(!agentsSource.contains("Component.onCompleted"));
+    QVERIFY(agentsSource.contains(
+        "Models.ProjectIntelligence.refreshSources(true)"));
+    QVERIFY(agentsSource.contains(
+        "Models.AgentAutoModeRules.refresh(false)"));
+    QVERIFY(agentsSource.contains(
+        "Models.ExternalDiscovery.refresh(true)"));
+    QVERIFY(agentsSource.contains("Models.AgentGlobal.refresh()"));
+    QVERIFY(agentsSource.contains(
+        "Unsaved Auto Mode rule changes will be replaced"));
+    QVERIFY(agentsSource.contains(
+        "objectName: \"panel.settings.autoMode.reload.confirm\""));
+    QVERIFY(agentsSource.contains(
+        "autoModeReloadCancel.forceActiveFocus("));
+    for (const auto copy : {
+             QByteArrayLiteral("qsTr(\"Not refreshed\")"),
+             QByteArrayLiteral("qsTr(\"Refreshing…\")"),
+             QByteArrayLiteral("qsTr(\"Detected\")"),
+             QByteArrayLiteral("qsTr(\"Not detected\")"),
+             QByteArrayLiteral("qsTr(\"Degraded\")"),
+             QByteArrayLiteral("qsTr(\"Refresh failed\")"),
+             QByteArrayLiteral("qsTr(\"External MCP servers\")"),
+             QByteArrayLiteral("No external MCP configs found."),
+             QByteArrayLiteral("qsTr(\"External sessions\")"),
+             QByteArrayLiteral("No external sessions found."),
+             QByteArrayLiteral("qsTr(\"Copy Source Path\")"),
+             QByteArrayLiteral("Reveal in File Manager"),
+         }) {
+        QVERIFY2(agentsSource.contains(copy), copy.constData());
+    }
+    QVERIFY(agentsSource.contains("canCopySourcePath("));
+    QVERIFY(agentsSource.contains("canOpenSource("));
+    QVERIFY(agentsSource.contains("canRevealSource("));
+    QVERIFY(agentsSource.contains(
+        "objectName:\n            \"panel.settings.externalDiscovery.status\""));
+    QVERIFY(!agentsSource.contains("JSON.stringify"));
+    QVERIFY(!agentsSource.contains("selectionToken"));
+    QVERIFY(!agentsSource.contains("runtimeIncarnationId"));
+    QVERIFY(!agentsSource.contains("mutationId"));
+    QVERIFY(!agentsSource.contains("requestId"));
+
+    QFile settingsDrawer(
+        QStringLiteral(
+            KODOSI_SOURCE_DIR "/src/qml/Settings/SettingsDrawer.qml"));
+    QVERIFY2(
+        settingsDrawer.open(QIODevice::ReadOnly),
+        qPrintable(settingsDrawer.errorString()));
+    const auto settingsSource = settingsDrawer.readAll();
+    const auto acquireStart =
+        settingsSource.indexOf("function acquireAgentsVisit()");
+    const auto releaseStart =
+        settingsSource.indexOf("function releaseAgentsVisit(");
+    const auto focusStart =
+        settingsSource.indexOf("function focusCategory(");
+    QVERIFY(acquireStart >= 0);
+    QVERIFY(releaseStart > acquireStart);
+    QVERIFY(focusStart > releaseStart);
+    const auto acquireSource = settingsSource.mid(
+        acquireStart,
+        releaseStart - acquireStart);
+    QCOMPARE(acquireSource.count("refreshSources(false)"), 1);
+    QCOMPARE(acquireSource.count("AgentAutoModeRules.refresh(false)"), 1);
+    QCOMPARE(acquireSource.count("ExternalDiscovery.refresh(false)"), 1);
+    QCOMPARE(acquireSource.count("AgentGlobal.refresh()"), 1);
+    const auto releaseSource = settingsSource.mid(
+        releaseStart,
+        focusStart - releaseStart);
+    QCOMPARE(releaseSource.count("AgentAutoModeRules.close()"), 1);
+    QCOMPARE(releaseSource.count("ExternalDiscovery.close()"), 1);
+    QCOMPARE(releaseSource.count("ProjectIntelligence.closeSource()"), 1);
+    QVERIFY(settingsSource.contains(
+        "releaseAgentsVisit(transferringProjectIntel)"));
+    QVERIFY(settingsSource.contains("Layout.minimumHeight: 0"));
+    QVERIFY(settingsSource.contains("Layout.minimumHeight: 66"));
+    QVERIFY(settingsSource.contains("Layout.maximumHeight: 66"));
+
+    const auto scopePosition =
+        agentsSource.indexOf("objectName: \"panel.settings.agents.scope\"");
+    const auto integrationPosition =
+        agentsSource.indexOf(
+            "objectName: \"panel.settings.agents.integration\"");
+    QVERIFY(scopePosition >= 0);
+    QVERIFY(integrationPosition > scopePosition);
+
+    QFile smoke(
+        QStringLiteral(
+            KODOSI_SOURCE_DIR "/scripts/smoke-ui-probe.sh"));
+    QVERIFY2(smoke.open(QIODevice::ReadOnly), qPrintable(smoke.errorString()));
+    const auto smokeSource = smoke.readAll();
+    QVERIFY(smokeSource.contains("agent-settings-compact-scope.json"));
+    QVERIFY(smokeSource.contains("agent-settings-wide-scope.json"));
+    QVERIFY(smokeSource.contains(
+        "settings scroll viewport overlaps the 66px footer"));
+
+    QFile projectModel(
+        QStringLiteral(
+            KODOSI_SOURCE_DIR
+            "/src/models/ProjectIntelligenceModel.cpp"));
+    QVERIFY2(
+        projectModel.open(QIODevice::ReadOnly),
+        qPrintable(projectModel.errorString()));
+    const auto modelSource = projectModel.readAll();
+    QVERIFY(modelSource.contains(
+        "kind->contains(QStringLiteral(\"mcp\"), Qt::CaseInsensitive)"));
+    QVERIFY(modelSource.contains(
+        "Select an active local session to inspect its bound settings snapshot."));
+    QVERIFY(modelSource.contains(
+        "No values for the %1 scope."));
 }
 
 void ContractTest::runtimeBridgeStartsAndStopsPinnedAbi()

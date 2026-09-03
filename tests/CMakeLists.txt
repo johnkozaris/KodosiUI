@@ -79,6 +79,33 @@ add_test(
     NAME kodosi-desktop-file-integration-tests
     COMMAND kodosi-desktop-file-integration-tests
 )
+
+qt_add_executable(kodosi-project-intelligence-model-tests
+    tst_project_intelligence_model.cpp
+)
+target_link_libraries(kodosi-project-intelligence-model-tests
+    PRIVATE
+        kodosi-desktop-integration
+        kodosi-runtime-bridge
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Test
+        Qt6::Widgets
+)
+target_compile_definitions(kodosi-project-intelligence-model-tests
+    PRIVATE
+        QT_NO_CAST_FROM_ASCII
+        QT_NO_CAST_TO_ASCII
+        QT_NO_URL_CAST_FROM_STRING
+)
+add_test(
+    NAME kodosi-project-intelligence-model-tests
+    COMMAND kodosi-project-intelligence-model-tests
+)
+set_tests_properties(kodosi-project-intelligence-model-tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 30
+)
 set_tests_properties(kodosi-desktop-file-integration-tests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     TIMEOUT 30
@@ -676,6 +703,26 @@ add_test(
     COMMAND kodosi-qt --smoke-test-agent-intel
 )
 set_tests_properties(kodosi-qt-agent-intel-qml-smoke PROPERTIES
+    ENVIRONMENT
+        "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
+    TIMEOUT 10
+)
+
+add_test(
+    NAME kodosi-qt-project-intel-qml-smoke
+    COMMAND kodosi-qt --smoke-test-project-intel --window-size 820x560
+)
+set_tests_properties(kodosi-qt-project-intel-qml-smoke PROPERTIES
+    ENVIRONMENT
+        "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
+    TIMEOUT 10
+)
+
+add_test(
+    NAME kodosi-qt-agent-settings-qml-smoke
+    COMMAND kodosi-qt --smoke-test-agent-settings --window-size 820x560
+)
+set_tests_properties(kodosi-qt-agent-settings-qml-smoke PROPERTIES
     ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
     TIMEOUT 10

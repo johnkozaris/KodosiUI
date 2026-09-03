@@ -187,10 +187,10 @@ void redactUrls(QString& value)
         if (!url.isValid() || url.scheme().isEmpty()) {
             continue;
         }
-        url.setUserName({});
-        url.setPassword({});
-        url.setQuery({});
-        url.setFragment({});
+        url.setUserName(QString {});
+        url.setPassword(QString {});
+        url.setQuery(QString {});
+        url.setFragment(QString {});
         value.replace(
             match.capturedStart(),
             match.capturedLength(),

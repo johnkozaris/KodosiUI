@@ -294,7 +294,7 @@ def main() -> None:
         },
         "ghostty": {
             "repository": ghostty["repository"],
-            "commit": measured_ghostty["upstreamCommit"],
+            "commit": measured_ghostty["linuxUpstreamCommit"],
             "packageRepository": ghostty["packageRepository"],
             "packageCommit": measured_sources["ghosttyPackage"]["commit"],
             "linuxVtArchiveSha256": measured_ghostty[

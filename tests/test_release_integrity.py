@@ -60,7 +60,7 @@ class ReleaseIntegrityTests(unittest.TestCase):
             temporary / "ghostty",
             "johnkozaris/kodosi-ghostty",
             {
-                "Ghostty.ref": (
+                "LinuxGhostty.ref": (
                     json.loads(
                         (ROOT / "dependencies.lock.json").read_text(
                             encoding="utf-8"
@@ -441,7 +441,7 @@ class ReleaseIntegrityTests(unittest.TestCase):
         for repo, relative in (
             (self.source, "tracked.txt"),
             (self.runtime, "runtime.txt"),
-            (self.ghostty, "Ghostty.ref"),
+            (self.ghostty, "LinuxGhostty.ref"),
         ):
             original = (repo / relative).read_text(encoding="utf-8")
             (repo / relative).write_text("dirty\n", encoding="utf-8")
@@ -517,7 +517,7 @@ class ReleaseIntegrityTests(unittest.TestCase):
     def test_lock_ref_and_archive_substitution_are_rejected(self) -> None:
         self.verify_pins()
         original_dependencies = self.dependencies.read_bytes()
-        original_ref = (self.ghostty / "Ghostty.ref").read_bytes()
+        original_ref = (self.ghostty / "LinuxGhostty.ref").read_bytes()
         archive = (
             self.ghostty
             / "Vendor/GhosttyVt/linux-x86_64/lib/libghostty-vt.a"
@@ -530,10 +530,14 @@ class ReleaseIntegrityTests(unittest.TestCase):
         self.verify_pins(expect_success=False)
         self.dependencies.write_bytes(original_dependencies)
 
-        with self.index_flag(self.ghostty, "Ghostty.ref", "assume-unchanged"):
-            (self.ghostty / "Ghostty.ref").write_text("f" * 40 + "\n")
+        with self.index_flag(
+            self.ghostty,
+            "LinuxGhostty.ref",
+            "assume-unchanged",
+        ):
+            (self.ghostty / "LinuxGhostty.ref").write_text("f" * 40 + "\n")
             self.verify_pins(expect_success=False)
-            (self.ghostty / "Ghostty.ref").write_bytes(original_ref)
+            (self.ghostty / "LinuxGhostty.ref").write_bytes(original_ref)
 
         archive.write_bytes(b"substitute archive\n")
         archive_relative = str(archive.relative_to(self.ghostty))
@@ -547,9 +551,13 @@ class ReleaseIntegrityTests(unittest.TestCase):
 
     def test_full_verifier_remeasures_ghostty_inputs(self) -> None:
         self.generate()
-        ref = self.ghostty / "Ghostty.ref"
+        ref = self.ghostty / "LinuxGhostty.ref"
         original_ref = ref.read_bytes()
-        with self.index_flag(self.ghostty, "Ghostty.ref", "assume-unchanged"):
+        with self.index_flag(
+            self.ghostty,
+            "LinuxGhostty.ref",
+            "assume-unchanged",
+        ):
             ref.write_text("f" * 40 + "\n", encoding="ascii")
             self.verify(expect_success=False)
             ref.write_bytes(original_ref)
@@ -589,7 +597,7 @@ class ReleaseIntegrityTests(unittest.TestCase):
         self.generate(expect_success=False)
 
     def test_stale_artifacts_after_ghostty_change_are_rejected(self) -> None:
-        self.commit_change(self.ghostty, "Ghostty.ref")
+        self.commit_change(self.ghostty, "LinuxGhostty.ref")
         dependencies = json.loads(self.dependencies.read_text(encoding="utf-8"))
         dependencies["ghostty"]["packageCommit"] = self.head(self.ghostty)
         self.write_json(self.dependencies, dependencies)
