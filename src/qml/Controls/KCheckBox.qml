@@ -21,7 +21,7 @@ CheckBox {
             ? KodosiTheme.focusRing
             : root.checked
               ? KodosiTheme.accent
-              : KodosiTheme.seamStrong
+              : KodosiTheme.controlBorder
 
         KIcon {
             anchors.centerIn: parent

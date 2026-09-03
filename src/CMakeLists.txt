@@ -22,6 +22,8 @@ qt_add_library(kodosi-runtime-bridge STATIC
     models/AgentGlobalModel.hpp
     models/AgentSessionIntelModel.cpp
     models/AgentSessionIntelModel.hpp
+    models/AppearanceModel.cpp
+    models/AppearanceModel.hpp
     models/AttentionModel.cpp
     models/AttentionModel.hpp
     models/AuthStateModel.cpp
@@ -76,6 +78,7 @@ target_link_libraries(kodosi-runtime-bridge
         Qt6::Core
     PRIVATE
         Kodosi::RustRuntime
+        Qt6::DBus
         Qt6::Gui
 )
 
@@ -260,6 +263,7 @@ qt_add_qml_module(kodosi-qt
         qml/Attention/AttentionSpinner.qml
         qml/Auth/AuthOverlay.qml
         qml/Auth/AuthErrorBanner.qml
+        qml/Appearance/AppearanceMenu.qml
         qml/AgentIntel/AgentCustomAgentsSurface.qml
         qml/AgentIntel/AgentIntelDrawer.qml
         qml/AgentIntel/ProjectIntelligenceModal.qml

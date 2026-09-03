@@ -9,6 +9,7 @@
 #include "models/AgentGlobalModel.hpp"
 #include "models/AgentMemoryModel.hpp"
 #include "models/AgentSessionIntelModel.hpp"
+#include "models/AppearanceModel.hpp"
 #include "models/AttentionModel.hpp"
 #include "models/SessionCatalogModel.hpp"
 #include "models/SessionAccess.hpp"
@@ -40,6 +41,7 @@
 #include "terminal/TerminalView.hpp"
 
 #include <QApplication>
+#include <QColor>
 #include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -60,6 +62,7 @@
 #include <QWindow>
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <optional>
 
@@ -137,6 +140,47 @@ QQuickItem* findQuickItem(
     return nullptr;
 }
 
+double relativeLuminance(const QColor& color)
+{
+    const auto linear = [](const double channel) {
+        return channel <= 0.04045
+            ? channel / 12.92
+            : std::pow((channel + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * linear(color.redF())
+        + 0.7152 * linear(color.greenF())
+        + 0.0722 * linear(color.blueF());
+}
+
+double contrastRatio(const QColor& first, const QColor& second)
+{
+    const auto firstLuminance = relativeLuminance(first);
+    const auto secondLuminance = relativeLuminance(second);
+    const auto lighter = std::max(firstLuminance, secondLuminance);
+    const auto darker = std::min(firstLuminance, secondLuminance);
+    return (lighter + 0.05) / (darker + 0.05);
+}
+
+bool themeContrastPasses(const QObject* rootObject)
+{
+    const auto canvas =
+        rootObject->property("themeCanvas").value<QColor>();
+    const auto surface =
+        rootObject->property("themeSurface").value<QColor>();
+    const auto primary =
+        rootObject->property("themeTextPrimary").value<QColor>();
+    const auto secondary =
+        rootObject->property("themeTextSecondary").value<QColor>();
+    const auto accent =
+        rootObject->property("themeAccent").value<QColor>();
+    const auto accentForeground =
+        rootObject->property("themeAccentForeground").value<QColor>();
+    return contrastRatio(primary, canvas) >= 4.5
+        && contrastRatio(primary, surface) >= 4.5
+        && contrastRatio(secondary, canvas) >= 4.5
+        && contrastRatio(accentForeground, accent) >= 4.5;
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -177,6 +221,9 @@ int main(int argc, char* argv[])
     const auto diagnosticsSmokeTest =
         arguments.contains(
             QStringLiteral("--smoke-test-diagnostics"));
+    const auto appearanceSmokeTest =
+        arguments.contains(
+            QStringLiteral("--smoke-test-appearance"));
     const auto desktopStateSmokeTest =
         arguments.contains(
             QStringLiteral("--smoke-test-desktop-state"));
@@ -213,6 +260,7 @@ int main(int argc, char* argv[])
         || agentSettingsSmokeTest
         || attentionSmokeTest
         || diagnosticsSmokeTest
+        || appearanceSmokeTest
         || desktopStateSmokeTest
         || tilingSmokeTest;
     const auto syntheticMode = windowSize.has_value()
@@ -279,6 +327,7 @@ int main(int argc, char* argv[])
         sessionCatalog,
         agentSessionIntel);
     kodosi::PeopleModel people;
+    kodosi::AppearanceModel appearance;
     kodosi::DesktopSettings desktopSettings;
     kodosi::DesktopStateModel desktopState(
         desktopStateSettings(!syntheticMode),
@@ -352,6 +401,15 @@ int main(int argc, char* argv[])
     terminalSurfaces.setNotificationSink(&terminalNotifications);
     kodosi::AuthStateModel authState;
     kodosi::AuthActions authActions(runtime);
+    if (appearanceSmokeTest) {
+        (void)appearance.setPreference(
+            static_cast<int>(
+                kodosi::AppearanceModel::Preference::Light));
+        appearance.injectReducedMotionForTesting(true);
+        authState.ingestAuthEvent(QByteArrayLiteral(
+            "{\"type\":\"auth.ready\",\"userId\":\"appearance-smoke\","
+            "\"accountEpoch\":77}"));
+    }
     if (tilingSmokeTest || tilingProbeSynthetic) {
         constexpr auto tilingEpoch = 88;
         const auto auth = QJsonDocument(QJsonObject {
@@ -666,6 +724,7 @@ int main(int argc, char* argv[])
         authActions,
         devices,
         deviceActions,
+        appearance,
         desktopSettings,
         desktopState,
         desktopFiles,
@@ -1277,6 +1336,181 @@ int main(int argc, char* argv[])
                                                 }
                                                 desktopState
                                                     .exitFocusMode();
+                                                application.exit(
+                                                    EXIT_SUCCESS);
+                                            });
+                                    });
+                            });
+                    });
+            });
+    } else if (appearanceSmokeTest) {
+        QTimer::singleShot(
+            50,
+            &application,
+            [&application,
+             &appearance,
+             &authActions,
+             rootObject] {
+                auto* utilityButton = rootObject->findChild<QObject*>(
+                    QStringLiteral("header.utility.menu"));
+                auto* menu = rootObject->findChild<QObject*>(
+                    QStringLiteral("panel.utility"));
+                auto* close = rootObject->findChild<QObject*>(
+                    QStringLiteral("panel.utility.close"));
+                auto* settings = rootObject->findChild<QObject*>(
+                    QStringLiteral("panel.utility.settings"));
+                auto* light = rootObject->findChild<QObject*>(
+                    QStringLiteral(
+                        "panel.utility.appearance.light"));
+                auto* dark = rootObject->findChild<QObject*>(
+                    QStringLiteral(
+                        "panel.utility.appearance.dark"));
+                auto* system = rootObject->findChild<QObject*>(
+                    QStringLiteral(
+                        "panel.utility.appearance.system"));
+                auto* signOut = rootObject->findChild<QObject*>(
+                    QStringLiteral("panel.utility.signOut"));
+                if (utilityButton == nullptr || menu == nullptr
+                    || close == nullptr || settings == nullptr
+                    || light == nullptr || dark == nullptr
+                    || system == nullptr || signOut == nullptr
+                    || appearance.preference()
+                        != kodosi::AppearanceModel::Preference::Light
+                    || appearance.effectiveScheme()
+                        != kodosi::AppearanceModel::EffectiveScheme::
+                            LightScheme
+                    || rootObject->property("themeMotionFast").toInt()
+                        != 0
+                    || rootObject->property("themeMotionNormal").toInt()
+                        != 0
+                    || !themeContrastPasses(rootObject)
+                    || !QMetaObject::invokeMethod(
+                        utilityButton,
+                        "click",
+                        Qt::DirectConnection)) {
+                    qCritical()
+                        << "The appearance menu or reduced-motion QML contract is incomplete.";
+                    application.exit(EXIT_FAILURE);
+                    return;
+                }
+                QTimer::singleShot(
+                    20,
+                    menu,
+                    [&application,
+                     &appearance,
+                     &authActions,
+                     rootObject,
+                     menu,
+                     settings,
+                     dark,
+                     system,
+                     signOut] {
+                        if (!menu->property("opened").toBool()
+                            || !QMetaObject::invokeMethod(
+                                dark,
+                                "click",
+                                Qt::DirectConnection)) {
+                            qCritical()
+                                << "The header utility control did not open or select Dark.";
+                            application.exit(EXIT_FAILURE);
+                            return;
+                        }
+                        QTimer::singleShot(
+                            0,
+                            menu,
+                            [&application,
+                             &appearance,
+                             &authActions,
+                             rootObject,
+                             menu,
+                             settings,
+                             system,
+                             signOut] {
+                                if (appearance.preference()
+                                        != kodosi::AppearanceModel::
+                                            Preference::Dark
+                                    || appearance.effectiveScheme()
+                                        != kodosi::AppearanceModel::
+                                            EffectiveScheme::DarkScheme
+                                    || !themeContrastPasses(rootObject)
+                                    || !QMetaObject::invokeMethod(
+                                        system,
+                                        "click",
+                                        Qt::DirectConnection)
+                                    || appearance.preference()
+                                        != kodosi::AppearanceModel::
+                                            Preference::System
+                                    || !QMetaObject::invokeMethod(
+                                        settings,
+                                        "click",
+                                        Qt::DirectConnection)) {
+                                    qCritical()
+                                        << "Appearance actions or authored palette contrast failed.";
+                                    application.exit(EXIT_FAILURE);
+                                    return;
+                                }
+                                QTimer::singleShot(
+                                    0,
+                                    rootObject,
+                                    [&application,
+                                     &authActions,
+                                     rootObject,
+                                     menu,
+                                     signOut] {
+                                        auto* settingsPanel =
+                                            rootObject
+                                                ->findChild<QObject*>(
+                                                    QStringLiteral(
+                                                        "panel.settings"));
+                                        if (settingsPanel == nullptr
+                                            || !settingsPanel
+                                                    ->property("opened")
+                                                    .toBool()
+                                            || menu
+                                                ->property("opened")
+                                                .toBool()
+                                            || !QMetaObject::
+                                                invokeMethod(
+                                                    settingsPanel,
+                                                    "close",
+                                                    Qt::DirectConnection)
+                                            || !QMetaObject::
+                                                invokeMethod(
+                                                    menu,
+                                                    "open",
+                                                    Qt::DirectConnection)) {
+                                            qCritical()
+                                                << "The utility Settings action did not preserve Settings behavior.";
+                                            application.exit(
+                                                EXIT_FAILURE);
+                                            return;
+                                        }
+                                        QTimer::singleShot(
+                                            0,
+                                            menu,
+                                            [&application,
+                                             &authActions,
+                                             signOut] {
+                                                if (!signOut
+                                                         ->property(
+                                                             "visible")
+                                                         .toBool()
+                                                    || !QMetaObject::
+                                                        invokeMethod(
+                                                            signOut,
+                                                            "click",
+                                                            Qt::
+                                                                DirectConnection)
+                                                    || authActions
+                                                           .failedOperation()
+                                                        != QStringLiteral(
+                                                            "logout")) {
+                                                    qCritical()
+                                                        << "The utility Sign out action is not wired.";
+                                                    application.exit(
+                                                        EXIT_FAILURE);
+                                                    return;
+                                                }
                                                 application.exit(
                                                     EXIT_SUCCESS);
                                             });

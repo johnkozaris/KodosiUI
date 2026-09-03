@@ -158,7 +158,7 @@ Button {
                     KodosiTheme.danger.g,
                     KodosiTheme.danger.b,
                     0.45)
-              : KodosiTheme.seam
+              : KodosiTheme.controlBorder
 
         Behavior on color {
             ColorAnimation { duration: KodosiTheme.motionFast }

@@ -35,13 +35,15 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def theme_color(theme: str, name: str) -> str:
+def theme_color(theme: str, palette: str, name: str) -> str:
+    authored_name = palette + name[0].upper() + name[1:]
     match = re.search(
-        rf'readonly property color {re.escape(name)}: "(#[0-9a-fA-F]{{6}})"',
+        rf'readonly property color {re.escape(authored_name)}: '
+        rf'"(#[0-9a-fA-F]{{6}})"',
         theme,
     )
     if not match:
-        fail(f"missing required color token {name!r}")
+        fail(f"missing required {palette} color token {name!r}")
     return match.group(1)
 
 
@@ -122,9 +124,12 @@ for token in (
     "radiusMedium: 10",
     "radiusLarge: 12",
     "radiusModal: 16",
-    'focusRing: "#ef9d75"',
+    'darkFocusRing: "#ef9d75"',
+    'lightFocusRing: "#944014"',
     "sidebarWidth: 272",
     "headerHeight: 56",
+    "motionFast: reduceMotion ? 0 : motionFastAuthored",
+    "motionNormal: reduceMotion ? 0 : motionNormalAuthored",
 ):
     if token not in theme:
         fail(f"missing required theme token {token!r}")
@@ -132,26 +137,95 @@ for token in (
 if re.search(r"#[0-9a-fA-F]{0,4}(?:00f|06f|07f|08f|09f|0af|0bf)", theme):
     fail("blue focus or selection literal detected in theme")
 
-on_danger = theme_color(theme, "dangerForeground")
-for state in ("danger", "dangerHover", "dangerPressed"):
+for palette in ("dark", "light"):
+    on_danger = theme_color(theme, palette, "dangerForeground")
+    for state in ("danger", "dangerHover", "dangerPressed"):
+        require_contrast(
+            on_danger,
+            theme_color(theme, palette, state),
+            4.5,
+            f"{palette} onDanger against {state}",
+        )
     require_contrast(
-        on_danger,
-        theme_color(theme, state),
+        theme_color(theme, palette, "accentForeground"),
+        theme_color(theme, palette, "accent"),
         4.5,
-        f"onDanger against {state}",
+        f"{palette} accent foreground against accent",
     )
-require_contrast(
-    theme_color(theme, "placeholderText"),
-    theme_color(theme, "input"),
-    4.5,
-    "placeholder text against input",
-)
-require_contrast(
-    theme_color(theme, "textSecondary"),
-    theme_color(theme, "canvas"),
-    3.0,
-    "prominent terminal scroll bar thumb against Stage",
-)
+    for state in ("accentHover", "accentPressed"):
+        require_contrast(
+            theme_color(theme, palette, "accentForeground"),
+            theme_color(theme, palette, state),
+            4.5,
+            f"{palette} accent foreground against {state}",
+        )
+    require_contrast(
+        theme_color(theme, palette, "placeholderText"),
+        theme_color(theme, palette, "input"),
+        4.5,
+        f"{palette} placeholder text against input",
+    )
+    require_contrast(
+        theme_color(theme, palette, "textPrimary"),
+        theme_color(theme, palette, "canvas"),
+        4.5,
+        f"{palette} primary text against canvas",
+    )
+    require_contrast(
+        theme_color(theme, palette, "textSecondary"),
+        theme_color(theme, palette, "canvas"),
+        4.5,
+        f"{palette} secondary text against canvas",
+    )
+    require_contrast(
+        theme_color(theme, palette, "textPrimary"),
+        theme_color(theme, palette, "terminal"),
+        4.5,
+        f"{palette} primary text against terminal surface",
+    )
+    for role in ("textPrimary", "textSecondary", "textTertiary"):
+        for surface in (
+            "canvas",
+            "surface",
+            "surfaceRaised",
+            "surfaceElevated",
+            "input",
+            "terminal",
+        ):
+            require_contrast(
+                theme_color(theme, palette, role),
+                theme_color(theme, palette, surface),
+                4.5,
+                f"{palette} {role} against {surface}",
+            )
+    for role in ("accent", "success", "warning", "danger", "reconnecting"):
+        for surface in (
+            "canvas",
+            "surface",
+            "surfaceRaised",
+            "surfaceElevated",
+            "surfaceSelected",
+            "input",
+        ):
+            require_contrast(
+                theme_color(theme, palette, role),
+                theme_color(theme, palette, surface),
+                4.5,
+                f"{palette} {role} text against {surface}",
+            )
+    for surface in (
+        "canvas",
+        "surface",
+        "surfaceRaised",
+        "surfaceElevated",
+        "input",
+    ):
+        require_contrast(
+            theme_color(theme, palette, "controlBorder"),
+            theme_color(theme, palette, surface),
+            3.0,
+            f"{palette} control border against {surface}",
+        )
 
 main = (QML / "Main.qml").read_text()
 for contract in (
@@ -159,6 +233,7 @@ for contract in (
     "enabled: !window.blockingOverlayOpen",
     'objectName: "header.sidebar.toggle"',
     'objectName: "header.settings"',
+    'objectName: "header.utility.menu"',
     'objectName: "header.attention"',
     'objectName: "header.tab.devices"',
     'objectName: "header.logo"',
@@ -169,6 +244,42 @@ for contract in (
 ):
     if contract not in main:
         fail(f"missing shell contract {contract!r}")
+
+appearance_menu = (QML / "Appearance" / "AppearanceMenu.qml").read_text()
+for contract in (
+    'objectName: "panel.utility"',
+    'objectName: "panel.utility.close"',
+    'objectName: "panel.utility.settings"',
+    'objectName: "panel.utility.appearance.light"',
+    'objectName: "panel.utility.appearance.dark"',
+    'objectName: "panel.utility.appearance.system"',
+    '"panel.utility.signOut"',
+    "root.openSettingsRequested()",
+    "root.signOutRequested()",
+    "Models.Appearance.setPreference(",
+):
+    if contract not in appearance_menu:
+        fail(f"missing appearance menu contract {contract!r}")
+
+busy_indicator = (CONTROL_DIR / "KBusyIndicator.qml").read_text()
+attention_spinner = (QML / "Attention" / "AttentionSpinner.qml").read_text()
+for contract in (
+    "duration: KodosiTheme.motionSpinner",
+    "running: root.running && !KodosiTheme.reduceMotion",
+):
+    if contract not in busy_indicator:
+        fail(f"missing reduced-motion busy indicator contract {contract!r}")
+for contract in (
+    "running: root.running && !KodosiTheme.reduceMotion",
+    "KodosiTheme.motionAttentionStagger",
+    "duration: KodosiTheme.motionFast",
+):
+    if contract not in attention_spinner:
+        fail(f"missing reduced-motion attention contract {contract!r}")
+for path in sorted(QML.rglob("*.qml")):
+    text = path.read_text()
+    if re.search(r"\bduration:\s*(?:900|[^(]*\*\s*120)\b", text):
+        fail(f"scattered animation duration remains in {path.relative_to(ROOT)}")
 
 desktop_state = (ROOT / "src" / "models" / "DesktopStateModel.cpp").read_text()
 for contract in (

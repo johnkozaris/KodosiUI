@@ -11,8 +11,18 @@ ApplicationWindow {
     property string selectedProject
     property string selectedStatus
     property string selectedMode
+    readonly property int themeMotionFast: KodosiTheme.motionFast
+    readonly property int themeMotionNormal: KodosiTheme.motionNormal
+    readonly property color themeCanvas: KodosiTheme.canvas
+    readonly property color themeSurface: KodosiTheme.surface
+    readonly property color themeTextPrimary: KodosiTheme.textPrimary
+    readonly property color themeTextSecondary: KodosiTheme.textSecondary
+    readonly property color themeAccent: KodosiTheme.accent
+    readonly property color themeAccentForeground:
+        KodosiTheme.accentForeground
     readonly property bool blockingOverlayOpen:
         settingsDrawer.opened
+        || utilityMenu.opened
         || attentionPanel.opened
         || agentIntelDrawer.opened
         || projectIntelModal.opened
@@ -143,6 +153,25 @@ ApplicationWindow {
             diagnosticsDrawer.close()
         else
             diagnosticsDrawer.open()
+    }
+
+    function openSettings() {
+        utilityMenu.close()
+        attentionPanel.close()
+        agentIntelDrawer.close()
+        diagnosticsDrawer.close()
+        settingsDrawer.open()
+    }
+
+    function toggleUtilityMenu() {
+        attentionPanel.close()
+        agentIntelDrawer.close()
+        settingsDrawer.close()
+        diagnosticsDrawer.close()
+        if (utilityMenu.opened)
+            utilityMenu.close()
+        else
+            utilityMenu.openAt(utilityButton)
     }
 
     function setShellAccessibilityIgnored(item, ignored) {
@@ -327,39 +356,26 @@ ApplicationWindow {
                         Accessible.id: objectName
                         glyph: "settings"
                         Accessible.name: qsTr("Open settings")
-                        onClicked: {
-                            attentionPanel.close()
-                            agentIntelDrawer.close()
-                            diagnosticsDrawer.close()
-                            settingsDrawer.open()
-                        }
+                        onClicked: window.openSettings()
                     }
 
                     KButton {
-                        id: accountButton
-                        objectName: "header.account"
+                        id: utilityButton
+                        objectName: "header.utility.menu"
                         Accessible.id: objectName
-                        variant: Models.AuthState.signedIn
-                            ? "secondary"
-                            : "directional"
-                        iconName: Models.AuthState.signedIn
-                            ? "account"
-                            : "login"
-                        iconTrailing: !Models.AuthState.signedIn
-                        text: Models.AuthState.signedIn
-                            ? qsTr("Sign out")
-                            : Models.AuthActions.busy
-                              ? qsTr("Signing in")
-                              : qsTr("Sign in")
-                        Accessible.name: text
+                        variant: "secondary"
+                        iconName: "account"
+                        text: window.width < 1000
+                            ? ""
+                            : Models.AuthState.signedIn
+                              ? qsTr("Account")
+                              : qsTr("Kodosi")
+                        Accessible.name: Models.AuthState.signedIn
+                            ? qsTr("Account menu")
+                            : qsTr("App menu")
                         enabled: !Models.AuthActions.busy
                         compact: window.width < 1000
-                        onClicked: {
-                            if (Models.AuthState.signedIn)
-                                Models.AuthActions.signOut()
-                            else
-                                Models.AuthActions.beginSignIn()
-                        }
+                        onClicked: window.toggleUtilityMenu()
                     }
                 }
 
@@ -572,6 +588,15 @@ ApplicationWindow {
 
     AttentionPanel {
         id: attentionPanel
+    }
+
+    AppearanceMenu {
+        id: utilityMenu
+        signedIn: Models.AuthState.signedIn
+        authBusy: Models.AuthActions.busy
+        onOpenSettingsRequested: window.openSettings()
+        onSignInRequested: Models.AuthActions.beginSignIn()
+        onSignOutRequested: Models.AuthActions.signOut()
     }
 
     SettingsDrawer {

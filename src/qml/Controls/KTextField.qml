@@ -23,7 +23,7 @@ TextField {
         border.color: root.activeFocus
             ? KodosiTheme.focusRing
             : root.acceptableInput
-              ? KodosiTheme.seam
+              ? KodosiTheme.controlBorder
               : KodosiTheme.danger
     }
 }

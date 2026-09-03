@@ -14,6 +14,7 @@ void configureModelInstances(
     AuthActions& authActions,
     DevicesModel& devices,
     DeviceActions& deviceActions,
+    AppearanceModel& appearance,
     DesktopSettings& desktopSettings,
     DesktopStateModel& desktopState,
     DesktopFileIntegration& desktopFiles,
@@ -47,6 +48,7 @@ void configureModelInstances(
     AuthActionsForeign::instance = &authActions;
     DevicesModelForeign::instance = &devices;
     DeviceActionsForeign::instance = &deviceActions;
+    AppearanceModelForeign::instance = &appearance;
     DesktopSettingsForeign::instance = &desktopSettings;
     DesktopStateModelForeign::instance = &desktopState;
     DesktopFileIntegrationForeign::instance = &desktopFiles;

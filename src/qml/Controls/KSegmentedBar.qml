@@ -10,7 +10,7 @@ Rectangle {
     radius: KodosiTheme.radiusMedium
     color: KodosiTheme.surfaceRaised
     border.width: 1
-    border.color: KodosiTheme.seam
+    border.color: KodosiTheme.controlBorder
 
     RowLayout {
         id: row

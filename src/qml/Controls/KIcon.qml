@@ -34,6 +34,7 @@ Item {
         case "cpu": return "M7 7 H17 V17 H7 Z M10 10 H14 V14 H10 Z M9 3 V7 M15 3 V7 M9 17 V21 M15 17 V21 M3 9 H7 M17 9 H21 M3 15 H7 M17 15 H21"
         case "refresh": return "M19 8 A8 8 0 1 0 20 14 M19 4 V8 H15"
         case "login": return "M13 5 H19 V19 H13 M4 12 H15 M11 8 L15 12 L11 16"
+        case "logout": return "M11 5 H5 V19 H11 M20 12 H9 M13 8 L9 12 L13 16"
         case "intel": return "M4 6 H20 M4 12 H20 M4 18 H20 M7 4 V8 M14 10 V14 M10 16 V20"
         case "interrupt": return "M7 5 H10 V19 H7 Z M14 5 H17 V19 H14 Z"
         case "focus": return "M4 9 V4 H9 M15 4 H20 V9 M20 15 V20 H15 M9 20 H4 V15"

@@ -32,9 +32,9 @@ Control {
         RotationAnimator on rotation {
             from: 0
             to: 360
-            duration: 900
+            duration: KodosiTheme.motionSpinner
             loops: Animation.Infinite
-            running: root.running
+            running: root.running && !KodosiTheme.reduceMotion
         }
     }
 }

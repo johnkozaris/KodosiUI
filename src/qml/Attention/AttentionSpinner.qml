@@ -27,13 +27,16 @@ Item {
                 Layout.preferredHeight: 4
                 radius: 2
                 color: KodosiTheme.accent
-                opacity: 0.32
+                opacity: KodosiTheme.reduceMotion ? 1 : 0.32
 
                 SequentialAnimation on opacity {
-                    running: root.running
+                    running: root.running && !KodosiTheme.reduceMotion
                     loops: Animation.Infinite
 
-                    PauseAnimation { duration: dot.index * 120 }
+                    PauseAnimation {
+                        duration: dot.index
+                            * KodosiTheme.motionAttentionStagger
+                    }
                     NumberAnimation {
                         from: 0.32
                         to: 1
@@ -44,7 +47,10 @@ Item {
                         to: 0.32
                         duration: KodosiTheme.motionFast
                     }
-                    PauseAnimation { duration: (2 - dot.index) * 120 }
+                    PauseAnimation {
+                        duration: (2 - dot.index)
+                            * KodosiTheme.motionAttentionStagger
+                    }
                 }
             }
         }

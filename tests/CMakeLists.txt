@@ -57,6 +57,30 @@ target_compile_definitions(kodosi-desktop-settings-tests
 )
 add_test(NAME kodosi-desktop-settings-tests COMMAND kodosi-desktop-settings-tests)
 
+qt_add_executable(kodosi-appearance-model-tests
+    tst_appearance_model.cpp
+)
+target_link_libraries(kodosi-appearance-model-tests
+    PRIVATE
+        kodosi-runtime-bridge
+        Qt6::Core
+        Qt6::DBus
+        Qt6::Gui
+        Qt6::Test
+)
+target_compile_definitions(kodosi-appearance-model-tests
+    PRIVATE
+        QT_NO_CAST_FROM_ASCII
+        QT_NO_CAST_TO_ASCII
+)
+add_test(
+    NAME kodosi-appearance-model-tests
+    COMMAND
+        "${DBUS_RUN_SESSION_EXECUTABLE}"
+        --
+        "$<TARGET_FILE:kodosi-appearance-model-tests>"
+)
+
 qt_add_executable(kodosi-desktop-file-integration-tests
     tst_desktop_file_integration.cpp
 )
@@ -683,6 +707,16 @@ set_tests_properties(kodosi-terminal-kernel-tests PROPERTIES
 
 add_test(NAME kodosi-qt-qml-smoke COMMAND kodosi-qt --smoke-test)
 set_tests_properties(kodosi-qt-qml-smoke PROPERTIES
+    ENVIRONMENT
+        "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
+    TIMEOUT 10
+)
+
+add_test(
+    NAME kodosi-qt-appearance-qml-smoke
+    COMMAND kodosi-qt --smoke-test-appearance --window-size 820x560
+)
+set_tests_properties(kodosi-qt-appearance-qml-smoke PROPERTIES
     ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
     TIMEOUT 10

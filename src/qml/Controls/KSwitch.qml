@@ -23,7 +23,7 @@ Switch {
             ? KodosiTheme.focusRing
             : root.checked
               ? KodosiTheme.accent
-              : KodosiTheme.seamStrong
+              : KodosiTheme.controlBorder
 
         Rectangle {
             x: root.checked ? parent.width - width - 3 : 3

@@ -82,6 +82,15 @@ clamping, scrolling, and divider proportions. QML renders those typed
 presentation models and keeps one independent native terminal surface per
 staged session; focus mode hides rather than destroys the other tile delegates.
 
+`AppearanceModel` owns the versioned System, Light, or Dark preference and
+applies it through Qt's `QStyleHints`. Follow System removes the application
+override and tracks live platform changes. On Linux it reads
+`org.freedesktop.appearance/reduced-motion` asynchronously from the
+Settings portal, listens for changes and service restarts, and defaults to
+normal motion when the desktop does not publish the standard key. Theme
+changes affect authored Qt chrome; terminal cell colors remain owned by the
+terminal session and its existing settings.
+
 Agent Intelligence Project Memory is acquired on demand through a native
 model. QML supplies only the stable session ID and presentation selections;
 the model privately resolves the current local Claude identity and retains

@@ -72,7 +72,7 @@ SpinBox {
         border.width: 1
         border.color: root.activeFocus
             ? KodosiTheme.focusRing
-            : KodosiTheme.seam
+            : KodosiTheme.controlBorder
     }
 
     Rectangle {

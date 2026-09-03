@@ -6,6 +6,7 @@
 #include "models/AgentGlobalModel.hpp"
 #include "models/AgentMemoryModel.hpp"
 #include "models/AgentSessionIntelModel.hpp"
+#include "models/AppearanceModel.hpp"
 #include "models/ExternalDiscoveryModel.hpp"
 #include "models/AttentionModel.hpp"
 #include "models/AuthStateModel.hpp"
@@ -279,6 +280,20 @@ struct DesktopSettingsForeign {
 public:
     inline static kodosi::DesktopSettings* instance = nullptr;
     static kodosi::DesktopSettings* create(QQmlEngine* engine, QJSEngine*)
+    {
+        return singleton(instance, engine);
+    }
+};
+
+struct AppearanceModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::AppearanceModel)
+    QML_NAMED_ELEMENT(Appearance)
+    QML_SINGLETON
+
+public:
+    inline static kodosi::AppearanceModel* instance = nullptr;
+    static kodosi::AppearanceModel* create(QQmlEngine* engine, QJSEngine*)
     {
         return singleton(instance, engine);
     }
@@ -602,6 +617,7 @@ void configureModelInstances(
     AuthActions& authActions,
     DevicesModel& devices,
     DeviceActions& deviceActions,
+    AppearanceModel& appearance,
     DesktopSettings& desktopSettings,
     DesktopStateModel& desktopState,
     DesktopFileIntegration& desktopFiles,

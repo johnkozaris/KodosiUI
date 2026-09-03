@@ -12,7 +12,7 @@ Slider {
         width: root.availableWidth
         height: 4
         radius: 2
-        color: KodosiTheme.input
+        color: KodosiTheme.controlBorder
 
         Rectangle {
             width: root.visualPosition * parent.width

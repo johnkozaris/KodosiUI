@@ -77,6 +77,14 @@ color is reserved for state and intent.
 The palette uses warm neutrals rather than blue-black defaults. Copper marks
 selection and primary actions; green communicates trusted or healthy state.
 
+Dark appearance keeps the established near-black cocoa command deck. Light
+appearance is authored independently as parchment, espresso, clay, and copper:
+it is not an inversion and does not admit platform white, gray, or blue into
+the control family. Both palettes preserve the same semantic role names so
+controls remain appearance-agnostic. Terminal cell colors continue to come
+from the terminal session; light appearance only changes the surrounding
+workbench chrome and authored selection roles.
+
 **The Signal Rarity Rule.** Accent colors indicate selection, action, or live
 state. Large decorative accent fields are not part of the system.
 
@@ -99,6 +107,13 @@ Depth is primarily tonal. Warm charcoal layers separate canvas, rail, cards,
 selected rows, and inset inputs. One-pixel seams define permanent regions;
 restrained offset shadows are reserved for active terminal tiles and transient
 overlays.
+
+## Motion
+
+Fast, normal, spinner, and attention-stagger timings are centralized in the
+theme. The desktop reduced-motion preference zeros transitions and stops
+continuous rotation or pulsing while preserving a static busy or attention
+indicator.
 
 ## Shapes
 
