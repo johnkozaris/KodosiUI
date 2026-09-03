@@ -55,6 +55,7 @@ depend = at-spi2-core
 depend = brotli
 depend = cairo
 depend = dbus
+depend = desktop-file-utils
 depend = libdrm
 depend = libglvnd
 depend = fontconfig

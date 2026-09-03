@@ -68,6 +68,15 @@ Item {
         shareDialog.open()
     }
 
+    function closeConflictingOverlays() {
+        createOpen = false
+        hiddenOpen = false
+        shareDialog.close()
+        Models.SessionActions.cancelDeleteConfirmation()
+        Models.SessionAccess.cancelLeaveConfirmation()
+        Models.SessionAccess.cancelRevokeConfirmation()
+    }
+
     function nextDesktopRequestId(suffix) {
         desktopRequestSerial += 1
         return "sidebar." + suffix + "." + desktopRequestSerial

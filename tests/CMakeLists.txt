@@ -57,6 +57,45 @@ target_compile_definitions(kodosi-desktop-settings-tests
 )
 add_test(NAME kodosi-desktop-settings-tests COMMAND kodosi-desktop-settings-tests)
 
+qt_add_executable(kodosi-deep-links-tests
+    tst_deep_links.cpp
+)
+target_link_libraries(kodosi-deep-links-tests
+    PRIVATE
+        kodosi-runtime-bridge
+        Qt6::Core
+        Qt6::Test
+)
+target_compile_definitions(kodosi-deep-links-tests
+    PRIVATE
+        KODOSI_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        QT_NO_CAST_FROM_ASCII
+        QT_NO_CAST_TO_ASCII
+        QT_NO_URL_CAST_FROM_STRING
+)
+add_test(NAME kodosi-deep-links-tests COMMAND kodosi-deep-links-tests)
+
+qt_add_executable(kodosi-single-instance-tests
+    tst_single_instance.cpp
+)
+target_link_libraries(kodosi-single-instance-tests
+    PRIVATE
+        kodosi-runtime-bridge
+        Qt6::Core
+        Qt6::Network
+        Qt6::Test
+)
+target_compile_definitions(kodosi-single-instance-tests
+    PRIVATE
+        QT_NO_CAST_FROM_ASCII
+        QT_NO_CAST_TO_ASCII
+        QT_NO_URL_CAST_FROM_STRING
+)
+add_test(
+    NAME kodosi-single-instance-tests
+    COMMAND kodosi-single-instance-tests
+)
+
 qt_add_executable(kodosi-appearance-model-tests
     tst_appearance_model.cpp
 )
@@ -195,10 +234,58 @@ add_test(
         --window-size
         820x560
 )
+add_test(
+    NAME kodosi-deep-link-approval-presentation
+    COMMAND
+        kodosi-qt
+        --smoke-test-deep-link-approval
+        kodosi://session/attention-smoke?toolUseId=tool-smoke
+        --window-size
+        900x700
+)
+add_test(
+    NAME kodosi-deep-link-missing-approval-presentation
+    COMMAND
+        kodosi-qt
+        --smoke-test-deep-link-missing-approval
+        kodosi://session/attention-smoke?toolUseId=missing-tool-smoke
+        --window-size
+        900x700
+)
+add_test(
+    NAME kodosi-deep-link-status-presentation
+    COMMAND
+        kodosi-qt
+        --smoke-test-deep-link-status
+        kodosi://session/%GG
+        --window-size
+        820x560
+)
 set_tests_properties(kodosi-shell-account-device-parity PROPERTIES
     ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
     TIMEOUT 20
+)
+set_tests_properties(
+    kodosi-deep-link-approval-presentation
+    PROPERTIES
+        ENVIRONMENT
+            "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
+        TIMEOUT 20
+)
+set_tests_properties(
+    kodosi-deep-link-missing-approval-presentation
+    PROPERTIES
+        ENVIRONMENT
+            "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
+        TIMEOUT 20
+)
+set_tests_properties(
+    kodosi-deep-link-status-presentation
+    PROPERTIES
+        ENVIRONMENT
+            "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
+        TIMEOUT 20
 )
 set_tests_properties(kodosi-desktop-state-composition PROPERTIES
     ENVIRONMENT

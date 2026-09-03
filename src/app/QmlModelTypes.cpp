@@ -17,6 +17,7 @@ void configureModelInstances(
     AppearanceModel& appearance,
     DesktopSettings& desktopSettings,
     DesktopStateModel& desktopState,
+    DeepLinkController& deepLinks,
     DesktopFileIntegration& desktopFiles,
     ExternalDiscoveryModel& externalDiscovery,
     MissionDirectoryModel& missions,
@@ -51,6 +52,7 @@ void configureModelInstances(
     AppearanceModelForeign::instance = &appearance;
     DesktopSettingsForeign::instance = &desktopSettings;
     DesktopStateModelForeign::instance = &desktopState;
+    DeepLinkControllerForeign::instance = &deepLinks;
     DesktopFileIntegrationForeign::instance = &desktopFiles;
     ExternalDiscoveryModelForeign::instance = &externalDiscovery;
     MissionDirectoryModelForeign::instance = &missions;

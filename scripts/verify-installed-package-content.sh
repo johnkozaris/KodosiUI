@@ -9,6 +9,11 @@ root=$(realpath "$root")
 test -x "$root/usr/bin/kodosi"
 test -x "$root/usr/bin/kodosi-qt"
 test -x "$root/usr/lib/kodosi/bin/kodosi"
+test -f "$root/usr/share/applications/com.kodosi.Kodosi.desktop"
+grep -Fxq 'Exec=kodosi-qt %u' \
+    "$root/usr/share/applications/com.kodosi.Kodosi.desktop"
+grep -Fxq 'MimeType=x-scheme-handler/kodosi;' \
+    "$root/usr/share/applications/com.kodosi.Kodosi.desktop"
 readelf -h "$root/usr/lib/kodosi/bin/kodosi" | grep -F 'ELF64' >/dev/null
 if ldd "$root/usr/lib/kodosi/bin/kodosi" | grep -Fq 'not found'; then
     echo "Bundled Kodosi CLI has unresolved ELF dependencies" >&2

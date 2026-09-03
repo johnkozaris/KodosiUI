@@ -30,6 +30,7 @@
 #include "models/SteeringModel.hpp"
 #include "models/TerminalTilingLayoutModel.hpp"
 #include "models/TrustModel.hpp"
+#include "app/DeepLinkController.hpp"
 #include "logging/ApplicationLogStore.hpp"
 #include "platform/DesktopFileIntegration.hpp"
 #include "terminal/TerminalSurfaceController.hpp"
@@ -308,6 +309,22 @@ struct DesktopStateModelForeign {
 public:
     inline static kodosi::DesktopStateModel* instance = nullptr;
     static kodosi::DesktopStateModel* create(QQmlEngine* engine, QJSEngine*)
+    {
+        return singleton(instance, engine);
+    }
+};
+
+struct DeepLinkControllerForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::DeepLinkController)
+    QML_NAMED_ELEMENT(DeepLinks)
+    QML_SINGLETON
+
+public:
+    inline static kodosi::DeepLinkController* instance = nullptr;
+    static kodosi::DeepLinkController* create(
+        QQmlEngine* engine,
+        QJSEngine*)
     {
         return singleton(instance, engine);
     }
@@ -620,6 +637,7 @@ void configureModelInstances(
     AppearanceModel& appearance,
     DesktopSettings& desktopSettings,
     DesktopStateModel& desktopState,
+    DeepLinkController& deepLinks,
     DesktopFileIntegration& desktopFiles,
     ExternalDiscoveryModel& externalDiscovery,
     MissionDirectoryModel& missions,

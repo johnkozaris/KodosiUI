@@ -29,6 +29,9 @@ ui-probe *args: ui-probe-build
 ui-probe-smoke: build ui-probe-build
     ./scripts/smoke-ui-probe.sh
 
+ui-probe-deep-link-smoke: build ui-probe-build
+    ./scripts/smoke-deep-link-ui-probe.sh
+
 ui-probe-input-status: ui-probe-build
     build/dev/src/kodosi-ui-probe input-status
 
@@ -46,6 +49,7 @@ test: build
     "{{ ctest }}" --preset dev
 
 release-integrity-test:
+    python3 -m unittest tests/test_deep_link_packaging.py
     python3 -m unittest tests/test_release_integrity.py
     python3 -m unittest tests/test_reproducible_archives.py
 

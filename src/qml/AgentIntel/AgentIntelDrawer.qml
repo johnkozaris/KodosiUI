@@ -14,9 +14,15 @@ KPopover {
     property string sessionId
     property string sessionName
     property string approvalIdentityToken
+    property bool approvalMissing: false
     property var intel: ({})
     property var sessionInfo: ({})
     property var approval: ({})
+    property bool approvalActionsAvailable:
+        !approvalMissing
+        && approval.identityToken !== undefined
+        && (approvalIdentityToken.length === 0
+            || approval.identityToken === approvalIdentityToken)
     property int surfaceIndex: 0
 
     parent: Overlay.overlay
@@ -30,12 +36,17 @@ KPopover {
     focus: true
     closePolicy: Popup.CloseOnEscape
 
-    function openForSession(sessionId, sessionName, approvalIdentityToken) {
+    function openForSession(
+        sessionId,
+        sessionName,
+        approvalIdentityToken,
+        approvalMissing) {
         Models.AgentCustomAgents.close()
         Models.AgentMemory.close()
         root.sessionId = sessionId
         root.sessionName = sessionName
         root.approvalIdentityToken = approvalIdentityToken || ""
+        root.approvalMissing = approvalMissing === true
         root.surfaceIndex = 0
         Models.AgentConversation.close()
         refreshPresentation()
@@ -50,7 +61,9 @@ KPopover {
             close()
             return
         }
-        approval = approvalIdentityToken.length > 0
+        approval = approvalMissing
+            ? ({})
+            : approvalIdentityToken.length > 0
             ? Models.PendingPermissions.presentationForIdentityToken(
                 approvalIdentityToken)
             : Models.PendingPermissions.presentationForSession(sessionId)
@@ -109,6 +122,7 @@ KPopover {
     }
     onClosed: {
         approvalIdentityToken = ""
+        approvalMissing = false
         approval = ({})
         surfaceIndex = 0
         Models.AgentConversation.close()
@@ -451,6 +465,7 @@ KPopover {
                         SurfaceCard {
                             visible: root.approval.identityToken !== undefined
                                 || root.approvalIdentityToken.length > 0
+                                || root.approvalMissing
                             Layout.fillWidth: true
                             implicitHeight: approvalColumn.implicitHeight + 24
 
@@ -461,7 +476,9 @@ KPopover {
                                 spacing: 7
 
                                 PlainLabel {
-                                    text: root.approval.identityToken !== undefined
+                                    text: root.approvalMissing
+                                        ? qsTr("This approval is no longer pending.")
+                                        : root.approval.identityToken !== undefined
                                         ? qsTr("Approval · %1")
                                             .arg(root.approval.toolName || "")
                                         : qsTr("This approval is no longer pending.")
@@ -474,7 +491,7 @@ KPopover {
 
                                 PlainLabel {
                                     Layout.fillWidth: true
-                                    visible: root.approval.identityToken !== undefined
+                                    visible: root.approvalActionsAvailable
                                     text: root.approval.decisionMessage
                                         || root.approval.toolInputSummary
                                         || qsTr("Permission request waiting")
@@ -483,7 +500,7 @@ KPopover {
                                 }
 
                                 RowLayout {
-                                    visible: root.approval.identityToken !== undefined
+                                    visible: root.approvalActionsAvailable
 
                                     KButton {
                                         objectName:
@@ -491,10 +508,15 @@ KPopover {
                                             + root.approval.identityToken
                                         Accessible.id: objectName
                                         text: qsTr("Deny")
-                                        enabled: root.approval.actionable === true
+                                        visible: root.approvalActionsAvailable
+                                        enabled: root.approvalActionsAvailable
+                                            && root.approval.actionable === true
                                         Accessible.name: qsTr("Deny this tool request")
-                                        onClicked: Models.PendingPermissions.deny(
-                                            root.approval.identityToken)
+                                        onClicked: {
+                                            if (root.approvalActionsAvailable)
+                                                Models.PendingPermissions.deny(
+                                                    root.approval.identityToken)
+                                        }
                                     }
                                     KButton {
                                         objectName:
@@ -502,10 +524,15 @@ KPopover {
                                             + root.approval.identityToken
                                         Accessible.id: objectName
                                         text: qsTr("Allow")
-                                        enabled: root.approval.actionable === true
+                                        visible: root.approvalActionsAvailable
+                                        enabled: root.approvalActionsAvailable
+                                            && root.approval.actionable === true
                                         Accessible.name: qsTr("Allow this tool request")
-                                        onClicked: Models.PendingPermissions.approve(
-                                            root.approval.identityToken)
+                                        onClicked: {
+                                            if (root.approvalActionsAvailable)
+                                                Models.PendingPermissions.approve(
+                                                    root.approval.identityToken)
+                                        }
                                     }
                                 }
 

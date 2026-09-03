@@ -55,6 +55,34 @@ portal, registered handler, or `xdg-open`.
 Linux packages depend on `xdg-desktop-portal` for native chooser routing and
 `xdg-utils` as a desktop-handler fallback for `QDesktopServices`.
 
+## Linux deep links
+
+The registered public route is
+`kodosi://session/<sessionId>` with an optional single
+`toolUseId=<toolUseId>` query item. A strict native parser rejects unsupported
+or unsafe forms before presentation. Session links wait for the authoritative
+catalog; approval links additionally wait for the authoritative pending
+permission snapshot and pass only the resolved opaque approval identity to
+QML.
+
+Linux uses one app owner per isolated Kodosi data root. Secondary desktop
+launches wait on the owner's early startup lock, then forward a bounded native
+activation frame over a mode-0600, same-UID Unix socket below
+`QStandardPaths::RuntimeLocation`, wait for an acknowledgement, and exit before
+constructing the Rust runtime. The owner publishes the socket only after its
+QML activation connections and runtime are ready, immediately before entering
+the Qt event loop. The endpoint
+namespace hashes the normalized effective Rust data root: validated
+`KODOSI_DATA_ROOT/core` in isolated runs, otherwise
+`QStandardPaths::ConfigLocation/kodosi`. Isolated roots require
+`KODOSI_PRODUCTION_DATA_ROOT` and reject production aliases before endpoint
+selection.
+
+Desktop activation captures a bounded control-free
+`XDG_ACTIVATION_TOKEN` for every activation kind. The token is carried only
+inside the same-UID activation frame, remains native-only, and is installed
+only while the owner raises and requests activation for the main window.
+
 ## Local application logs
 
 The Linux client installs its Qt message handler after application identity is
@@ -133,6 +161,7 @@ just ui-probe button --button left --click
 just ui-probe drag --from-x 10 --from-y 20 --to-x 300 --to-y 200
 just ui-probe-input-status
 just ui-probe-smoke
+just ui-probe-deep-link-smoke
 ```
 
 Set `KODOSI_UI_PROBE_SKIP_INTERACTIVE_PORTALS=1` when running the real-app

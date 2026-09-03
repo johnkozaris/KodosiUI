@@ -105,17 +105,31 @@ ApplicationWindow {
     }
 
     function activateSession(sessionId) {
-        if (!requestSessionSelection(sessionId, false))
+        return activateSessionWithRemote(sessionId, false)
+    }
+
+    function activateSessionWithRemote(sessionId, openRemote) {
+        if (!requestSessionSelection(sessionId, openRemote === true))
             return false
         Models.DesktopState.activeView = 0
         return true
     }
 
     function openAgentIntel(sessionId, approvalIdentityToken) {
+        return openAgentIntelWithRemote(
+            sessionId,
+            approvalIdentityToken,
+            false)
+    }
+
+    function openAgentIntelWithRemote(
+            sessionId,
+            approvalIdentityToken,
+            openRemote) {
         const session = Models.Sessions.presentationForSession(sessionId)
         if (!session.sessionId)
             return false
-        if (!activateSession(sessionId))
+        if (!activateSessionWithRemote(sessionId, openRemote))
             return false
         attentionPanel.close()
         settingsDrawer.close()
@@ -123,8 +137,100 @@ ApplicationWindow {
         agentIntelDrawer.openForSession(
             sessionId,
             session.name,
-            approvalIdentityToken || "")
+            approvalIdentityToken || "",
+            false)
         return true
+    }
+
+    function closeDeepLinkOverlays() {
+        utilityMenu.close()
+        keyboardShortcutsOverlay.close()
+        attentionPanel.close()
+        settingsDrawer.close()
+        agentIntelDrawer.close()
+        projectIntelModal.close()
+        diagnosticsDrawer.close()
+        Models.SessionActions.cancelCloseConfirmation()
+        sessionSidebar.closeConflictingOverlays()
+    }
+
+    function openDeepLinkedSession(sessionId) {
+        closeDeepLinkOverlays()
+        const opened = activateSessionWithRemote(sessionId, true)
+        if (!opened)
+            Models.DeepLinks.reportNavigationResult(false)
+        return opened
+    }
+
+    function openDeepLinkedApproval(sessionId, identityToken) {
+        closeDeepLinkOverlays()
+        const opened = openAgentIntelWithRemote(
+            sessionId,
+            identityToken,
+            true)
+        if (!opened)
+            Models.DeepLinks.reportNavigationResult(false)
+        return opened
+    }
+
+    function openMissingDeepLinkedApproval(sessionId) {
+        closeDeepLinkOverlays()
+        const session = Models.Sessions.presentationForSession(sessionId)
+        const opened = session.sessionId === sessionId
+            && activateSessionWithRemote(sessionId, true)
+        if (opened) {
+            agentIntelDrawer.openForSession(
+                sessionId,
+                session.name,
+                "",
+                true)
+        }
+        if (!opened)
+            Models.DeepLinks.reportNavigationResult(false)
+        return opened
+    }
+
+    function deepLinkStatusText(code) {
+        switch (code) {
+        case "tooLong":
+            return qsTr("The link is too long to open safely.")
+        case "malformedEncoding":
+            return qsTr("The link contains malformed text encoding.")
+        case "unsafeText":
+            return qsTr("The link contains unsafe text.")
+        case "unsupportedParameters":
+            return qsTr("The link contains unsupported parameters.")
+        case "queueFull":
+            return qsTr("Too many links are waiting to open. Try the link again.")
+        case "waitingAccount":
+            return qsTr("Waiting for the active account before opening the link…")
+        case "waitingSessions":
+            return qsTr("Waiting for the authoritative session list…")
+        case "accountChanged":
+            return qsTr("The link expired because the active account changed.")
+        case "runtimeRestarted":
+            return qsTr("The link expired because the runtime restarted.")
+        case "expired":
+            return qsTr("The link expired before its authoritative data became available.")
+        case "sessionsUnavailable":
+            return qsTr("Sessions are unavailable, so the link could not be opened.")
+        case "sessionMissing":
+            return qsTr("The linked session is no longer available.")
+        case "sessionRestarted":
+            return qsTr("The link expired because the session restarted.")
+        case "waitingApprovals":
+            return qsTr("Waiting for the authoritative approval list…")
+        case "approvalMissing":
+            return qsTr("This approval is no longer pending.")
+        case "approvalsUnavailable":
+            return qsTr("Pending approvals are unavailable. The linked session was opened instead.")
+        case "navigationFailed":
+            return qsTr("The linked session could not be staged. Close another staged session and try again.")
+        case "invalid":
+            return qsTr("This Kodosi link is invalid or unsupported.")
+        default:
+            return ""
+        }
     }
 
     function openProjectIntelForSession(sessionId) {
@@ -607,6 +713,59 @@ ApplicationWindow {
         }
     }
 
+    Rectangle {
+        id: deepLinkStatus
+        objectName: "deepLink.status"
+        Accessible.id: objectName
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: KodosiTheme.spacing3
+        implicitHeight: visible
+            ? Math.max(44, deepLinkStatusRow.implicitHeight
+                + KodosiTheme.spacing4)
+            : 0
+        height: implicitHeight
+        visible: Models.DeepLinks.statusCode.length > 0
+        z: 10000
+        radius: KodosiTheme.radiusMedium
+        color: KodosiTheme.surfaceElevated
+        border.width: 1
+        border.color: KodosiTheme.seam
+        Accessible.role: Accessible.AlertMessage
+        Accessible.name: deepLinkStatusLabel.text
+        Accessible.ignored: !visible
+
+        RowLayout {
+            id: deepLinkStatusRow
+            anchors.fill: parent
+            anchors.leftMargin: KodosiTheme.spacing5
+            anchors.rightMargin: KodosiTheme.spacing5
+            spacing: KodosiTheme.spacing3
+
+            PlainLabel {
+                id: deepLinkStatusLabel
+                objectName: "deepLink.status.label"
+                Accessible.id: objectName
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                verticalAlignment: Text.AlignVCenter
+                text: window.deepLinkStatusText(
+                    Models.DeepLinks.statusCode)
+                color: KodosiTheme.textPrimary
+                wrapMode: Text.Wrap
+            }
+
+            KIconButton {
+                objectName: "deepLink.status.dismiss"
+                Accessible.id: objectName
+                glyph: "close"
+                Accessible.name: qsTr("Dismiss link status")
+                onClicked: Models.DeepLinks.clearStatus()
+            }
+        }
+    }
+
     Shortcut {
         objectName: "shortcut.settings"
         sequence: "Ctrl+,"
@@ -727,6 +886,22 @@ ApplicationWindow {
                 window.openAgentIntel(sessionId, approvalIdentityToken)
             else
                 window.activateSession(sessionId)
+        }
+    }
+
+    Connections {
+        target: Models.DeepLinks
+
+        function onOpenSessionRequested(sessionId) {
+            window.openDeepLinkedSession(sessionId)
+        }
+
+        function onReviewApprovalRequested(sessionId, identityToken) {
+            window.openDeepLinkedApproval(sessionId, identityToken)
+        }
+
+        function onMissingApprovalRequested(sessionId) {
+            window.openMissingDeepLinkedApproval(sessionId)
         }
     }
 

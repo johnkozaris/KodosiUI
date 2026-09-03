@@ -2,9 +2,10 @@
 Type=Application
 Name=Kodosi
 Comment=Local-first mission control for coding agents
-Exec=kodosi-qt
+Exec=kodosi-qt %u
 Icon=com.kodosi.Kodosi
 Terminal=false
 Categories=Development;
 Keywords=agents;terminal;development;mission;
 StartupNotify=true
+MimeType=x-scheme-handler/kodosi;

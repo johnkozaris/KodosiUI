@@ -1290,9 +1290,56 @@ if [[ -z "$ready_session_handle" ]]; then
     echo "Created real local shell session did not appear in My Agents." >&2
     exit 4
 fi
-"$probe" button --button left --click \
-    --element "$ready_session_handle" --adapter atspi \
-    >"$artifact_dir/ready-session-select-click.json"
+ready_session_id=$(
+    python3 -c '
+import json, sys
+matches = [
+    item for item in json.load(sys.stdin)["matches"]
+    if item.get("id", "").startswith("sidebar.session.")
+    and ".actions." not in item.get("id", "")
+]
+if len(matches) != 1:
+    raise SystemExit(1)
+print(matches[0]["id"].removeprefix("sidebar.session."))
+' <"$artifact_dir/ready-session-row.json"
+)
+test -n "$ready_session_id"
+
+"$probe" find --app "$app_handle" --id header.tab.devices \
+    >"$artifact_dir/ready-devices-tab.json"
+ready_devices_handle=$(
+    json_value matches.0.handle <"$artifact_dir/ready-devices-tab.json"
+)
+"$probe" click "$ready_devices_handle" \
+    >"$artifact_dir/ready-devices-click.json"
+"$probe" wait --app "$app_handle" --pid "$app_pid" id=surface.devices \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/ready-devices-view.json"
+
+secondary_pid=
+set +e
+XDG_CONFIG_HOME="$config_dir" \
+    KODOSI_DATA_ROOT="$data_root" \
+    KODOSI_PRODUCTION_DATA_ROOT="$production_data_root" \
+    QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
+    "$app" "kodosi://session/$ready_session_id" \
+    >"$artifact_dir/ready-deep-link-secondary.log" 2>&1 &
+secondary_pid=$!
+wait "$secondary_pid"
+secondary_status=$?
+set -e
+if [[ "$secondary_status" -ne 0 ]]; then
+    echo "Secondary deep-link process was not acknowledged." >&2
+    exit 4
+fi
+if ! kill -0 "$app_pid" 2>/dev/null; then
+    echo "The original Kodosi owner exited during deep-link forwarding." >&2
+    exit 4
+fi
+if [[ "$secondary_pid" = "$app_pid" ]]; then
+    echo "Deep-link probe did not launch a distinct secondary process." >&2
+    exit 4
+fi
 "$probe" wait --app "$app_handle" --pid "$app_pid" \
     name="Ready proof terminal" \
     --state showing --timeout-ms 30000 \

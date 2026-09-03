@@ -17,7 +17,8 @@ if ! grep -Eq '(^|, )libopengl0(,|$)' <<<"$dependencies"; then
     echo "DEB does not declare the host OpenGL loader dependency" >&2
     exit 1
 fi
-if ! grep -Eq '(^|, )xdg-desktop-portal(,|$)' <<<"$dependencies" ||
+if ! grep -Eq '(^|, )desktop-file-utils(,|$)' <<<"$dependencies" ||
+    ! grep -Eq '(^|, )xdg-desktop-portal(,|$)' <<<"$dependencies" ||
     ! grep -Eq '(^|, )xdg-utils(,|$)' <<<"$dependencies"; then
     echo "DEB does not declare portal and desktop-handler dependencies" >&2
     exit 1
@@ -90,6 +91,13 @@ verify_private_linkage \
 
 desktop-file-validate \
     "$stage/usr/share/applications/com.kodosi.Kodosi.desktop"
+grep -Fxq 'Exec=kodosi-qt %u' \
+    "$stage/usr/share/applications/com.kodosi.Kodosi.desktop"
+grep -Fxq 'MimeType=x-scheme-handler/kodosi;' \
+    "$stage/usr/share/applications/com.kodosi.Kodosi.desktop"
+update-desktop-database "$stage/usr/share/applications"
+grep -Eq '^x-scheme-handler/kodosi=.*com\.kodosi\.Kodosi\.desktop' \
+    "$stage/usr/share/applications/mimeinfo.cache"
 appstreamcli validate --no-net \
     "$stage/usr/share/metainfo/com.kodosi.Kodosi.metainfo.xml"
 

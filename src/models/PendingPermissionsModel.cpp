@@ -169,6 +169,64 @@ PendingPermissionsModel::notificationRequest(const QString& token) const
     };
 }
 
+PendingPermissionsModel::DeepLinkResolution
+PendingPermissionsModel::resolveDeepLink(
+    const QString& sessionId,
+    const QString& sessionIncarnationId,
+    const QString& toolUseId) const
+{
+    const auto currentIncarnation =
+        m_sessions.incarnationForSession(sessionId);
+    if (!currentIncarnation || *currentIncarnation != sessionIncarnationId) {
+        return {
+            .state = DeepLinkResolutionState::Stale,
+            .identityToken = {},
+        };
+    }
+    if (m_authorityState == AuthorityState::Loading) {
+        return {
+            .state = DeepLinkResolutionState::Wait,
+            .identityToken = {},
+        };
+    }
+    if (m_authorityState == AuthorityState::AuthorityFailed) {
+        return {
+            .state = DeepLinkResolutionState::AuthorityFailed,
+            .identityToken = {},
+        };
+    }
+    const auto exact = std::ranges::find_if(
+        m_requests,
+        [&](const Request& request) {
+            return request.sessionId == sessionId
+                && request.sessionIncarnationId == sessionIncarnationId
+                && request.toolUseId == toolUseId;
+        });
+    if (exact != m_requests.end()) {
+        return {
+            .state = DeepLinkResolutionState::Exact,
+            .identityToken = exact->identityToken,
+        };
+    }
+    const auto candidate = m_latestSnapshot
+        && std::ranges::any_of(
+            m_latestSnapshot->requests,
+            [&](const Request& request) {
+                return request.sessionId == sessionId
+                    && request.sessionIncarnationId
+                        == sessionIncarnationId
+                    && request.toolUseId == toolUseId
+                    && request.requestGeneration > 0
+                    && !sessionIncarnationId.isEmpty();
+            });
+    return {
+        .state = candidate
+            ? DeepLinkResolutionState::Wait
+            : DeepLinkResolutionState::Missing,
+        .identityToken = {},
+    };
+}
+
 int PendingPermissionsModel::rowForIdentityToken(const QString& token) const
 {
     const auto found =

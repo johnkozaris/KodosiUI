@@ -25,7 +25,7 @@ docker run --rm \
     bash -lc '
         set -euo pipefail
         pacman -Syu --needed --noconfirm \
-            at-spi2-core cairo libdrm libglvnd \
+            at-spi2-core cairo desktop-file-utils libdrm libglvnd \
             fontconfig freetype2 mesa gdk-pixbuf2 gtk3 harfbuzz pango \
             wayland libx11 libxcb xcb-util-cursor xcb-util-image \
             xcb-util-keysyms xcb-util-renderutil xcb-util-wm \

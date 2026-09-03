@@ -1,6 +1,9 @@
 #include "attention/ApprovalNotifications.hpp"
 #include "attention/TerminalNotifications.hpp"
 #include "app/QmlModelTypes.hpp"
+#include "app/DeepLinkController.hpp"
+#include "app/DeepLinkRouter.hpp"
+#include "app/SingleInstanceGuard.hpp"
 #include "bridge/RuntimeBridge.hpp"
 #include "logging/ApplicationLogStore.hpp"
 #include "models/AgentConversationModel.hpp"
@@ -108,6 +111,33 @@ bool parseWindowSize(
     return true;
 }
 
+std::optional<kodosi::DeepLinkParseResult> commandLineDeepLink(
+    const QStringList& arguments)
+{
+    QStringList positional;
+    for (auto index = 1; index < arguments.size(); ++index) {
+        const auto& argument = arguments.at(index);
+        if (argument == QStringLiteral("--window-size")) {
+            ++index;
+            continue;
+        }
+        if (argument.startsWith(u'-')) {
+            continue;
+        }
+        positional.append(argument);
+    }
+    if (positional.isEmpty()) {
+        return std::nullopt;
+    }
+    if (positional.size() != 1) {
+        return kodosi::DeepLinkParseResult {
+            .destination = std::nullopt,
+            .error = kodosi::DeepLinkParseError::UnsupportedRoute,
+        };
+    }
+    return kodosi::DeepLinkRouter::parse(positional.constFirst());
+}
+
 std::unique_ptr<QSettings> desktopStateSettings(const bool persistent)
 {
     if (persistent) {
@@ -198,6 +228,7 @@ int main(int argc, char* argv[])
     QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
 
     const auto arguments = application.arguments();
+    const auto initialDeepLink = commandLineDeepLink(arguments);
     std::optional<QSize> windowSize;
     QString windowSizeError;
     if (!parseWindowSize(arguments, windowSize, windowSizeError)) {
@@ -218,6 +249,15 @@ int main(int argc, char* argv[])
     const auto attentionSmokeTest =
         arguments.contains(
             QStringLiteral("--smoke-test-attention"));
+    const auto deepLinkApprovalSmokeTest =
+        arguments.contains(
+            QStringLiteral("--smoke-test-deep-link-approval"));
+    const auto deepLinkMissingApprovalSmokeTest =
+        arguments.contains(
+            QStringLiteral("--smoke-test-deep-link-missing-approval"));
+    const auto deepLinkStatusSmokeTest =
+        arguments.contains(
+            QStringLiteral("--smoke-test-deep-link-status"));
     const auto diagnosticsSmokeTest =
         arguments.contains(
             QStringLiteral("--smoke-test-diagnostics"));
@@ -262,6 +302,9 @@ int main(int argc, char* argv[])
         || projectIntelSmokeTest
         || agentSettingsSmokeTest
         || attentionSmokeTest
+        || deepLinkApprovalSmokeTest
+        || deepLinkMissingApprovalSmokeTest
+        || deepLinkStatusSmokeTest
         || diagnosticsSmokeTest
         || appearanceSmokeTest
         || shellParitySmokeTest
@@ -276,15 +319,24 @@ int main(int argc, char* argv[])
                     || argument.startsWith(QStringLiteral("--ui-probe-"));
             });
     QString syntheticRootDirectory;
+    QString syntheticRuntimeDirectory;
     auto removeSyntheticConfig = qScopeGuard([&] {
         if (!syntheticRootDirectory.isEmpty()) {
             (void)QDir(syntheticRootDirectory).removeRecursively();
         }
+        if (!syntheticRuntimeDirectory.isEmpty()) {
+            (void)QDir(syntheticRuntimeDirectory).removeRecursively();
+        }
     });
     if (syntheticMode) {
+        const auto syntheticId =
+            QUuid::createUuid().toString(QUuid::WithoutBraces);
         syntheticRootDirectory = QDir::current().absoluteFilePath(
             QStringLiteral("build/synthetic-roots/")
-            + QUuid::createUuid().toString(QUuid::WithoutBraces));
+            + syntheticId);
+        syntheticRuntimeDirectory = QDir::current().absoluteFilePath(
+            QStringLiteral("build/run/")
+            + syntheticId.left(12));
         const auto syntheticConfigDirectory =
             QDir(syntheticRootDirectory).filePath(QStringLiteral("config"));
         const auto syntheticStateDirectory =
@@ -305,6 +357,32 @@ int main(int argc, char* argv[])
                 << "Synthetic mode could not isolate XDG roots.";
             return EXIT_FAILURE;
         }
+    }
+    const auto singleInstanceRuntime = syntheticMode
+        ? syntheticRuntimeDirectory
+        : kodosi::SingleInstanceGuard::standardRuntimeDirectory();
+    auto launchActivation =
+        kodosi::SingleInstanceGuard::activation(initialDeepLink);
+    qunsetenv("XDG_ACTIVATION_TOKEN");
+    const auto endpointNamespace =
+        kodosi::SingleInstanceGuard::endpointNamespace();
+    if (!endpointNamespace.valid()) {
+        qCritical().noquote() << endpointNamespace.error;
+        return EXIT_FAILURE;
+    }
+    kodosi::SingleInstanceGuard singleInstance;
+    const auto singleInstanceResult = singleInstance.start(
+        singleInstanceRuntime,
+        endpointNamespace.value,
+        launchActivation);
+    if (singleInstanceResult.state
+        == kodosi::SingleInstanceGuard::StartState::Forwarded) {
+        return EXIT_SUCCESS;
+    }
+    if (singleInstanceResult.state
+        == kodosi::SingleInstanceGuard::StartState::Failed) {
+        qCritical().noquote() << singleInstanceResult.error;
+        return EXIT_FAILURE;
     }
     kodosi::ApplicationLogStore applicationLog({
         .directory = kodosi::ApplicationLogStore::standardLogDirectory(),
@@ -513,6 +591,55 @@ int main(int argc, char* argv[])
         sessionCatalog);
     kodosi::PeopleActions peopleActions(runtime, people);
     kodosi::PendingPermissionsModel pendingPermissions(runtime, sessionCatalog);
+    kodosi::DeepLinkController deepLinks(
+        sessionCatalog,
+        pendingPermissions);
+    if (deepLinkApprovalSmokeTest || deepLinkMissingApprovalSmokeTest) {
+        constexpr auto smokeEpoch = 77;
+        const auto authEvent = QJsonDocument(QJsonObject {
+            {QStringLiteral("type"), QStringLiteral("auth.required")},
+            {QStringLiteral("accountEpoch"), smokeEpoch},
+        }).toJson(QJsonDocument::Compact);
+        deepLinks.ingestAuthEvent(authEvent);
+        pendingPermissions.ingestAuthEvent(authEvent);
+        pendingPermissions.ingestAgentIntelEvent(
+            QJsonDocument(QJsonObject {
+                {QStringLiteral("authority"),
+                 QStringLiteral("accountContext")},
+                {QStringLiteral("accountUserId"), QString {}},
+                {QStringLiteral("accountEpoch"), smokeEpoch},
+                {QStringLiteral("type"),
+                 QStringLiteral(
+                     "agent.intel.pendingPermissionsSnapshot")},
+                {QStringLiteral("generation"), 1},
+                {QStringLiteral("requests"),
+                 QJsonArray {
+                     QJsonObject {
+                         {QStringLiteral("sessionId"),
+                          QStringLiteral("attention-smoke")},
+                         {QStringLiteral("sessionIncarnationId"),
+                          QStringLiteral(
+                              "01900000-0000-7000-8000-000000000077")},
+                         {QStringLiteral("requestGeneration"), 1},
+                         {QStringLiteral("toolUseId"),
+                          deepLinkMissingApprovalSmokeTest
+                              ? QStringLiteral("other-tool-smoke")
+                              : QStringLiteral("tool-smoke")},
+                         {QStringLiteral("toolName"),
+                          QStringLiteral("Bash")},
+                         {QStringLiteral("toolInput"), QJsonObject {}},
+                         {QStringLiteral("createdAtMs"),
+                          1'700'000'000'000.0},
+                         {QStringLiteral("deadlineAtMs"),
+                          1'800'000'000'000.0},
+                         {QStringLiteral("risk"),
+                          QStringLiteral("safe")},
+                         {QStringLiteral("decisionPhase"),
+                          QStringLiteral("actionable")},
+                     },
+                 }},
+            }).toJson(QJsonDocument::Compact));
+    }
     kodosi::AttentionModel attention(
         pendingPermissions,
         agentSessionIntel,
@@ -593,7 +720,9 @@ int main(int argc, char* argv[])
             "\"userCode\":\"MNPQ-2345\","
             "\"expiresAt\":\"2099-09-03T12:30:00Z\"}"));
     }
-    if (attentionSmokeTest || attentionProbePopulated || agentIntelProbeOpen) {
+    if (attentionSmokeTest || deepLinkApprovalSmokeTest
+        || deepLinkMissingApprovalSmokeTest
+        || attentionProbePopulated || agentIntelProbeOpen) {
         constexpr auto smokeEpoch = 77;
         sessionCatalog.ingestAuthEvent(
             QJsonDocument(QJsonObject {
@@ -668,6 +797,7 @@ int main(int argc, char* argv[])
          &authActions,
          &authState,
          &desktopState,
+         &deepLinks,
          &devices,
          &externalDiscovery,
          &missions,
@@ -686,6 +816,7 @@ int main(int argc, char* argv[])
             const kodosi::EventLane lane,
             QByteArray json) {
             if (lane == kodosi::EventLane::Auth) {
+                deepLinks.ingestAuthEvent(json);
                 authActions.ingestAuthEvent(json);
                 agentAutoModeRules.ingestAuthEvent(json);
                 agentConversation.ingestAuthEvent(json);
@@ -751,6 +882,7 @@ int main(int argc, char* argv[])
          &agentSessionIntel,
          &authState,
          &desktopState,
+         &deepLinks,
          &devices,
          &externalDiscovery,
          &missions,
@@ -769,6 +901,7 @@ int main(int argc, char* argv[])
                 return;
             }
             authState.resetRuntimeAuthority();
+            deepLinks.resetRuntimeAuthority();
             desktopState.resetRuntimeAuthority();
             agentConversation.resetRuntimeAuthority();
             agentAutoModeRules.resetRuntimeAuthority();
@@ -806,6 +939,7 @@ int main(int argc, char* argv[])
         appearance,
         desktopSettings,
         desktopState,
+        deepLinks,
         desktopFiles,
         externalDiscovery,
         missions,
@@ -843,12 +977,166 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
     desktopFiles.setTransientParent(mainWindow);
+    const auto activateMainWindow =
+        [mainWindow](const QString& activationToken) {
+        if (mainWindow == nullptr) {
+            return;
+        }
+        mainWindow->setVisible(true);
+        kodosi::SingleInstanceGuard::withActivationToken(
+            activationToken,
+            [mainWindow] {
+                mainWindow->raise();
+                mainWindow->requestActivate();
+            });
+    };
+    QObject::connect(
+        &singleInstance,
+        &kodosi::SingleInstanceGuard::activationReceived,
+        &application,
+        activateMainWindow);
+    QObject::connect(
+        &singleInstance,
+        &kodosi::SingleInstanceGuard::routeReceived,
+        &deepLinks,
+        [&deepLinks, &activateMainWindow](
+            kodosi::DeepLinkDestination destination,
+            const QString& activationToken) {
+            activateMainWindow(activationToken);
+            deepLinks.enqueue(std::move(destination));
+        });
+    QObject::connect(
+        &singleInstance,
+        &kodosi::SingleInstanceGuard::invalidRouteReceived,
+        &deepLinks,
+        [&deepLinks, &activateMainWindow](
+            const kodosi::DeepLinkParseError error,
+            const QString& activationToken) {
+            activateMainWindow(activationToken);
+            deepLinks.reject(error);
+        });
+    QObject::connect(
+        &deepLinks,
+        &kodosi::DeepLinkController::activationRequested,
+        &application,
+        [&activateMainWindow] { activateMainWindow({}); });
+    QObject::connect(
+        &deepLinks,
+        &kodosi::DeepLinkController::openSessionRequested,
+        &application,
+        [&activateMainWindow] { activateMainWindow({}); });
+    QObject::connect(
+        &deepLinks,
+        &kodosi::DeepLinkController::reviewApprovalRequested,
+        &application,
+        [&activateMainWindow] { activateMainWindow({}); });
+    QObject::connect(
+        &deepLinks,
+        &kodosi::DeepLinkController::missingApprovalRequested,
+        &application,
+        [&activateMainWindow] { activateMainWindow({}); });
     const auto attachSize = windowSize
         ? windowSize
         : agentIntelSmokeTest
         ? std::optional<QSize>(QSize(820, 800))
         : std::nullopt;
     desktopState.attachWindow(mainWindow, attachSize);
+    activateMainWindow(launchActivation.activationToken);
+    launchActivation.activationToken.clear();
+    if (initialDeepLink) {
+        if (initialDeepLink->destination) {
+            deepLinks.enqueue(*initialDeepLink->destination);
+        } else {
+            deepLinks.reject(initialDeepLink->error);
+        }
+    }
+    if (deepLinkApprovalSmokeTest) {
+        QTimer::singleShot(
+            0,
+            &application,
+            [&application, rootObject] {
+                const auto* drawer = rootObject->findChild<QObject*>(
+                    QStringLiteral("panel.agentIntel"));
+                if (drawer == nullptr
+                    || !drawer->property("opened").toBool()
+                    || drawer->property("sessionId").toString()
+                        != QStringLiteral("attention-smoke")
+                    || drawer->property("approvalIdentityToken")
+                           .toString()
+                           .isEmpty()) {
+                    qCritical()
+                        << "Approval deep link did not open the exact synthetic review.";
+                    application.exit(EXIT_FAILURE);
+                    return;
+                }
+                application.quit();
+            });
+    }
+    if (deepLinkMissingApprovalSmokeTest) {
+        QTimer::singleShot(
+            0,
+            &application,
+            [&application, rootObject, &pendingPermissions] {
+                const auto* drawer = rootObject->findChild<QObject*>(
+                    QStringLiteral("panel.agentIntel"));
+                const auto approval =
+                    drawer == nullptr
+                    ? QVariantMap {}
+                    : drawer->property("approval").toMap();
+                if (drawer == nullptr
+                    || !drawer->property("opened").toBool()
+                    || drawer->property("sessionId").toString()
+                        != QStringLiteral("attention-smoke")
+                    || !drawer->property("approvalMissing").toBool()
+                    || !drawer->property("approvalIdentityToken")
+                            .toString()
+                            .isEmpty()
+                    || !approval.isEmpty()) {
+                    qCritical()
+                        << "Missing approval deep link exposed an unrelated request.";
+                    application.exit(EXIT_FAILURE);
+                    return;
+                }
+                const auto descendants = drawer->findChildren<QObject*>();
+                const auto before =
+                    pendingPermissions.presentationForSession(
+                        QStringLiteral("attention-smoke"));
+                auto foundActionControl = false;
+                for (auto* descendant : descendants) {
+                    const auto name = descendant->objectName();
+                    if (!name.startsWith(
+                            QStringLiteral(
+                                "panel.agentIntel.approval.allow."))
+                        && !name.startsWith(
+                            QStringLiteral(
+                                "panel.agentIntel.approval.deny."))) {
+                        continue;
+                    }
+                    foundActionControl = true;
+                    if (descendant->property("visible").toBool()
+                        || descendant->property("enabled").toBool()
+                        || !QMetaObject::invokeMethod(
+                            descendant,
+                            "clicked",
+                            Qt::DirectConnection)) {
+                        qCritical()
+                            << "Missing approval deep link retained an actionable control.";
+                        application.exit(EXIT_FAILURE);
+                        return;
+                    }
+                }
+                if (!foundActionControl
+                    || pendingPermissions.presentationForSession(
+                           QStringLiteral("attention-smoke"))
+                        != before) {
+                    qCritical()
+                        << "Missing approval deep link authorized an unrelated request.";
+                    application.exit(EXIT_FAILURE);
+                    return;
+                }
+                application.quit();
+            });
+    }
     if (agentIntelProbeOpen) {
         QTimer::singleShot(
             0,
@@ -934,14 +1222,12 @@ int main(int argc, char* argv[])
                 qWarning() << "The approval review surface could not be activated.";
                 return;
             }
-            mainWindow->raise();
-            if (!activationToken.isEmpty()) {
-                (void)qputenv(
-                    "XDG_ACTIVATION_TOKEN",
-                    activationToken.toUtf8());
-            }
-            mainWindow->requestActivate();
-            qunsetenv("XDG_ACTIVATION_TOKEN");
+            kodosi::SingleInstanceGuard::withActivationToken(
+                activationToken,
+                [mainWindow] {
+                    mainWindow->raise();
+                    mainWindow->requestActivate();
+                });
         });
     QObject::connect(
         &terminalNotifications,
@@ -961,14 +1247,12 @@ int main(int argc, char* argv[])
                 qWarning() << "The terminal notification session could not be activated.";
                 return;
             }
-            mainWindow->raise();
-            if (!activationToken.isEmpty()) {
-                (void)qputenv(
-                    "XDG_ACTIVATION_TOKEN",
-                    activationToken.toUtf8());
-            }
-            mainWindow->requestActivate();
-            qunsetenv("XDG_ACTIVATION_TOKEN");
+            kodosi::SingleInstanceGuard::withActivationToken(
+                activationToken,
+                [mainWindow] {
+                    mainWindow->raise();
+                    mainWindow->requestActivate();
+                });
         });
 
     if (desktopStateSmokeTest) {
@@ -2113,6 +2397,68 @@ int main(int argc, char* argv[])
                             });
                     });
             });
+    } else if (deepLinkStatusSmokeTest) {
+        QTimer::singleShot(
+            50,
+            &application,
+            [&application,
+             &deepLinks,
+             mainWindow,
+             rootObject] {
+                auto* rootItem = qobject_cast<QQuickItem*>(
+                    rootObject->property("contentItem")
+                        .value<QObject*>());
+                auto* banner = findQuickItem(
+                    rootItem,
+                    QStringLiteral("deepLink.status"));
+                auto* label = findQuickItem(
+                    rootItem,
+                    QStringLiteral("deepLink.status.label"));
+                auto* dismiss = findQuickItem(
+                    rootItem,
+                    QStringLiteral("deepLink.status.dismiss"));
+                if (banner == nullptr || label == nullptr
+                    || dismiss == nullptr || mainWindow == nullptr
+                    || !banner->isVisible()
+                    || !dismiss->isVisible()
+                    || !dismiss->isEnabled()
+                    || banner->width() > mainWindow->width()
+                    || banner->height() > mainWindow->height()
+                    || label->width() <= 0
+                    || label->x() + label->width()
+                        > dismiss->x()) {
+                    qCritical()
+                        << "The compact deep-link status banner layout is invalid.";
+                    application.exit(EXIT_FAILURE);
+                    return;
+                }
+                const auto priorText =
+                    label->property("text").toString();
+                if (!QMetaObject::invokeMethod(
+                        dismiss,
+                        "clicked",
+                        Qt::DirectConnection)
+                    || !deepLinks.statusCode().isEmpty()
+                    || banner->isVisible()) {
+                    qCritical()
+                        << "The deep-link status dismiss action is not wired.";
+                    application.exit(EXIT_FAILURE);
+                    return;
+                }
+                deepLinks.reject(
+                    kodosi::DeepLinkParseError::UnsupportedRoute);
+                if (!banner->isVisible()
+                    || deepLinks.statusCode()
+                        != QStringLiteral("invalid")
+                    || label->property("text").toString()
+                        == priorText) {
+                    qCritical()
+                        << "A later route did not replace the deep-link status.";
+                    application.exit(EXIT_FAILURE);
+                    return;
+                }
+                application.exit(EXIT_SUCCESS);
+            });
     } else if (smokeTest) {
         QVariant staleSession;
         if (!QMetaObject::invokeMethod(
@@ -2801,9 +3147,15 @@ int main(int argc, char* argv[])
         qInfo() << "Synthetic presentation probe is ready.";
     } else if (auto result = runtime.start(); !result) {
         qCritical().noquote() << result.error().message;
-        QTimer::singleShot(0, &application, [] { QCoreApplication::exit(EXIT_FAILURE); });
+        return EXIT_FAILURE;
     } else {
         (void)agentGlobal.refresh();
+    }
+    const auto endpointReady = singleInstance.publishEndpoint();
+    if (endpointReady.state
+        != kodosi::SingleInstanceGuard::StartState::Owner) {
+        qCritical().noquote() << endpointReady.error;
+        return EXIT_FAILURE;
     }
     QObject::connect(&application, &QCoreApplication::aboutToQuit, &runtime, [&runtime] {
         runtime.stop();

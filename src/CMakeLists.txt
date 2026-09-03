@@ -4,6 +4,12 @@ set_source_files_properties(
 )
 
 qt_add_library(kodosi-runtime-bridge STATIC
+    app/DeepLinkController.cpp
+    app/DeepLinkController.hpp
+    app/DeepLinkRouter.cpp
+    app/DeepLinkRouter.hpp
+    app/SingleInstanceGuard.cpp
+    app/SingleInstanceGuard.hpp
     bridge/RuntimeBridge.cpp
     bridge/RuntimeBridge.hpp
     logging/ApplicationLogStore.cpp
@@ -76,6 +82,7 @@ target_include_directories(kodosi-runtime-bridge
 target_link_libraries(kodosi-runtime-bridge
     PUBLIC
         Qt6::Core
+        Qt6::Network
     PRIVATE
         Kodosi::RustRuntime
         Qt6::DBus

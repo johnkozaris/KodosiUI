@@ -26,6 +26,19 @@ class PendingPermissionsModel final : public QAbstractListModel {
     Q_PROPERTY(QString authorityError READ authorityError NOTIFY authorityStateChanged)
 
 public:
+    enum class DeepLinkResolutionState {
+        Wait,
+        Exact,
+        Missing,
+        AuthorityFailed,
+        Stale,
+    };
+
+    struct DeepLinkResolution {
+        DeepLinkResolutionState state;
+        QString identityToken;
+    };
+
     struct NotificationRequest {
         QString identityToken;
         QString sessionId;
@@ -82,6 +95,10 @@ public:
     [[nodiscard]] QString authorityError() const;
     [[nodiscard]] std::optional<NotificationRequest> notificationRequest(
         const QString& identityToken) const;
+    [[nodiscard]] DeepLinkResolution resolveDeepLink(
+        const QString& sessionId,
+        const QString& sessionIncarnationId,
+        const QString& toolUseId) const;
 
     Q_INVOKABLE [[nodiscard]] bool refresh();
     Q_INVOKABLE [[nodiscard]] int rowForIdentityToken(
