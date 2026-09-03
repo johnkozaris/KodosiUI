@@ -60,7 +60,7 @@
   },
   "swiftParityBaseline": {
     "repository": "johnkozaris/kodosiSwift",
-    "commit": "b0363e80fa47360943211c860fdfa0cd96c099d0"
+    "commit": "66825e1f0816a794dc46fc6dd1d7c6cd04396a0d"
   },
   "ghostty": {
     "repository": "ghostty-org/ghostty",

@@ -4,7 +4,7 @@
     "runtimeRepository": "johnkozaris/Kodosi",
     "runtimeCommit": "b1970e5f103fad1a52f73d686ba2b5d98cb9ed4d",
     "swiftRepository": "johnkozaris/kodosiSwift",
-    "swiftCommit": "b0363e80fa47360943211c860fdfa0cd96c099d0",
+    "swiftCommit": "66825e1f0816a794dc46fc6dd1d7c6cd04396a0d",
     "ffiAbiVersion": 5,
     "desktopProtocolVersion": 37
   },

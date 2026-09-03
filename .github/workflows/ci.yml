@@ -45,7 +45,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: johnkozaris/kodosiSwift
-          ref: b0363e80fa47360943211c860fdfa0cd96c099d0
+          ref: 66825e1f0816a794dc46fc6dd1d7c6cd04396a0d
           token: ${{ secrets.KODOSI_REPOSITORY_TOKEN }}
           path: kodosiSwift
           persist-credentials: false
