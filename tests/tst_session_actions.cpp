@@ -1,5 +1,6 @@
 #include "models/SessionActions.hpp"
 #include "models/DesktopSettings.hpp"
+#include "models/ProviderConversationResumeResolver.hpp"
 
 #include <QDir>
 #include <QFileInfo>
@@ -17,6 +18,7 @@
 class FakeSessionDispatcher final : public kodosi::CommandDispatcher {
 public:
     QVector<QJsonObject> commands;
+    QVector<QByteArray> rawCommands;
     QString rejectType;
     int rejectionsRemaining = 0;
 
@@ -34,9 +36,25 @@ public:
                 .message = QStringLiteral("Rejected"),
             });
         }
+        rawCommands.push_back(json.toByteArray());
         commands.push_back(document.object());
         return {};
     }
+};
+
+class FakeResumeResolver final
+    : public kodosi::ProviderConversationResumeResolver {
+public:
+    std::optional<kodosi::ProviderConversationResumeTarget>
+    resolveResumeTarget(const QString& presentationId) const override
+    {
+        return presentationId == acceptedPresentationId ? target
+                                                        : std::nullopt;
+    }
+
+    QString acceptedPresentationId =
+        QStringLiteral("conversation-opaque");
+    std::optional<kodosi::ProviderConversationResumeTarget> target;
 };
 
 class SessionActionsTest final : public QObject {
@@ -47,6 +65,7 @@ private slots:
     void rejectsUnavailableLifecycleActions();
     void correlatesAsynchronousFailures();
     void createsLocalSessionWithCorrelatedReceipt();
+    void createsResumedSessionFromOpaqueCurrentIdentity();
     void usesReadablePersistedWorkingDirectoryAsCreationDefault();
     void renamesReopensAndDeletesLocalSessions();
     void authoritativeSnapshotRecoversDroppedLifecycleEvents();
@@ -317,6 +336,97 @@ void SessionActionsTest::createsLocalSessionWithCorrelatedReceipt()
     }).toJson(QJsonDocument::Compact));
     QVERIFY(!actions.creating());
     QCOMPARE(created.count(), 1);
+}
+
+void SessionActionsTest::createsResumedSessionFromOpaqueCurrentIdentity()
+{
+    FakeSessionDispatcher dispatcher;
+    kodosi::SessionCatalogModel sessions;
+    kodosi::SessionActions actions(dispatcher, sessions);
+    FakeResumeResolver resolver;
+    QTemporaryDir directory(
+        QDir::current().filePath(
+            QStringLiteral("resumed-session-XXXXXX")));
+    QVERIFY(directory.isValid());
+    const auto canonicalDirectory =
+        QFileInfo(directory.path()).canonicalFilePath();
+    resolver.target = kodosi::ProviderConversationResumeTarget {
+        .provider = QStringLiteral("copilot"),
+        .nativeConversationId =
+            QStringLiteral("01900000-0000-4000-8000-000000000123"),
+        .workingDirectory = canonicalDirectory,
+        .accountUserId = QStringLiteral("me"),
+        .accountEpoch = 1,
+    };
+    actions.setProviderConversationResumeResolver(&resolver);
+    actions.ingestAuthEvent(
+        QByteArrayLiteral(
+            "{\"type\":\"auth.ready\",\"userId\":\"me\",\"accountEpoch\":1}"));
+
+    const auto preResumeCommands = dispatcher.commands.size();
+    QVERIFY(!actions.createResumed(
+        QStringLiteral("Resume"),
+        QStringLiteral("not-current")));
+    QCOMPARE(dispatcher.commands.size(), preResumeCommands);
+    QVERIFY(actions.createResumed(
+        QStringLiteral(" Resumed review "),
+        resolver.acceptedPresentationId));
+    const auto command = dispatcher.commands.constLast();
+    const auto commandKeys = command.keys();
+    QCOMPARE(
+        QSet<QString>(commandKeys.cbegin(), commandKeys.cend()),
+        QSet<QString>({
+            QStringLiteral("type"),
+            QStringLiteral("requestId"),
+            QStringLiteral("name"),
+            QStringLiteral("workingDir"),
+            QStringLiteral("resume"),
+        }));
+    QCOMPARE(
+        dispatcher.rawCommands.constLast(),
+        QJsonDocument(command).toJson(QJsonDocument::Compact));
+    QCOMPARE(
+        command.value(QStringLiteral("type")).toString(),
+        QStringLiteral("session.create"));
+    QCOMPARE(
+        command.value(QStringLiteral("name")).toString(),
+        QStringLiteral("Resumed review"));
+    QCOMPARE(
+        command.value(QStringLiteral("workingDir")).toString(),
+        canonicalDirectory);
+    const auto resume = command.value(QStringLiteral("resume")).toObject();
+    QCOMPARE(
+        resume,
+        QJsonObject({
+            {QStringLiteral("provider"), QStringLiteral("copilot")},
+            {QStringLiteral("nativeConversationId"),
+             QStringLiteral(
+                 "01900000-0000-4000-8000-000000000123")},
+        }));
+
+    const auto requestId =
+        command.value(QStringLiteral("requestId")).toString();
+    actions.ingestSessionEvent(QJsonDocument(QJsonObject {
+        {QStringLiteral("authority"), QStringLiteral("accountContext")},
+        {QStringLiteral("accountUserId"), QStringLiteral("me")},
+        {QStringLiteral("accountEpoch"), 1},
+        {QStringLiteral("type"), QStringLiteral("session.created")},
+        {QStringLiteral("requestId"), requestId},
+        {QStringLiteral("sessionId"), QStringLiteral("resumed")},
+        {QStringLiteral("runtimeIncarnationId"),
+         QStringLiteral("01900000-0000-7000-8000-000000000124")},
+    }).toJson(QJsonDocument::Compact));
+    QVERIFY(!actions.creating());
+
+    actions.ingestAuthEvent(
+        QByteArrayLiteral(
+            "{\"type\":\"auth.ready\",\"userId\":\"other\",\"accountEpoch\":2}"));
+    const auto before = dispatcher.commands.size();
+    QVERIFY(!actions.createResumed(
+        QStringLiteral("Stale"),
+        resolver.acceptedPresentationId));
+    QCOMPARE(dispatcher.commands.size(), before);
+    QVERIFY(actions.lastError().contains(QStringLiteral("no longer current")));
 }
 
 void SessionActionsTest::renamesReopensAndDeletesLocalSessions()

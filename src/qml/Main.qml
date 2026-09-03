@@ -53,6 +53,7 @@ ApplicationWindow {
         || attentionPanel.opened
         || agentIntelDrawer.opened
         || projectIntelModal.opened
+        || resumeAgentWorkModal.opened
         || diagnosticsDrawer.opened
         || closeSessionConfirmation.opened
         || sessionSidebar.modalOpen
@@ -149,6 +150,7 @@ ApplicationWindow {
         settingsDrawer.close()
         agentIntelDrawer.close()
         projectIntelModal.close()
+        resumeAgentWorkModal.closeModal()
         diagnosticsDrawer.close()
         Models.SessionActions.cancelCloseConfirmation()
         sessionSidebar.closeConflictingOverlays()
@@ -250,6 +252,16 @@ ApplicationWindow {
         diagnosticsDrawer.close()
         agentIntelDrawer.close()
         projectIntelModal.openForSource(sourceId)
+        return true
+    }
+
+    function openResumeAgentWork() {
+        attentionPanel.close()
+        settingsDrawer.close()
+        diagnosticsDrawer.close()
+        agentIntelDrawer.close()
+        projectIntelModal.close()
+        resumeAgentWorkModal.openModal()
         return true
     }
 
@@ -635,6 +647,8 @@ ApplicationWindow {
                         window.requestSessionSelection(sessionId, openRemote)
                     onProjectIntelligenceRequested: sessionId =>
                         window.openProjectIntelForSession(sessionId)
+                    onResumeAgentWorkRequested:
+                        window.openResumeAgentWork()
                 }
 
                 Rectangle {
@@ -1043,6 +1057,10 @@ ApplicationWindow {
 
     ProjectIntelligenceModal {
         id: projectIntelModal
+    }
+
+    ResumeAgentWorkModal {
+        id: resumeAgentWorkModal
     }
 
     DiagnosticsDrawer {

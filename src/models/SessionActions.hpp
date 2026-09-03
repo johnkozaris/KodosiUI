@@ -18,6 +18,7 @@ namespace kodosi {
 
 class SessionAccess;
 class DesktopSettings;
+class ProviderConversationResumeResolver;
 
 class HiddenSessionsModel : public QAbstractListModel {
     Q_OBJECT
@@ -118,6 +119,9 @@ public:
     Q_INVOKABLE [[nodiscard]] bool create(
         const QString& name,
         const QString& workingDirectory);
+    Q_INVOKABLE [[nodiscard]] bool createResumed(
+        const QString& name,
+        const QString& conversationPresentationId);
     Q_INVOKABLE [[nodiscard]] bool createDefault();
     Q_INVOKABLE [[nodiscard]] bool canInterrupt(const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool canClose(const QString& sessionId) const;
@@ -149,6 +153,8 @@ public:
         const QString& sessionId,
         const QString& mode);
     Q_INVOKABLE void clearError();
+    void setProviderConversationResumeResolver(
+        ProviderConversationResumeResolver* resolver);
 
 public slots:
     void ingestAuthEvent(QByteArray json);
@@ -173,6 +179,7 @@ private:
     SessionCatalogModel& m_sessions;
     SessionAccess* m_access = nullptr;
     DesktopSettings* m_settings = nullptr;
+    ProviderConversationResumeResolver* m_resumeResolver = nullptr;
     AccountContextFence m_accountFence {256};
     struct PendingReceipt {
         QString operation;
@@ -198,12 +205,17 @@ private:
     QString m_createRequestId;
     QString m_hiddenRequestId;
     QString m_accountUserId;
+    quint64 m_accountEpoch = 0;
     QString m_lastError;
     quint64 m_availabilityRevision = 0;
     bool m_hiddenRefreshQueued = false;
     int m_hiddenRetryAttempts = 0;
 
     [[nodiscard]] bool send(QJsonObject command);
+    [[nodiscard]] bool dispatchCreate(
+        const QString& name,
+        const QString& workingDirectory,
+        std::optional<QJsonObject> resume);
     [[nodiscard]] bool dispatchClose(
         const QString& sessionId,
         const QString& incarnationId);

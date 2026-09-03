@@ -105,6 +105,8 @@ qt_add_library(kodosi-desktop-integration STATIC
     models/ExternalDiscoveryModel.hpp
     models/ProjectIntelligenceModel.cpp
     models/ProjectIntelligenceModel.hpp
+    models/ProviderConversationsModel.cpp
+    models/ProviderConversationsModel.hpp
 )
 
 target_include_directories(kodosi-desktop-integration
@@ -312,6 +314,7 @@ qt_add_qml_module(kodosi-qt
         qml/Shell/KeyboardShortcutsOverlay.qml
         qml/Theme/KodosiTheme.qml
         qml/Workbench/SessionSidebar.qml
+        qml/Workbench/ResumeAgentWorkModal.qml
         qml/Workbench/DesktopFileErrorBanner.qml
         qml/Workbench/TerminalDivider.qml
         qml/Workbench/TerminalStage.qml

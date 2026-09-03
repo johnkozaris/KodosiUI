@@ -39,6 +39,7 @@ Item {
     property string shareSessionName
     signal sessionSelectionRequested(string sessionId, bool openRemote)
     signal projectIntelligenceRequested(string sessionId)
+    signal resumeAgentWorkRequested()
 
     function selectDelegate(item) {
         if (!item)
@@ -223,10 +224,7 @@ Item {
                     iconName: "history"
                     text: qsTr("Resume Agent Work")
                     Accessible.name: text
-                    onClicked: {
-                        root.hiddenOpen = true
-                        Models.SessionActions.refreshHidden()
-                    }
+                    onClicked: root.resumeAgentWorkRequested()
                 }
             }
 
@@ -275,9 +273,12 @@ Item {
                 compact: true
                 variant: "quiet"
                 iconName: "eye"
-                text: qsTr("%1 hidden").arg(
-                    Models.SessionActions.hiddenSessions.count)
-                Accessible.name: text
+                text: qsTr("Hidden sessions")
+                Accessible.name: Models.SessionActions.hiddenSessions.count
+                    === 1
+                    ? qsTr("Hidden sessions, 1 session")
+                    : qsTr("Hidden sessions, %1 sessions").arg(
+                        Models.SessionActions.hiddenSessions.count)
                 onClicked: {
                     root.hiddenOpen = !root.hiddenOpen
                     if (root.hiddenOpen)

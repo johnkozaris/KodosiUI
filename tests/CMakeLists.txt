@@ -235,6 +235,14 @@ add_test(
         820x560
 )
 add_test(
+    NAME kodosi-resume-agent-work-presentation
+    COMMAND
+        kodosi-qt
+        --smoke-test-resume-agent-work
+        --window-size
+        820x560
+)
+add_test(
     NAME kodosi-deep-link-approval-presentation
     COMMAND
         kodosi-qt
@@ -262,6 +270,11 @@ add_test(
         820x560
 )
 set_tests_properties(kodosi-shell-account-device-parity PROPERTIES
+    ENVIRONMENT
+        "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
+    TIMEOUT 20
+)
+set_tests_properties(kodosi-resume-agent-work-presentation PROPERTIES
     ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
     TIMEOUT 20
@@ -637,6 +650,34 @@ target_compile_definitions(kodosi-agent-conversation-model-tests
 add_test(
     NAME kodosi-agent-conversation-model-tests
     COMMAND kodosi-agent-conversation-model-tests
+)
+
+qt_add_executable(kodosi-provider-conversations-model-tests
+    tst_provider_conversations_model.cpp
+)
+target_link_libraries(kodosi-provider-conversations-model-tests
+    PRIVATE
+        kodosi-desktop-integration
+        kodosi-runtime-bridge
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Test
+        Qt6::Widgets
+)
+target_compile_definitions(kodosi-provider-conversations-model-tests
+    PRIVATE
+        KODOSI_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        QT_NO_CAST_FROM_ASCII
+        QT_NO_CAST_TO_ASCII
+        QT_NO_URL_CAST_FROM_STRING
+)
+add_test(
+    NAME kodosi-provider-conversations-model-tests
+    COMMAND kodosi-provider-conversations-model-tests
+)
+set_tests_properties(kodosi-provider-conversations-model-tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 30
 )
 
 qt_add_executable(kodosi-agent-memory-model-tests

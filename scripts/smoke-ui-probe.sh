@@ -347,6 +347,14 @@ else
     test "$(
         json_value atspi.available <"$artifact_dir/input-status.json"
     )" = "True"
+    "$probe" pointer --element "$field_handle" --position center \
+        --adapter atspi >"$artifact_dir/font-family-raw-pointer.json"
+    "$probe" button --button left --click --adapter atspi \
+        >"$artifact_dir/font-family-raw-click.json"
+    "$probe" wait --app "$app_handle" \
+        id=panel.settings.terminal.fontFamily \
+        --state focused --timeout-ms 5000 \
+        >"$artifact_dir/font-family-raw-focused.json"
     "$probe" shortcut --keys Ctrl+A --adapter atspi \
         >"$artifact_dir/font-family-select-all.json"
     for key in K o d o s i M o n o; do
@@ -509,6 +517,71 @@ fi
 fi
 
 stop_current_app
+
+start_synthetic_app \
+    resume-agent-work \
+    --ui-probe-resume-agent-work \
+    --window-size 820x560
+"$probe" wait --app "$app_handle" id=panel.resumeAgentWork \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/resume-agent-work-panel.json"
+"$probe" tree --app "$app_handle" --depth 7 \
+    >"$artifact_dir/resume-agent-work-tree.json"
+assert_shell_hidden_by_modal \
+    <"$artifact_dir/resume-agent-work-tree.json"
+"$probe" wait --app "$app_handle" id=resumeAgentWork.search \
+    --state focused --timeout-ms 5000 \
+    >"$artifact_dir/resume-agent-work-search-focused.json"
+"$probe" find --app "$app_handle" --id resumeAgentWork.search \
+    >"$artifact_dir/resume-agent-work-search.json"
+resume_search_handle=$(
+    json_value matches.0.handle \
+        <"$artifact_dir/resume-agent-work-search.json"
+)
+"$probe" inspect "$resume_search_handle" \
+    >"$artifact_dir/resume-agent-work-search-inspect.json"
+python3 -c '
+import json, sys
+states = json.load(sys.stdin)["element"]["states"]
+if "focused" not in states:
+    raise SystemExit("Resume Agent Work did not focus search")
+' <"$artifact_dir/resume-agent-work-search-inspect.json"
+"$probe" set-text "$resume_search_handle" --text "no such conversation" \
+    >"$artifact_dir/resume-agent-work-no-match-set.json"
+"$probe" wait --app "$app_handle" id=resumeAgentWork.noMatches \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/resume-agent-work-no-match.json"
+"$probe" set-text "$resume_search_handle" --text "Linux" \
+    >"$artifact_dir/resume-agent-work-match-set.json"
+"$probe" wait --app "$app_handle" id=resumeAgentWork.detail.title \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/resume-agent-work-detail.json"
+"$probe" find --app "$app_handle" --id resumeAgentWork.preview \
+    >"$artifact_dir/resume-agent-work-preview.json"
+"$probe" find --app "$app_handle" --id resumeAgentWork.folder.browse \
+    >"$artifact_dir/resume-agent-work-browse.json"
+"$probe" find --app "$app_handle" --id resumeAgentWork.resume \
+    >"$artifact_dir/resume-agent-work-resume.json"
+resume_button_handle=$(
+    json_value matches.0.handle \
+        <"$artifact_dir/resume-agent-work-resume.json"
+)
+"$probe" inspect "$resume_button_handle" \
+    >"$artifact_dir/resume-agent-work-resume-inspect.json"
+python3 -c '
+import json, sys
+states = json.load(sys.stdin)["element"]["states"]
+if "enabled" in states or "sensitive" in states:
+    raise SystemExit("synthetic Resume action must not mutate a provider archive")
+' <"$artifact_dir/resume-agent-work-resume-inspect.json"
+"$probe" find --app "$app_handle" --id resumeAgentWork.cancel \
+    >"$artifact_dir/resume-agent-work-cancel.json"
+resume_cancel_handle=$(
+    json_value matches.0.handle \
+        <"$artifact_dir/resume-agent-work-cancel.json"
+)
+"$probe" click "$resume_cancel_handle" \
+    >"$artifact_dir/resume-agent-work-cancel-click.json"
 
 start_synthetic_app \
     project-intel-wide \

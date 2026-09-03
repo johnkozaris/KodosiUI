@@ -255,6 +255,9 @@ bool DesktopFileIntegration::requestDirectory(
 
     const auto message = purpose == Purpose::NewSessionWorkingDirectory
         ? translated("Select a working directory for the new session")
+        : purpose == Purpose::ResumeAgentWork
+        ? translated(
+            "Select the project whose provider conversation you want to continue")
         : translated("Select the default working directory for sessions");
     const QPointer<DesktopFileIntegration> self(this);
     m_picker->open(
@@ -870,7 +873,8 @@ DesktopFileIntegration::validateRequestId(const QString& requestId)
 bool DesktopFileIntegration::isPickerPurpose(const Purpose purpose) noexcept
 {
     return purpose == Purpose::NewSessionWorkingDirectory
-        || purpose == Purpose::SettingsWorkingDirectory;
+        || purpose == Purpose::SettingsWorkingDirectory
+        || purpose == Purpose::ResumeAgentWork;
 }
 
 bool DesktopFileIntegration::isSessionProjectPurpose(

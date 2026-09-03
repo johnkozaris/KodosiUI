@@ -25,6 +25,7 @@ void configureModelInstances(
     MissionActions& missionActions,
     PendingPermissionsModel& pendingPermissions,
     ProjectIntelligenceModel& projectIntelligence,
+    ProviderConversationsModel& providerConversations,
     PeopleModel& people,
     PeopleActions& peopleActions,
     RuntimeDiagnosticsModel& runtimeDiagnostics,
@@ -60,6 +61,7 @@ void configureModelInstances(
     MissionActionsForeign::instance = &missionActions;
     PendingPermissionsModelForeign::instance = &pendingPermissions;
     ProjectIntelligenceModelForeign::instance = &projectIntelligence;
+    ProviderConversationsModelForeign::instance = &providerConversations;
     PeopleModelForeign::instance = &people;
     PeopleActionsForeign::instance = &peopleActions;
     RuntimeDiagnosticsModelForeign::instance = &runtimeDiagnostics;

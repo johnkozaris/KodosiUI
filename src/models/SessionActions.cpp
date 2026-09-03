@@ -1,5 +1,6 @@
 #include "models/SessionActions.hpp"
 #include "models/DesktopSettings.hpp"
+#include "models/ProviderConversationResumeResolver.hpp"
 #include "models/SessionAccess.hpp"
 
 #include <QDir>
@@ -221,6 +222,57 @@ bool SessionActions::create(
     const QString& name,
     const QString& workingDirectory)
 {
+    return dispatchCreate(name, workingDirectory, std::nullopt);
+}
+
+bool SessionActions::createResumed(
+    const QString& name,
+    const QString& conversationPresentationId)
+{
+    if (m_resumeResolver == nullptr
+        || conversationPresentationId.isEmpty()) {
+        m_lastError =
+            QStringLiteral("Select a current provider conversation to resume.");
+        emit stateChanged();
+        return false;
+    }
+    const auto target =
+        m_resumeResolver->resolveResumeTarget(conversationPresentationId);
+    const QUuid nativeConversationId(
+        target ? target->nativeConversationId : QString {});
+    if (!target || target->accountEpoch != m_accountEpoch
+        || target->accountUserId != m_accountUserId
+        || (target->provider != QStringLiteral("claude")
+            && target->provider != QStringLiteral("copilot"))
+        || nativeConversationId.isNull()
+        || nativeConversationId.toString(QUuid::WithoutBraces)
+            != target->nativeConversationId) {
+        m_lastError = QStringLiteral(
+            "The selected provider conversation is no longer current.");
+        emit stateChanged();
+        return false;
+    }
+    return dispatchCreate(
+        name,
+        target->workingDirectory,
+        QJsonObject {
+            {QStringLiteral("provider"), target->provider},
+            {QStringLiteral("nativeConversationId"),
+             target->nativeConversationId},
+        });
+}
+
+void SessionActions::setProviderConversationResumeResolver(
+    ProviderConversationResumeResolver* resolver)
+{
+    m_resumeResolver = resolver;
+}
+
+bool SessionActions::dispatchCreate(
+    const QString& name,
+    const QString& workingDirectory,
+    std::optional<QJsonObject> resume)
+{
     const auto trimmedName = name.trimmed();
     const auto nameBytes = trimmedName.toUtf8();
     const auto trimmedDirectory = workingDirectory.trimmed();
@@ -241,12 +293,16 @@ bool SessionActions::create(
     }
     const auto requestId =
         QUuid::createUuidV7().toString(QUuid::WithoutBraces);
-    const auto accepted = send({
+    QJsonObject command {
         {QStringLiteral("type"), QStringLiteral("session.create")},
         {QStringLiteral("requestId"), requestId},
         {QStringLiteral("name"), trimmedName},
         {QStringLiteral("workingDir"), QDir::cleanPath(trimmedDirectory)},
-    });
+    };
+    if (resume) {
+        command.insert(QStringLiteral("resume"), std::move(*resume));
+    }
+    const auto accepted = send(std::move(command));
     if (accepted) {
         m_createRequestId = requestId;
         m_pendingReceipts.insert(requestId, {
@@ -836,6 +892,7 @@ void SessionActions::resetRuntimeAuthority()
     m_hiddenRefreshQueued = false;
     m_hiddenRetryAttempts = 0;
     m_accountUserId.clear();
+    m_accountEpoch = 0;
     m_lastError.clear();
     bumpAvailability();
     emit stateChanged();
@@ -872,6 +929,7 @@ void SessionActions::activateAccount(QString userId, const quint64 epoch)
         m_hiddenRefreshQueued = false;
         m_hiddenRetryAttempts = 0;
         m_accountUserId = std::move(userId);
+        m_accountEpoch = epoch;
         m_lastError.clear();
         bumpAvailability();
         emit stateChanged();

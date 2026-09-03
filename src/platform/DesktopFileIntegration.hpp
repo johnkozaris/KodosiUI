@@ -64,6 +64,7 @@ public:
         ProjectMemory,
         ProjectCustomAgent,
         ExternalSource,
+        ResumeAgentWork,
     };
     Q_ENUM(Purpose)
 

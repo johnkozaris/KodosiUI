@@ -20,6 +20,7 @@
 #include "models/MissionActions.hpp"
 #include "models/PendingPermissionsModel.hpp"
 #include "models/ProjectIntelligenceModel.hpp"
+#include "models/ProviderConversationsModel.hpp"
 #include "models/PeopleModel.hpp"
 #include "models/PeopleActions.hpp"
 #include "models/RuntimeDiagnosticsModel.hpp"
@@ -153,6 +154,28 @@ struct ProjectIntelligenceModelForeign {
 public:
     inline static kodosi::ProjectIntelligenceModel* instance = nullptr;
     static kodosi::ProjectIntelligenceModel* create(
+        QQmlEngine* engine,
+        QJSEngine*)
+    {
+        return singleton(instance, engine);
+    }
+};
+
+struct ProviderConversationPreviewModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::ProviderConversationPreviewModel)
+    QML_ANONYMOUS
+};
+
+struct ProviderConversationsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::ProviderConversationsModel)
+    QML_NAMED_ELEMENT(ProviderConversations)
+    QML_SINGLETON
+
+public:
+    inline static kodosi::ProviderConversationsModel* instance = nullptr;
+    static kodosi::ProviderConversationsModel* create(
         QQmlEngine* engine,
         QJSEngine*)
     {
@@ -645,6 +668,7 @@ void configureModelInstances(
     MissionActions& missionActions,
     PendingPermissionsModel& pendingPermissions,
     ProjectIntelligenceModel& projectIntelligence,
+    ProviderConversationsModel& providerConversations,
     PeopleModel& people,
     PeopleActions& peopleActions,
     RuntimeDiagnosticsModel& runtimeDiagnostics,

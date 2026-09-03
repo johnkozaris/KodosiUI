@@ -35,6 +35,7 @@
 #include "models/RuntimeDiagnosticsModel.hpp"
 #include "models/PendingPermissionsModel.hpp"
 #include "models/ProjectIntelligenceModel.hpp"
+#include "models/ProviderConversationsModel.hpp"
 #include "models/TrustModel.hpp"
 #include "platform/FreedesktopNotificationDriver.hpp"
 #include "platform/DesktopFileIntegration.hpp"
@@ -297,6 +298,12 @@ int main(int argc, char* argv[])
     const auto authProbeError =
         arguments.contains(
             QStringLiteral("--ui-probe-auth-error"));
+    const auto resumeAgentWorkProbe =
+        arguments.contains(
+            QStringLiteral("--ui-probe-resume-agent-work"));
+    const auto resumeAgentWorkSmokeTest =
+        arguments.contains(
+            QStringLiteral("--smoke-test-resume-agent-work"));
     const auto smokeTest = settingsSmokeTest
         || agentIntelSmokeTest
         || projectIntelSmokeTest
@@ -420,6 +427,10 @@ int main(int argc, char* argv[])
         &applicationLog);
     kodosi::AgentAutoModeRulesModel agentAutoModeRules(runtime);
     kodosi::ExternalDiscoveryModel externalDiscovery(runtime, desktopFiles);
+    kodosi::ProviderConversationsModel providerConversations(
+        runtime,
+        desktopFiles,
+        desktopSettings);
     kodosi::ProjectIntelligenceModel projectIntelligence(
         runtime,
         agentConversation,
@@ -453,6 +464,11 @@ int main(int argc, char* argv[])
         sessionCatalog,
         sessionAccess,
         desktopSettings);
+    sessionActions.setProviderConversationResumeResolver(
+        &providerConversations);
+    if (resumeAgentWorkProbe || resumeAgentWorkSmokeTest) {
+        providerConversations.installSyntheticFixture();
+    }
     QObject::connect(
         &desktopState,
         &kodosi::DesktopStateModel::remoteRestoreRequested,
@@ -806,6 +822,7 @@ int main(int argc, char* argv[])
          &pendingPermissions,
          &people,
          &projectIntelligence,
+         &providerConversations,
          &runtimeDiagnostics,
          &sessionCatalog,
          &sessionAccess,
@@ -838,6 +855,7 @@ int main(int argc, char* argv[])
                 pendingPermissions.ingestAuthEvent(json);
                 people.ingestAuthEvent(json);
                 projectIntelligence.ingestAuthEvent(json);
+                providerConversations.ingestAuthEvent(json);
                 trust.ingestAuthEvent(json);
             } else if (lane == kodosi::EventLane::Devices) {
                 devices.ingestDevicesEvent(std::move(json));
@@ -853,6 +871,7 @@ int main(int argc, char* argv[])
                 agentSessionIntel.ingestAgentIntelEvent(json);
                 pendingPermissions.ingestAgentIntelEvent(json);
                 projectIntelligence.ingestAgentIntelEvent(json);
+                providerConversations.ingestAgentIntelEvent(json);
                 externalDiscovery.ingestAgentIntelEvent(json);
                 steering.ingestAgentIntelEvent(std::move(json));
             } else if (lane == kodosi::EventLane::Friends) {
@@ -891,6 +910,7 @@ int main(int argc, char* argv[])
          &pendingPermissions,
          &people,
          &projectIntelligence,
+         &providerConversations,
          &sessionCatalog,
          &sessionAccess,
          &sessionActions,
@@ -917,6 +937,7 @@ int main(int argc, char* argv[])
             pendingPermissions.resetRuntimeAuthority();
             people.resetRuntimeAuthority();
             projectIntelligence.resetRuntimeAuthority();
+            providerConversations.resetRuntimeAuthority();
             sessionCatalog.resetRuntimeAuthority();
             sessionAccess.resetRuntimeAuthority();
             sessionActions.resetRuntimeAuthority();
@@ -947,6 +968,7 @@ int main(int argc, char* argv[])
         missionActions,
         pendingPermissions,
         projectIntelligence,
+        providerConversations,
         people,
         peopleActions,
         runtimeDiagnostics,
@@ -1162,8 +1184,53 @@ int main(int argc, char* argv[])
                 }
             });
     }
-    if (projectIntelSmokeTest || projectIntelProbePopulated
-        || projectIntelProbeEmpty || projectIntelProbeArchive) {
+    if (resumeAgentWorkProbe || resumeAgentWorkSmokeTest) {
+        QTimer::singleShot(
+            0,
+            rootObject,
+            [rootObject] {
+                QVariant opened;
+                if (!QMetaObject::invokeMethod(
+                        rootObject,
+                        "openResumeAgentWork",
+                        Qt::DirectConnection,
+                        Q_RETURN_ARG(QVariant, opened))
+                    || !opened.toBool()) {
+                    qCritical()
+                        << "The Resume Agent Work probe surface could not be opened.";
+                    QCoreApplication::exit(EXIT_FAILURE);
+                }
+            });
+    }
+    if (resumeAgentWorkSmokeTest) {
+        QTimer::singleShot(
+            250,
+            &application,
+            [&application, rootObject] {
+                auto* panel = rootObject->findChild<QObject*>(
+                    QStringLiteral("panel.resumeAgentWork"));
+                auto* search = rootObject->findChild<QObject*>(
+                    QStringLiteral("resumeAgentWork.search"));
+                auto* resume = rootObject->findChild<QObject*>(
+                    QStringLiteral("resumeAgentWork.resume"));
+                auto* browse = rootObject->findChild<QObject*>(
+                    QStringLiteral("resumeAgentWork.folder.browse"));
+                if (panel == nullptr || search == nullptr
+                    || resume == nullptr || browse == nullptr
+                    || !panel->property("opened").toBool()
+                    || !search->property("activeFocus").toBool()
+                    || resume->property("enabled").toBool()
+                    || !browse->property("visible").toBool()) {
+                    qCritical()
+                        << "Resume Agent Work compact accessibility presentation failed.";
+                    application.exit(EXIT_FAILURE);
+                    return;
+                }
+                application.quit();
+            });
+    } else if (!resumeAgentWorkProbe
+        && (projectIntelSmokeTest || projectIntelProbePopulated
+        || projectIntelProbeEmpty || projectIntelProbeArchive)) {
         QTimer::singleShot(
             0,
             rootObject,
@@ -3143,7 +3210,8 @@ int main(int argc, char* argv[])
         }
     } else if (tilingProbeSynthetic || projectIntelProbePopulated
         || projectIntelProbeEmpty || projectIntelProbeArchive
-        || agentSettingsProbePopulated) {
+        || agentSettingsProbePopulated || resumeAgentWorkProbe
+        || resumeAgentWorkSmokeTest) {
         qInfo() << "Synthetic presentation probe is ready.";
     } else if (auto result = runtime.start(); !result) {
         qCritical().noquote() << result.error().message;

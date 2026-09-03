@@ -124,6 +124,12 @@ model. QML supplies only the stable session ID and presentation selections;
 the model privately resolves the current local Claude identity and retains
 protocol 37 filesystem-identity-bound authority.
 
+Resume Agent Work uses a native provider-conversation model over protocol 37.
+It owns the canonical project folder, provider-native conversation identity,
+pagination cursors, account/runtime fences, and bounded transcript preview.
+QML receives only opaque presentation IDs and safe display metadata; resumed
+session creation re-resolves the native identity immediately before dispatch.
+
 Custom Agents use the same demand boundary. Native code asks Rust for bounded,
 path-free summaries and keeps Rust's one-shot detail selections private. QML
 receives only opaque presentation identities and bounded detail text.
