@@ -34,14 +34,23 @@ struct TerminalCursor {
     std::int32_t visualStyle = 0;
 };
 
+struct TerminalScrollState {
+    std::uint64_t totalRows = 0;
+    std::uint64_t viewportOffset = 0;
+    std::uint64_t viewportRows = 0;
+};
+
 struct TerminalFrame {
     std::uint16_t columns = 0;
     std::uint16_t rows = 0;
     std::uint64_t nextSequence = 0;
+    std::uint64_t viewportRevision = 0;
+    std::uint64_t displayRevision = 0;
     QColor foreground;
     QColor background;
     QColor cursorColor;
     TerminalCursor cursor;
+    TerminalScrollState scroll;
     QVector<TerminalCell> cells;
 
     [[nodiscard]] const TerminalCell* cell(

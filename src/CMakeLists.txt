@@ -118,6 +118,8 @@ qt_add_library(kodosi-terminal-kernel STATIC
     terminal/TerminalAccessibility.hpp
     terminal/GhosttyTerminalKernel.cpp
     terminal/GhosttyTerminalKernel.hpp
+    terminal/TerminalLink.cpp
+    terminal/TerminalLink.hpp
     terminal/TerminalFrame.hpp
     terminal/TerminalRasterizer.cpp
     terminal/TerminalRasterizer.hpp

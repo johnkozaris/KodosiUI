@@ -65,13 +65,30 @@ public:
     [[nodiscard]] std::expected<QByteArray, GhosttyTerminalKernel::Failure> encodeKey(
         const TerminalSubscription& subscription,
         TerminalKeyEvent event);
-    [[nodiscard]] GhosttyTerminalKernel::Result select(
+    [[nodiscard]] std::expected<QByteArray, GhosttyTerminalKernel::Failure> encodePaste(
         const TerminalSubscription& subscription,
-        std::uint16_t startColumn,
-        std::uint16_t startRow,
-        std::uint16_t endColumn,
-        std::uint16_t endRow,
+        QByteArray text);
+    [[nodiscard]] GhosttyTerminalKernel::Result scrollViewport(
+        const TerminalSubscription& subscription,
+        int rows);
+    [[nodiscard]] GhosttyTerminalKernel::Result scrollViewportToBottom(
+        const TerminalSubscription& subscription);
+    [[nodiscard]] std::expected<QString, GhosttyTerminalKernel::Failure> linkAt(
+        const TerminalSubscription& subscription,
+        std::uint64_t viewportRevision,
+        std::uint16_t column,
+        std::uint16_t row);
+    [[nodiscard]] GhosttyTerminalKernel::Result beginSelection(
+        const TerminalSubscription& subscription,
+        std::uint64_t viewportRevision,
+        std::uint16_t column,
+        std::uint16_t row,
         bool rectangular = false);
+    [[nodiscard]] GhosttyTerminalKernel::Result updateSelection(
+        const TerminalSubscription& subscription,
+        std::uint64_t viewportRevision,
+        std::uint16_t column,
+        std::uint16_t row);
     [[nodiscard]] GhosttyTerminalKernel::Result clearSelection(
         const TerminalSubscription& subscription);
     [[nodiscard]] std::expected<QString, GhosttyTerminalKernel::Failure> selectedText(

@@ -8,6 +8,7 @@
 
 #include <expected>
 #include <memory>
+#include <optional>
 
 namespace kodosi {
 
@@ -78,6 +79,9 @@ public:
         enum class Code {
             MissingCheckpoint,
             StaleSubscription,
+            StaleFrame,
+            HitTestRace,
+            UnsafePaste,
             SequenceMismatch,
             ResourceLimit,
             GhosttyRejected,
@@ -85,11 +89,16 @@ public:
 
         Code code;
         QString message;
+
+        [[nodiscard]] bool isRecoverableHitTestRace() const noexcept
+        {
+            return code == Code::StaleFrame || code == Code::HitTestRace;
+        }
     };
 
     using Frame = std::shared_ptr<const TerminalFrame>;
     using Result = std::expected<Frame, Failure>;
-    using ConfigureResult = std::expected<void, Failure>;
+    using ConfigureResult = std::expected<std::optional<Frame>, Failure>;
 
     explicit GhosttyTerminalKernel(TerminalKernelSettings settings = {});
     ~GhosttyTerminalKernel();
@@ -111,13 +120,30 @@ public:
     [[nodiscard]] std::expected<QByteArray, Failure> encodeKey(
         const TerminalSubscription& subscription,
         TerminalKeyEvent event);
-    [[nodiscard]] Result select(
+    [[nodiscard]] std::expected<QByteArray, Failure> encodePaste(
         const TerminalSubscription& subscription,
-        std::uint16_t startColumn,
-        std::uint16_t startRow,
-        std::uint16_t endColumn,
-        std::uint16_t endRow,
+        QByteArray text);
+    [[nodiscard]] Result scrollViewport(
+        const TerminalSubscription& subscription,
+        int rows);
+    [[nodiscard]] Result scrollViewportToBottom(
+        const TerminalSubscription& subscription);
+    [[nodiscard]] std::expected<QString, Failure> linkAt(
+        const TerminalSubscription& subscription,
+        std::uint64_t viewportRevision,
+        std::uint16_t column,
+        std::uint16_t row);
+    [[nodiscard]] Result beginSelection(
+        const TerminalSubscription& subscription,
+        std::uint64_t viewportRevision,
+        std::uint16_t column,
+        std::uint16_t row,
         bool rectangular = false);
+    [[nodiscard]] Result updateSelection(
+        const TerminalSubscription& subscription,
+        std::uint64_t viewportRevision,
+        std::uint16_t column,
+        std::uint16_t row);
     [[nodiscard]] Result clearSelection(const TerminalSubscription& subscription);
     [[nodiscard]] std::expected<QString, Failure> selectedText(
         const TerminalSubscription& subscription);

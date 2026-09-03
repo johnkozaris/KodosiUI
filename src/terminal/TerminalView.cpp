@@ -1,17 +1,21 @@
 #include "terminal/TerminalView.hpp"
 #include "logging/ApplicationLogStore.hpp"
+#include "terminal/TerminalLink.hpp"
 
 #include <kodosi_runtime.h>
 
 #include <QAccessible>
+#include <QDesktopServices>
 #include <QFontDatabase>
 #include <QFocusEvent>
 #include <QGuiApplication>
 #include <QClipboard>
+#include <QHoverEvent>
 #include <QInputMethodEvent>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QMetaObject>
 #include <QMouseEvent>
 #include <QQuickWindow>
@@ -20,6 +24,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QUuid>
+#include <QWheelEvent>
 #include <QtQuick/private/qquickaccessibleattached_p.h>
 
 #include <algorithm>
@@ -34,6 +39,7 @@ namespace {
 
 constexpr qsizetype maximumQueuedInputBytes = 1024 * 1024;
 constexpr std::size_t maximumQueuedInputFrames = 1024;
+constexpr int maximumWheelRowsPerEvent = 100;
 constexpr int inputBackoffMilliseconds[] {4, 8, 16, 32, 64};
 
 void publishAccessibleTextChange(
@@ -295,7 +301,57 @@ std::optional<TerminalKey> terminalKey(const QKeyEvent* event)
     }
 }
 
+bool isPasteShortcut(const QKeyEvent* event)
+{
+    const auto modifiers = event->modifiers();
+    const auto terminalShortcut = event->key() == Qt::Key_V
+        && modifiers == (Qt::ControlModifier | Qt::ShiftModifier);
+    const auto platformShortcut = event->matches(QKeySequence::Paste)
+        && !modifiers.testFlag(Qt::ControlModifier);
+    return terminalShortcut || platformShortcut;
+}
+
 } // namespace
+
+void detail::TerminalFrameMailbox::reset(const std::uint64_t incarnation)
+{
+    std::scoped_lock lock(m_mutex);
+    m_pendingFrame.reset();
+    m_incarnation = incarnation;
+    m_highestDisplayRevision = 0;
+    m_drainQueued = false;
+}
+
+detail::TerminalFrameMailbox::EnqueueResult detail::TerminalFrameMailbox::enqueue(
+    const std::uint64_t incarnation,
+    GhosttyTerminalKernel::Frame frame)
+{
+    std::scoped_lock lock(m_mutex);
+    if (incarnation != m_incarnation || frame == nullptr
+        || frame->displayRevision <= m_highestDisplayRevision) {
+        return {};
+    }
+    m_highestDisplayRevision = frame->displayRevision;
+    m_pendingFrame = std::move(frame);
+    const auto queueDrain = !m_drainQueued;
+    m_drainQueued = true;
+    return {
+        .accepted = true,
+        .queueDrain = queueDrain,
+    };
+}
+
+GhosttyTerminalKernel::Frame detail::TerminalFrameMailbox::take(
+    const std::uint64_t incarnation)
+{
+    std::scoped_lock lock(m_mutex);
+    if (incarnation != m_incarnation) {
+        return {};
+    }
+    auto frame = std::exchange(m_pendingFrame, {});
+    m_drainQueued = false;
+    return frame;
+}
 
 TerminalView::TerminalView(QQuickItem* parent)
     : QQuickItem(parent)
@@ -306,6 +362,7 @@ TerminalView::TerminalView(QQuickItem* parent)
     setFlag(ItemAcceptsInputMethod, true);
     setActiveFocusOnTab(true);
     setAcceptedMouseButtons(Qt::LeftButton);
+    setAcceptHoverEvents(true);
     auto* accessible = qobject_cast<QQuickAccessibleAttached*>(
         qmlAttachedPropertiesObject<QQuickAccessibleAttached>(this, true));
     accessible->setRole(QAccessible::Terminal);
@@ -750,6 +807,7 @@ void TerminalView::setTerminalCapabilities(
         m_inputBackoffStep = 0;
         m_preedit.clear();
         m_renderedPreedit.clear();
+        m_pasteShortcutKey.reset();
         if (auto* inputMethod = QGuiApplication::inputMethod()) {
             inputMethod->reset();
             inputMethod->update(Qt::ImEnabled | Qt::ImCursorRectangle);
@@ -832,6 +890,7 @@ bool TerminalView::attach(
     m_surfaceGeneration = ++m_nextSurfaceGeneration;
     m_renderPerformanceGeneration.fetch_add(1, std::memory_order_acq_rel);
     const auto epoch = m_attachmentEpoch.fetch_add(1, std::memory_order_acq_rel) + 1;
+    m_frameMailbox.reset(epoch);
     const auto registered = m_registry->registerSession(
         m_subscription,
         {
@@ -949,12 +1008,8 @@ void TerminalView::detach()
             sendFocus(false);
         }
     }
-    m_attachmentEpoch.fetch_add(1, std::memory_order_acq_rel);
-    {
-        std::scoped_lock lock(m_mailboxMutex);
-        m_pendingFrame.reset();
-        m_frameDrainQueued = false;
-    }
+    const auto epoch = m_attachmentEpoch.fetch_add(1, std::memory_order_acq_rel) + 1;
+    m_frameMailbox.reset(epoch);
     auto* registry = std::exchange(m_registry, nullptr);
     auto* runtime = std::exchange(m_runtime, nullptr);
     if (registry != nullptr) {
@@ -985,6 +1040,11 @@ void TerminalView::detach()
     m_renderedPreedit.clear();
     m_selecting = false;
     m_copyShortcutActive = false;
+    m_pasteShortcutKey.reset();
+    m_pressedLink.reset();
+    m_wheelAngleRemainder = 0;
+    m_wheelPixelRemainder = 0.0;
+    clearHoverLink();
     updateBlinkTimer();
     if (auto* inputMethod = QGuiApplication::inputMethod()) {
         if (ownsComposition) {
@@ -1143,6 +1203,16 @@ void TerminalView::keyPressEvent(QKeyEvent* event)
         event->accept();
         return;
     }
+    if (isPasteShortcut(event)) {
+        if (!event->isAutoRepeat()) {
+            m_pasteShortcutKey = event->key();
+        }
+        if (m_canSendInput && !event->isAutoRepeat()) {
+            pasteClipboard();
+        }
+        event->accept();
+        return;
+    }
     if (!m_canSendInput) {
         QQuickItem::keyPressEvent(event);
         return;
@@ -1179,6 +1249,11 @@ void TerminalView::keyReleaseEvent(QKeyEvent* event)
 {
     if (event->key() == Qt::Key_C && m_copyShortcutActive) {
         m_copyShortcutActive = false;
+        event->accept();
+        return;
+    }
+    if (m_pasteShortcutKey && event->key() == *m_pasteShortcutKey) {
+        m_pasteShortcutKey.reset();
         event->accept();
         return;
     }
@@ -1252,6 +1327,8 @@ void TerminalView::focusInEvent(QFocusEvent* event)
 void TerminalView::focusOutEvent(QFocusEvent* event)
 {
     sendFocus(false);
+    m_copyShortcutActive = false;
+    m_pasteShortcutKey.reset();
     m_preedit.clear();
     updateBlinkTimer();
     update();
@@ -1270,19 +1347,32 @@ void TerminalView::mousePressEvent(QMouseEvent* event)
         return;
     }
     forceActiveFocus(Qt::MouseFocusReason);
-    m_selectionAnchor = *cell;
-    m_selecting = true;
-    updateSelection(*cell);
+    if (event->modifiers() == Qt::NoModifier) {
+        if (auto link = linkAtCell(*cell, true)) {
+            m_pressedLink = std::move(*link);
+            m_selecting = false;
+            event->accept();
+            return;
+        }
+    }
+    m_pressedLink.reset();
+    beginSelection(*cell);
     event->accept();
 }
 
 void TerminalView::mouseMoveEvent(QMouseEvent* event)
 {
+    if (m_pressedLink && event->buttons().testFlag(Qt::LeftButton)) {
+        event->accept();
+        return;
+    }
     if (!m_selecting || !event->buttons().testFlag(Qt::LeftButton)) {
         QQuickItem::mouseMoveEvent(event);
         return;
     }
-    if (const auto cell = terminalCellAt(event->position())) {
+    if (const auto cell = terminalCellAt(
+            event->position(),
+            CellHitTest::ClampToViewport)) {
         updateSelection(*cell);
     }
     event->accept();
@@ -1290,15 +1380,62 @@ void TerminalView::mouseMoveEvent(QMouseEvent* event)
 
 void TerminalView::mouseReleaseEvent(QMouseEvent* event)
 {
+    if (event->button() == Qt::LeftButton && m_pressedLink) {
+        const auto pressed = std::exchange(m_pressedLink, std::nullopt);
+        const auto cell = terminalCellAt(
+            event->position(),
+            CellHitTest::Strict);
+        const auto released = cell ? linkAtCell(*cell, true) : std::nullopt;
+        if (released && *released == *pressed
+            && !QDesktopServices::openUrl(*released)) {
+            emit terminalError(QStringLiteral("The terminal link could not be opened."));
+        }
+        event->accept();
+        return;
+    }
     if (event->button() != Qt::LeftButton || !m_selecting) {
         QQuickItem::mouseReleaseEvent(event);
         return;
     }
-    if (const auto cell = terminalCellAt(event->position())) {
+    if (const auto cell = terminalCellAt(
+            event->position(),
+            CellHitTest::ClampToViewport)) {
         updateSelection(*cell);
     }
     m_selecting = false;
     event->accept();
+}
+
+void TerminalView::hoverMoveEvent(QHoverEvent* event)
+{
+    updateHoverLink(event->position());
+    event->accept();
+}
+
+void TerminalView::hoverLeaveEvent(QHoverEvent* event)
+{
+    clearHoverLink();
+    event->accept();
+}
+
+void TerminalView::wheelEvent(QWheelEvent* event)
+{
+    if (!m_terminalReady || m_registry == nullptr) {
+        QQuickItem::wheelEvent(event);
+        return;
+    }
+    const auto rows = wheelRows(event);
+    if (rows != 0) {
+        auto scrolled = m_registry->scrollViewport(m_subscription, rows);
+        if (!scrolled) {
+            emit terminalError(scrolled.error().message);
+        }
+    }
+    if (event->pixelDelta().y() != 0 || event->angleDelta().y() != 0) {
+        event->accept();
+        return;
+    }
+    QQuickItem::wheelEvent(event);
 }
 
 void TerminalView::itemChange(const ItemChange change, const ItemChangeData& value)
@@ -1327,19 +1464,11 @@ void TerminalView::enqueueFrame(
     const std::uint64_t epoch,
     GhosttyTerminalKernel::Frame frame)
 {
-    bool queueDrain = false;
-    {
-        std::scoped_lock lock(m_mailboxMutex);
-        if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch) {
-            return;
-        }
-        m_pendingFrame = std::move(frame);
-        if (!m_frameDrainQueued) {
-            m_frameDrainQueued = true;
-            queueDrain = true;
-        }
+    if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch) {
+        return;
     }
-    if (queueDrain) {
+    const auto enqueued = m_frameMailbox.enqueue(epoch, std::move(frame));
+    if (enqueued.queueDrain) {
         QMetaObject::invokeMethod(
             this,
             [this, epoch] { drainFrame(epoch); },
@@ -1353,15 +1482,7 @@ void TerminalView::drainFrame(const std::uint64_t epoch)
     if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch) {
         return;
     }
-    GhosttyTerminalKernel::Frame frame;
-    {
-        std::scoped_lock lock(m_mailboxMutex);
-        if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch) {
-            return;
-        }
-        frame = std::exchange(m_pendingFrame, {});
-        m_frameDrainQueued = false;
-    }
+    auto frame = m_frameMailbox.take(epoch);
     if (frame) {
         presentFrame(std::move(frame));
     }
@@ -1372,6 +1493,8 @@ void TerminalView::presentFrame(GhosttyTerminalKernel::Frame frame)
     Q_ASSERT(thread() == QThread::currentThread());
     const auto priorAccessibleText = accessibleText();
     m_frame = std::move(frame);
+    m_pressedLink.reset();
+    clearHoverLink();
     const auto wasReady = m_terminalReady;
     m_terminalReady = m_frame != nullptr;
     if (m_frame) {
@@ -1417,7 +1540,35 @@ void TerminalView::sendText(const QString& text)
     if (!m_canSendInput || m_runtime == nullptr || text.isEmpty()) {
         return;
     }
-    enqueueInput(text.toUtf8());
+    (void)enqueueInput(text.toUtf8());
+}
+
+void TerminalView::pasteClipboard()
+{
+    if (!m_canSendInput || m_registry == nullptr || m_runtime == nullptr
+        || !m_terminalReady) {
+        return;
+    }
+    auto* clipboard = QGuiApplication::clipboard();
+    if (clipboard == nullptr) {
+        return;
+    }
+    auto text = clipboard->text(QClipboard::Clipboard).toUtf8();
+    if (text.isEmpty()) {
+        return;
+    }
+    if (text.size() > maximumQueuedInputBytes
+        || m_queuedInputBytes > maximumQueuedInputBytes - text.size()
+        || m_inputQueue.size() >= maximumQueuedInputFrames) {
+        emit terminalError(QStringLiteral("Terminal input queue is full; input was not accepted."));
+        return;
+    }
+    auto encoded = m_registry->encodePaste(m_subscription, std::move(text));
+    if (!encoded) {
+        emit terminalError(encoded.error().message);
+        return;
+    }
+    (void)enqueueInput(std::move(*encoded));
 }
 
 bool TerminalView::sendKey(QKeyEvent* event, const TerminalKeyAction action)
@@ -1462,24 +1613,31 @@ bool TerminalView::sendKey(QKeyEvent* event, const TerminalKeyAction action)
         emit terminalError(encoded.error().message);
         return true;
     }
-    enqueueInput(std::move(*encoded));
+    (void)enqueueInput(std::move(*encoded));
     return true;
 }
 
-void TerminalView::enqueueInput(QByteArray bytes)
+bool TerminalView::enqueueInput(QByteArray bytes)
 {
-    if (!m_canSendInput || bytes.isEmpty()) {
-        return;
+    if (!m_canSendInput || bytes.isEmpty() || m_registry == nullptr
+        || m_runtime == nullptr || !m_terminalReady) {
+        return false;
     }
     if (bytes.size() > maximumQueuedInputBytes
         || m_queuedInputBytes > maximumQueuedInputBytes - bytes.size()
         || m_inputQueue.size() >= maximumQueuedInputFrames) {
         emit terminalError(QStringLiteral("Terminal input queue is full; input was not accepted."));
-        return;
+        return false;
+    }
+    auto bottom = m_registry->scrollViewportToBottom(m_subscription);
+    if (!bottom) {
+        emit terminalError(bottom.error().message);
+        return false;
     }
     m_queuedInputBytes += bytes.size();
     m_inputQueue.push_back(std::move(bytes));
     drainInputQueue();
+    return true;
 }
 
 void TerminalView::drainInputQueue()
@@ -1806,13 +1964,22 @@ void TerminalView::presentFailure(GhosttyTerminalKernel::Failure failure)
     emit terminalError(std::move(failure.message));
 }
 
-std::optional<QPoint> TerminalView::terminalCellAt(const QPointF& position) const
+std::optional<QPoint> TerminalView::terminalCellAt(
+    const QPointF& position,
+    const CellHitTest hitTest) const
 {
-    if (!m_frame) {
+    if (!m_frame || m_frame->columns == 0 || m_frame->rows == 0) {
         return std::nullopt;
     }
     const auto cell = TerminalRasterizer::cellSize(m_font, m_lineHeight);
     if (cell.width() <= 0.0 || cell.height() <= 0.0) {
+        return std::nullopt;
+    }
+    if (hitTest == CellHitTest::Strict
+        && (position.x() < 0.0 || position.y() < 0.0
+            || position.x() >= width() || position.y() >= height()
+            || position.x() >= cell.width() * m_frame->columns
+            || position.y() >= cell.height() * m_frame->rows)) {
         return std::nullopt;
     }
     const auto column = std::clamp(
@@ -1826,18 +1993,111 @@ std::optional<QPoint> TerminalView::terminalCellAt(const QPointF& position) cons
     return QPoint(column, row);
 }
 
-void TerminalView::updateSelection(const QPoint& endpoint)
+std::optional<QUrl> TerminalView::linkAtCell(
+    const QPoint& cell,
+    const bool reportFailure)
 {
-    if (m_registry == nullptr) {
+    if (m_registry == nullptr || !m_terminalReady) {
+        return std::nullopt;
+    }
+    auto value = m_registry->linkAt(
+        m_subscription,
+        m_frame->viewportRevision,
+        static_cast<std::uint16_t>(cell.x()),
+        static_cast<std::uint16_t>(cell.y()));
+    if (!value) {
+        if (reportFailure
+            && value.error().code
+                != GhosttyTerminalKernel::Failure::Code::StaleFrame) {
+            emit terminalError(value.error().message);
+        }
+        return std::nullopt;
+    }
+    return validatedTerminalLink(*value);
+}
+
+void TerminalView::updateHoverLink(const QPointF& position)
+{
+    const auto cell = terminalCellAt(position, CellHitTest::Strict);
+    if (cell && linkAtCell(*cell, false)) {
+        setCursor(Qt::PointingHandCursor);
+    } else {
+        unsetCursor();
+    }
+}
+
+void TerminalView::clearHoverLink()
+{
+    unsetCursor();
+}
+
+int TerminalView::wheelRows(QWheelEvent* event)
+{
+    const auto cell = TerminalRasterizer::cellSize(m_font, m_lineHeight);
+    if (event->pixelDelta().y() != 0 && cell.height() > 0.0) {
+        const auto bounded = std::clamp(
+            static_cast<qreal>(event->pixelDelta().y()),
+            -cell.height() * maximumWheelRowsPerEvent,
+            cell.height() * maximumWheelRowsPerEvent);
+        m_wheelPixelRemainder += bounded;
+        const auto rows = std::clamp(
+            static_cast<int>(m_wheelPixelRemainder / cell.height()),
+            -maximumWheelRowsPerEvent,
+            maximumWheelRowsPerEvent);
+        m_wheelPixelRemainder -= rows * cell.height();
+        return -rows;
+    }
+    if (event->angleDelta().y() != 0) {
+        const auto bounded = std::clamp(
+            event->angleDelta().y(),
+            -120 * maximumWheelRowsPerEvent,
+            120 * maximumWheelRowsPerEvent);
+        m_wheelAngleRemainder += bounded;
+        const auto rows = std::clamp(
+            m_wheelAngleRemainder / 120,
+            -maximumWheelRowsPerEvent,
+            maximumWheelRowsPerEvent);
+        m_wheelAngleRemainder -= rows * 120;
+        return -rows;
+    }
+    return 0;
+}
+
+void TerminalView::beginSelection(const QPoint& anchor)
+{
+    if (m_registry == nullptr || m_frame == nullptr) {
         return;
     }
-    auto selected = m_registry->select(
+    auto selected = m_registry->beginSelection(
         m_subscription,
-        static_cast<std::uint16_t>(m_selectionAnchor.x()),
-        static_cast<std::uint16_t>(m_selectionAnchor.y()),
+        m_frame->viewportRevision,
+        static_cast<std::uint16_t>(anchor.x()),
+        static_cast<std::uint16_t>(anchor.y()));
+    m_selecting = selected.has_value();
+    if (!selected && !selected.error().isRecoverableHitTestRace()) {
+        emit terminalError(selected.error().message);
+    }
+}
+
+void TerminalView::updateSelection(const QPoint& endpoint)
+{
+    if (m_registry == nullptr || m_frame == nullptr) {
+        return;
+    }
+    auto selected = m_registry->updateSelection(
+        m_subscription,
+        m_frame->viewportRevision,
         static_cast<std::uint16_t>(endpoint.x()),
         static_cast<std::uint16_t>(endpoint.y()));
     if (!selected) {
+        if (selected.error().isRecoverableHitTestRace()) {
+            m_selecting = false;
+            if (auto cleared = m_registry->clearSelection(m_subscription);
+                !cleared) {
+                emit terminalError(cleared.error().message);
+            }
+            return;
+        }
         emit terminalError(selected.error().message);
     }
 }

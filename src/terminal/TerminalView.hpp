@@ -8,6 +8,7 @@
 #include <QPoint>
 #include <QQuickItem>
 #include <QTimer>
+#include <QUrl>
 #include <QVariant>
 
 #include <atomic>
@@ -17,6 +18,31 @@
 #include <optional>
 
 namespace kodosi {
+
+namespace detail {
+
+class TerminalFrameMailbox final {
+public:
+    struct EnqueueResult {
+        bool accepted = false;
+        bool queueDrain = false;
+    };
+
+    void reset(std::uint64_t incarnation);
+    [[nodiscard]] EnqueueResult enqueue(
+        std::uint64_t incarnation,
+        GhosttyTerminalKernel::Frame frame);
+    [[nodiscard]] GhosttyTerminalKernel::Frame take(std::uint64_t incarnation);
+
+private:
+    std::mutex m_mutex;
+    GhosttyTerminalKernel::Frame m_pendingFrame;
+    std::uint64_t m_incarnation = 0;
+    std::uint64_t m_highestDisplayRevision = 0;
+    bool m_drainQueued = false;
+};
+
+} // namespace detail
 
 class TerminalView : public QQuickItem {
     Q_OBJECT
@@ -127,8 +153,16 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void hoverMoveEvent(QHoverEvent* event) override;
+    void hoverLeaveEvent(QHoverEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
 
 private:
+    enum class CellHitTest {
+        Strict,
+        ClampToViewport,
+    };
+
     enum class FocusOperation {
         None,
         Focus,
@@ -189,12 +223,13 @@ private:
     bool m_inputRetryQueued = false;
     std::uint8_t m_inputBackoffStep = 0;
     std::atomic<std::uint64_t> m_attachmentEpoch {0};
-    std::mutex m_mailboxMutex;
-    GhosttyTerminalKernel::Frame m_pendingFrame;
-    bool m_frameDrainQueued = false;
-    QPoint m_selectionAnchor;
+    detail::TerminalFrameMailbox m_frameMailbox;
     bool m_selecting = false;
     bool m_copyShortcutActive = false;
+    std::optional<int> m_pasteShortcutKey;
+    std::optional<QUrl> m_pressedLink;
+    int m_wheelAngleRemainder = 0;
+    qreal m_wheelPixelRemainder = 0.0;
     std::atomic_bool m_renderPerformanceQueued = false;
     std::atomic<std::uint64_t> m_renderPerformanceGeneration {1};
 
@@ -204,8 +239,9 @@ private:
     void presentFrame(GhosttyTerminalKernel::Frame frame);
     void presentFailure(GhosttyTerminalKernel::Failure failure);
     void sendText(const QString& text);
+    void pasteClipboard();
     [[nodiscard]] bool sendKey(QKeyEvent* event, TerminalKeyAction action);
-    void enqueueInput(QByteArray bytes);
+    [[nodiscard]] bool enqueueInput(QByteArray bytes);
     void drainInputQueue();
     void sendFocus(bool focused);
     void dispatchFocus(FocusOperation operation);
@@ -215,7 +251,16 @@ private:
     void handleResizeOutcome(TerminalResizeOutcome outcome);
     void scheduleResize();
     void dispatchResize();
-    [[nodiscard]] std::optional<QPoint> terminalCellAt(const QPointF& position) const;
+    [[nodiscard]] std::optional<QPoint> terminalCellAt(
+        const QPointF& position,
+        CellHitTest hitTest = CellHitTest::Strict) const;
+    [[nodiscard]] std::optional<QUrl> linkAtCell(
+        const QPoint& cell,
+        bool reportFailure);
+    void updateHoverLink(const QPointF& position);
+    void clearHoverLink();
+    [[nodiscard]] int wheelRows(QWheelEvent* event);
+    void beginSelection(const QPoint& anchor);
     void updateSelection(const QPoint& endpoint);
     [[nodiscard]] bool copySelection();
     [[nodiscard]] TerminalKernelSettings kernelSettings() const;

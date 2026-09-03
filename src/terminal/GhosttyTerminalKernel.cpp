@@ -16,6 +16,7 @@ namespace {
 
 constexpr qsizetype maximumVisibleCells = 1'048'576;
 constexpr std::size_t maximumGraphemeBytes = 4'096;
+constexpr std::size_t maximumHyperlinkBytes = 8'192;
 
 GhosttyTerminalKernel::Failure ghosttyFailure(QString operation, const GhosttyResult result)
 {
@@ -93,6 +94,25 @@ public:
     KeyEventHandle& operator=(const KeyEventHandle&) = delete;
 
     GhosttyKeyEvent value = nullptr;
+};
+
+class TrackedGridRefHandle final {
+public:
+    TrackedGridRefHandle() = default;
+    ~TrackedGridRefHandle()
+    {
+        ghostty_tracked_grid_ref_free(value);
+    }
+
+    TrackedGridRefHandle(const TrackedGridRefHandle&) = delete;
+    TrackedGridRefHandle& operator=(const TrackedGridRefHandle&) = delete;
+
+    void reset(GhosttyTrackedGridRef next = nullptr)
+    {
+        ghostty_tracked_grid_ref_free(std::exchange(value, next));
+    }
+
+    GhosttyTrackedGridRef value = nullptr;
 };
 
 class RowIteratorHandle final {
@@ -291,7 +311,9 @@ std::expected<QString, GhosttyTerminalKernel::Failure> readGrapheme(
 FrameResult extractFrame(
     const GhosttyTerminal terminal,
     const GhosttyRenderState renderState,
-    const std::uint64_t nextSequence)
+    const std::uint64_t nextSequence,
+    const std::uint64_t viewportRevision,
+    const std::uint64_t displayRevision)
 {
     const auto update = ghostty_render_state_update(renderState, terminal);
     if (update != GHOSTTY_SUCCESS) {
@@ -302,6 +324,7 @@ FrameResult extractFrame(
     std::uint16_t rows = 0;
     GhosttyRenderStateColors colors = GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);
     GhosttyRenderStateCursor cursor = GHOSTTY_INIT_SIZED(GhosttyRenderStateCursor);
+    GhosttyTerminalScrollbar scrollbar {};
     const GhosttyRenderStateData keys[] {
         GHOSTTY_RENDER_STATE_DATA_COLS,
         GHOSTTY_RENDER_STATE_DATA_ROWS,
@@ -320,6 +343,14 @@ FrameResult extractFrame(
         return std::unexpected(
             ghosttyFailure(QStringLiteral("render-state metadata"), stateResult));
     }
+    const auto scrollbarResult = ghostty_terminal_get(
+        terminal,
+        GHOSTTY_TERMINAL_DATA_SCROLLBAR,
+        &scrollbar);
+    if (scrollbarResult != GHOSTTY_SUCCESS) {
+        return std::unexpected(
+            ghosttyFailure(QStringLiteral("terminal scrollbar"), scrollbarResult));
+    }
 
     const auto cellCount = static_cast<std::uint64_t>(columns) * rows;
     if (cellCount > static_cast<std::uint64_t>(maximumVisibleCells)) {
@@ -333,6 +364,8 @@ FrameResult extractFrame(
     frame->columns = columns;
     frame->rows = rows;
     frame->nextSequence = nextSequence;
+    frame->viewportRevision = viewportRevision;
+    frame->displayRevision = displayRevision;
     frame->foreground = color(colors.foreground);
     frame->background = color(colors.background);
     frame->cursorColor = color(
@@ -345,6 +378,11 @@ FrameResult extractFrame(
         .column = cursor.viewport_has_value ? cursor.viewport_x : std::uint16_t {0},
         .row = cursor.viewport_has_value ? cursor.viewport_y : std::uint16_t {0},
         .visualStyle = cursor.visual_style,
+    };
+    frame->scroll = {
+        .totalRows = scrollbar.total,
+        .viewportOffset = scrollbar.offset,
+        .viewportRows = scrollbar.len,
     };
     frame->cells.reserve(static_cast<qsizetype>(cellCount));
 
@@ -564,14 +602,53 @@ GhosttyTerminalKernel::ConfigureResult applySettings(
 
 class GhosttyTerminalKernel::Impl final {
 public:
+    GhosttyResult refreshSelection()
+    {
+        if (selectionAnchor.value == nullptr || selectionEndpoint.value == nullptr) {
+            return GHOSTTY_SUCCESS;
+        }
+        GhosttySelection selection = GHOSTTY_INIT_SIZED(GhosttySelection);
+        auto result = ghostty_tracked_grid_ref_snapshot(
+            selectionAnchor.value,
+            &selection.start);
+        if (result == GHOSTTY_SUCCESS) {
+            result = ghostty_tracked_grid_ref_snapshot(
+                selectionEndpoint.value,
+                &selection.end);
+        }
+        if (result == GHOSTTY_NO_VALUE) {
+            const auto clearResult = ghostty_terminal_set(
+                terminal.value,
+                GHOSTTY_TERMINAL_OPT_SELECTION,
+                nullptr);
+            selectionAnchor.reset();
+            selectionEndpoint.reset();
+            selectionRectangular = false;
+            return clearResult;
+        }
+        if (result != GHOSTTY_SUCCESS) {
+            return result;
+        }
+        selection.rectangle = selectionRectangular;
+        return ghostty_terminal_set(
+            terminal.value,
+            GHOSTTY_TERMINAL_OPT_SELECTION,
+            &selection);
+    }
+
     mutable std::mutex mutex;
     TerminalHandle terminal;
     RenderStateHandle renderState;
     KeyEncoderHandle keyEncoder;
+    TrackedGridRefHandle selectionAnchor;
+    TrackedGridRefHandle selectionEndpoint;
     TerminalSubscription subscription;
     std::uint64_t nextSequence = 0;
+    std::uint64_t viewportRevision = 0;
+    std::uint64_t displayRevision = 0;
     Frame currentFrame;
     TerminalKernelSettings settings;
+    bool selectionRectangular = false;
     bool admitted = false;
     bool failed = false;
 };
@@ -599,6 +676,13 @@ GhosttyTerminalKernel::Result GhosttyTerminalKernel::installCheckpoint(
     }
 
     std::scoped_lock lock(m_impl->mutex);
+    if (m_impl->viewportRevision == std::numeric_limits<std::uint64_t>::max()
+        || m_impl->displayRevision == std::numeric_limits<std::uint64_t>::max()) {
+        return std::unexpected(Failure {
+            Failure::Code::ResourceLimit,
+            QStringLiteral("Terminal display revision is exhausted."),
+        });
+    }
     TerminalHandle candidateTerminal;
     auto result = ghostty_terminal_new(
         nullptr,
@@ -649,8 +733,14 @@ GhosttyTerminalKernel::Result GhosttyTerminalKernel::installCheckpoint(
     if (result != GHOSTTY_SUCCESS || candidateRenderState.value == nullptr) {
         return std::unexpected(ghosttyFailure(QStringLiteral("render-state creation"), result));
     }
-    auto candidateFrame =
-        extractFrame(candidateTerminal.value, candidateRenderState.value, checkpoint.nextSequence);
+    const auto viewportRevision = m_impl->viewportRevision + 1;
+    const auto displayRevision = m_impl->displayRevision + 1;
+    auto candidateFrame = extractFrame(
+        candidateTerminal.value,
+        candidateRenderState.value,
+        checkpoint.nextSequence,
+        viewportRevision,
+        displayRevision);
     if (!candidateFrame) {
         return candidateFrame;
     }
@@ -670,9 +760,14 @@ GhosttyTerminalKernel::Result GhosttyTerminalKernel::installCheckpoint(
     std::swap(m_impl->terminal.value, candidateTerminal.value);
     std::swap(m_impl->renderState.value, candidateRenderState.value);
     std::swap(m_impl->keyEncoder.value, candidateKeyEncoder.value);
+    m_impl->selectionAnchor.reset();
+    m_impl->selectionEndpoint.reset();
     m_impl->subscription = checkpoint.subscription;
     m_impl->nextSequence = checkpoint.nextSequence;
+    m_impl->viewportRevision = viewportRevision;
+    m_impl->displayRevision = displayRevision;
     m_impl->currentFrame = *candidateFrame;
+    m_impl->selectionRectangular = false;
     m_impl->admitted = true;
     m_impl->failed = false;
     return m_impl->currentFrame;
@@ -700,6 +795,13 @@ GhosttyTerminalKernel::Result GhosttyTerminalKernel::applyData(const TerminalDat
             QStringLiteral("Raw terminal data is not the next contiguous frame."),
         });
     }
+    if (m_impl->viewportRevision == std::numeric_limits<std::uint64_t>::max()
+        || m_impl->displayRevision == std::numeric_limits<std::uint64_t>::max()) {
+        return std::unexpected(Failure {
+            Failure::Code::ResourceLimit,
+            QStringLiteral("Terminal display revision is exhausted."),
+        });
+    }
 
     ghostty_terminal_vt_write(
         m_impl->terminal.value,
@@ -714,10 +816,22 @@ GhosttyTerminalKernel::Result GhosttyTerminalKernel::applyData(const TerminalDat
         m_impl->failed = true;
         return std::unexpected(ghosttyFailure(QStringLiteral("terminal write"), status));
     }
+    const auto selectionResult = m_impl->refreshSelection();
+    if (selectionResult != GHOSTTY_SUCCESS) {
+        m_impl->failed = true;
+        return std::unexpected(
+            ghosttyFailure(QStringLiteral("selection refresh"), selectionResult));
+    }
 
     ++m_impl->nextSequence;
-    auto nextFrame =
-        extractFrame(m_impl->terminal.value, m_impl->renderState.value, m_impl->nextSequence);
+    ++m_impl->viewportRevision;
+    ++m_impl->displayRevision;
+    auto nextFrame = extractFrame(
+        m_impl->terminal.value,
+        m_impl->renderState.value,
+        m_impl->nextSequence,
+        m_impl->viewportRevision,
+        m_impl->displayRevision);
     if (!nextFrame) {
         m_impl->failed = true;
         return nextFrame;
@@ -751,6 +865,13 @@ GhosttyTerminalKernel::Result GhosttyTerminalKernel::applyResize(
             QStringLiteral("Terminal resize does not match the current sequence boundary."),
         });
     }
+    if (m_impl->viewportRevision == std::numeric_limits<std::uint64_t>::max()
+        || m_impl->displayRevision == std::numeric_limits<std::uint64_t>::max()) {
+        return std::unexpected(Failure {
+            Failure::Code::ResourceLimit,
+            QStringLiteral("Terminal display revision is exhausted."),
+        });
+    }
 
     const auto result = ghostty_terminal_resize(
         m_impl->terminal.value,
@@ -761,8 +882,20 @@ GhosttyTerminalKernel::Result GhosttyTerminalKernel::applyResize(
     if (result != GHOSTTY_SUCCESS) {
         return std::unexpected(ghosttyFailure(QStringLiteral("terminal resize"), result));
     }
-    auto nextFrame =
-        extractFrame(m_impl->terminal.value, m_impl->renderState.value, m_impl->nextSequence);
+    const auto selectionResult = m_impl->refreshSelection();
+    if (selectionResult != GHOSTTY_SUCCESS) {
+        m_impl->failed = true;
+        return std::unexpected(
+            ghosttyFailure(QStringLiteral("selection refresh"), selectionResult));
+    }
+    ++m_impl->viewportRevision;
+    ++m_impl->displayRevision;
+    auto nextFrame = extractFrame(
+        m_impl->terminal.value,
+        m_impl->renderState.value,
+        m_impl->nextSequence,
+        m_impl->viewportRevision,
+        m_impl->displayRevision);
     if (!nextFrame) {
         m_impl->failed = true;
         return nextFrame;
@@ -852,12 +985,290 @@ GhosttyTerminalKernel::encodeKey(
     return encoded;
 }
 
-GhosttyTerminalKernel::Result GhosttyTerminalKernel::select(
+std::expected<QByteArray, GhosttyTerminalKernel::Failure>
+GhosttyTerminalKernel::encodePaste(
     const TerminalSubscription& subscription,
-    const std::uint16_t startColumn,
-    const std::uint16_t startRow,
-    const std::uint16_t endColumn,
-    const std::uint16_t endRow,
+    QByteArray text)
+{
+    std::scoped_lock lock(m_impl->mutex);
+    if (!m_impl->admitted || m_impl->failed) {
+        return std::unexpected(Failure {
+            Failure::Code::MissingCheckpoint,
+            QStringLiteral("Terminal paste requires an admitted semantic checkpoint."),
+        });
+    }
+    if (!sameSubscription(subscription, m_impl->subscription)) {
+        return std::unexpected(Failure {
+            Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal paste belongs to a stale subscription."),
+        });
+    }
+    if (text.isEmpty()) {
+        return QByteArray {};
+    }
+
+    GhosttyTerminalModeConfig bracketed {
+        .mode = GHOSTTY_MODE_BRACKETED_PASTE,
+        .value = false,
+    };
+    auto result = ghostty_terminal_get(
+        m_impl->terminal.value,
+        GHOSTTY_TERMINAL_DATA_MODE,
+        &bracketed);
+    if (result != GHOSTTY_SUCCESS) {
+        return std::unexpected(
+            ghosttyFailure(QStringLiteral("bracketed paste mode"), result));
+    }
+    if (!bracketed.value
+        && std::any_of(text.cbegin(), text.cend(), [](const char value) {
+            const auto byte = static_cast<unsigned char>(value);
+            return byte < 0x20 || byte == 0x7f;
+        })) {
+        return std::unexpected(Failure {
+            Failure::Code::UnsafePaste,
+            QStringLiteral(
+                "Multiline or control-character paste requires bracketed paste mode; "
+                "no input was sent."),
+        });
+    }
+
+    std::size_t required = 0;
+    result = ghostty_paste_encode(
+        text.data(),
+        static_cast<std::size_t>(text.size()),
+        bracketed.value,
+        nullptr,
+        0,
+        &required);
+    if (result != GHOSTTY_OUT_OF_SPACE
+        || required > static_cast<std::size_t>(KODOSI_MAX_FRAME_BYTES)
+        || required > static_cast<std::size_t>(std::numeric_limits<qsizetype>::max())) {
+        return std::unexpected(ghosttyFailure(QStringLiteral("paste encoding size"), result));
+    }
+    QByteArray encoded(static_cast<qsizetype>(required), Qt::Uninitialized);
+    std::size_t written = 0;
+    result = ghostty_paste_encode(
+        text.data(),
+        static_cast<std::size_t>(text.size()),
+        bracketed.value,
+        encoded.data(),
+        static_cast<std::size_t>(encoded.size()),
+        &written);
+    if (result != GHOSTTY_SUCCESS
+        || written > static_cast<std::size_t>(encoded.size())) {
+        return std::unexpected(ghosttyFailure(QStringLiteral("paste encoding"), result));
+    }
+    encoded.resize(static_cast<qsizetype>(written));
+    return encoded;
+}
+
+GhosttyTerminalKernel::Result GhosttyTerminalKernel::scrollViewport(
+    const TerminalSubscription& subscription,
+    const int rows)
+{
+    std::scoped_lock lock(m_impl->mutex);
+    if (!m_impl->admitted || m_impl->failed) {
+        return std::unexpected(Failure {
+            Failure::Code::MissingCheckpoint,
+            QStringLiteral("Terminal scrolling requires an admitted semantic checkpoint."),
+        });
+    }
+    if (!sameSubscription(subscription, m_impl->subscription)) {
+        return std::unexpected(Failure {
+            Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal scrolling belongs to a stale subscription."),
+        });
+    }
+    if (rows == 0) {
+        return m_impl->currentFrame;
+    }
+    const auto* frame = m_impl->currentFrame.get();
+    if (frame != nullptr
+        && ((rows < 0 && frame->scroll.viewportOffset == 0)
+            || (rows > 0
+                && frame->scroll.viewportOffset + frame->scroll.viewportRows
+                    >= frame->scroll.totalRows))) {
+        return m_impl->currentFrame;
+    }
+    if (m_impl->viewportRevision == std::numeric_limits<std::uint64_t>::max()
+        || m_impl->displayRevision == std::numeric_limits<std::uint64_t>::max()) {
+        return std::unexpected(Failure {
+            Failure::Code::ResourceLimit,
+            QStringLiteral("Terminal display revision is exhausted."),
+        });
+    }
+
+    GhosttyTerminalScrollViewport scroll {
+        .tag = GHOSTTY_SCROLL_VIEWPORT_DELTA,
+        .value = {.delta = static_cast<intptr_t>(rows)},
+    };
+    ghostty_terminal_scroll_viewport(m_impl->terminal.value, scroll);
+    const auto selectionResult = m_impl->refreshSelection();
+    if (selectionResult != GHOSTTY_SUCCESS) {
+        m_impl->failed = true;
+        return std::unexpected(
+            ghosttyFailure(QStringLiteral("selection refresh"), selectionResult));
+    }
+    ++m_impl->viewportRevision;
+    ++m_impl->displayRevision;
+    auto nextFrame = extractFrame(
+        m_impl->terminal.value,
+        m_impl->renderState.value,
+        m_impl->nextSequence,
+        m_impl->viewportRevision,
+        m_impl->displayRevision);
+    if (!nextFrame) {
+        m_impl->failed = true;
+        return nextFrame;
+    }
+    m_impl->currentFrame = *nextFrame;
+    return m_impl->currentFrame;
+}
+
+GhosttyTerminalKernel::Result GhosttyTerminalKernel::scrollViewportToBottom(
+    const TerminalSubscription& subscription)
+{
+    std::scoped_lock lock(m_impl->mutex);
+    if (!m_impl->admitted || m_impl->failed) {
+        return std::unexpected(Failure {
+            Failure::Code::MissingCheckpoint,
+            QStringLiteral("Terminal scrolling requires an admitted semantic checkpoint."),
+        });
+    }
+    if (!sameSubscription(subscription, m_impl->subscription)) {
+        return std::unexpected(Failure {
+            Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal scrolling belongs to a stale subscription."),
+        });
+    }
+    const auto* frame = m_impl->currentFrame.get();
+    if (frame != nullptr
+        && frame->scroll.viewportOffset + frame->scroll.viewportRows
+            >= frame->scroll.totalRows) {
+        return m_impl->currentFrame;
+    }
+    if (m_impl->viewportRevision == std::numeric_limits<std::uint64_t>::max()
+        || m_impl->displayRevision == std::numeric_limits<std::uint64_t>::max()) {
+        return std::unexpected(Failure {
+            Failure::Code::ResourceLimit,
+            QStringLiteral("Terminal display revision is exhausted."),
+        });
+    }
+
+    GhosttyTerminalScrollViewport scroll {
+        .tag = GHOSTTY_SCROLL_VIEWPORT_BOTTOM,
+        .value = {},
+    };
+    ghostty_terminal_scroll_viewport(m_impl->terminal.value, scroll);
+    const auto selectionResult = m_impl->refreshSelection();
+    if (selectionResult != GHOSTTY_SUCCESS) {
+        m_impl->failed = true;
+        return std::unexpected(
+            ghosttyFailure(QStringLiteral("selection refresh"), selectionResult));
+    }
+    ++m_impl->viewportRevision;
+    ++m_impl->displayRevision;
+    auto nextFrame = extractFrame(
+        m_impl->terminal.value,
+        m_impl->renderState.value,
+        m_impl->nextSequence,
+        m_impl->viewportRevision,
+        m_impl->displayRevision);
+    if (!nextFrame) {
+        m_impl->failed = true;
+        return nextFrame;
+    }
+    m_impl->currentFrame = *nextFrame;
+    return m_impl->currentFrame;
+}
+
+std::expected<QString, GhosttyTerminalKernel::Failure>
+GhosttyTerminalKernel::linkAt(
+    const TerminalSubscription& subscription,
+    const std::uint64_t viewportRevision,
+    const std::uint16_t column,
+    const std::uint16_t row)
+{
+    std::scoped_lock lock(m_impl->mutex);
+    if (!m_impl->admitted || m_impl->failed) {
+        return std::unexpected(Failure {
+            Failure::Code::MissingCheckpoint,
+            QStringLiteral("Terminal link lookup requires an admitted semantic checkpoint."),
+        });
+    }
+    if (!sameSubscription(subscription, m_impl->subscription)) {
+        return std::unexpected(Failure {
+            Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal link lookup belongs to a stale subscription."),
+        });
+    }
+    const auto* frame = m_impl->currentFrame.get();
+    if (frame == nullptr || frame->viewportRevision != viewportRevision) {
+        return std::unexpected(Failure {
+            Failure::Code::StaleFrame,
+            QStringLiteral("Terminal link lookup does not match the displayed frame."),
+        });
+    }
+    if (column >= frame->columns || row >= frame->rows) {
+        return std::unexpected(Failure {
+            Failure::Code::ResourceLimit,
+            QStringLiteral("Terminal link lookup point is outside the viewport."),
+        });
+    }
+
+    GhosttyPoint point {};
+    point.tag = GHOSTTY_POINT_TAG_VIEWPORT;
+    point.value.coordinate = {column, row};
+    GhosttyGridRef reference = GHOSTTY_INIT_SIZED(GhosttyGridRef);
+    auto result = ghostty_terminal_grid_ref(
+        m_impl->terminal.value,
+        point,
+        &reference);
+    if (result != GHOSTTY_SUCCESS) {
+        return std::unexpected(
+            ghosttyFailure(QStringLiteral("link grid reference"), result));
+    }
+
+    std::size_t required = 0;
+    result = ghostty_grid_ref_hyperlink_uri(
+        &reference,
+        nullptr,
+        0,
+        &required);
+    if (result == GHOSTTY_SUCCESS && required == 0) {
+        return QString {};
+    }
+    if (result != GHOSTTY_OUT_OF_SPACE || required == 0
+        || required > maximumHyperlinkBytes
+        || required > static_cast<std::size_t>(std::numeric_limits<qsizetype>::max())) {
+        return std::unexpected(ghosttyFailure(QStringLiteral("link URI size"), result));
+    }
+    QByteArray uri(static_cast<qsizetype>(required), Qt::Uninitialized);
+    std::size_t written = 0;
+    result = ghostty_grid_ref_hyperlink_uri(
+        &reference,
+        reinterpret_cast<std::uint8_t*>(uri.data()),
+        static_cast<std::size_t>(uri.size()),
+        &written);
+    if (result != GHOSTTY_SUCCESS || written > static_cast<std::size_t>(uri.size())) {
+        return std::unexpected(ghosttyFailure(QStringLiteral("link URI copy"), result));
+    }
+    uri.resize(static_cast<qsizetype>(written));
+    const auto value = QString::fromUtf8(uri);
+    if (value.toUtf8() != uri) {
+        return std::unexpected(Failure {
+            Failure::Code::GhosttyRejected,
+            QStringLiteral("Terminal link URI is not valid UTF-8."),
+        });
+    }
+    return value;
+}
+
+GhosttyTerminalKernel::Result GhosttyTerminalKernel::beginSelection(
+    const TerminalSubscription& subscription,
+    const std::uint64_t viewportRevision,
+    const std::uint16_t column,
+    const std::uint16_t row,
     const bool rectangular)
 {
     std::scoped_lock lock(m_impl->mutex);
@@ -874,44 +1285,134 @@ GhosttyTerminalKernel::Result GhosttyTerminalKernel::select(
         });
     }
     const auto* frame = m_impl->currentFrame.get();
-    if (frame == nullptr || startColumn >= frame->columns || endColumn >= frame->columns
-        || startRow >= frame->rows || endRow >= frame->rows) {
+    if (frame == nullptr || frame->viewportRevision != viewportRevision) {
+        return std::unexpected(Failure {
+            Failure::Code::StaleFrame,
+            QStringLiteral("Terminal selection does not match the displayed frame."),
+        });
+    }
+    if (column >= frame->columns || row >= frame->rows) {
+        return std::unexpected(Failure {
+            Failure::Code::HitTestRace,
+            QStringLiteral("Terminal selection point no longer matches the viewport."),
+        });
+    }
+    if (m_impl->displayRevision == std::numeric_limits<std::uint64_t>::max()) {
         return std::unexpected(Failure {
             Failure::Code::ResourceLimit,
-            QStringLiteral("Terminal selection point is outside the viewport."),
+            QStringLiteral("Terminal display revision is exhausted."),
         });
     }
 
-    const auto point = [](const std::uint16_t column, const std::uint16_t row) {
-        GhosttyPoint value {};
-        value.tag = GHOSTTY_POINT_TAG_ACTIVE;
-        value.value.coordinate = {column, row};
-        return value;
-    };
-    GhosttySelection selection = GHOSTTY_INIT_SIZED(GhosttySelection);
-    auto result = ghostty_terminal_grid_ref(
+    GhosttyPoint point {};
+    point.tag = GHOSTTY_POINT_TAG_VIEWPORT;
+    point.value.coordinate = {column, row};
+    TrackedGridRefHandle anchor;
+    auto result = ghostty_terminal_grid_ref_track(
         m_impl->terminal.value,
-        point(startColumn, startRow),
-        &selection.start);
-    if (result == GHOSTTY_SUCCESS) {
-        result = ghostty_terminal_grid_ref(
-            m_impl->terminal.value,
-            point(endColumn, endRow),
-            &selection.end);
-    }
+        point,
+        &anchor.value);
     if (result != GHOSTTY_SUCCESS) {
-        return std::unexpected(ghosttyFailure(QStringLiteral("selection grid reference"), result));
+        return std::unexpected(
+            ghosttyFailure(QStringLiteral("selection anchor"), result));
     }
-    selection.rectangle = rectangular;
-    result = ghostty_terminal_set(
+    TrackedGridRefHandle endpoint;
+    result = ghostty_terminal_grid_ref_track(
         m_impl->terminal.value,
-        GHOSTTY_TERMINAL_OPT_SELECTION,
-        &selection);
+        point,
+        &endpoint.value);
+    if (result != GHOSTTY_SUCCESS) {
+        return std::unexpected(
+            ghosttyFailure(QStringLiteral("selection endpoint"), result));
+    }
+    m_impl->selectionAnchor.reset(std::exchange(anchor.value, nullptr));
+    m_impl->selectionEndpoint.reset(std::exchange(endpoint.value, nullptr));
+    m_impl->selectionRectangular = rectangular;
+    result = m_impl->refreshSelection();
+    if (result != GHOSTTY_SUCCESS) {
+        m_impl->selectionAnchor.reset();
+        m_impl->selectionEndpoint.reset();
+        m_impl->selectionRectangular = false;
+        return std::unexpected(ghosttyFailure(QStringLiteral("selection install"), result));
+    }
+    ++m_impl->displayRevision;
+    auto nextFrame = extractFrame(
+        m_impl->terminal.value,
+        m_impl->renderState.value,
+        m_impl->nextSequence,
+        m_impl->viewportRevision,
+        m_impl->displayRevision);
+    if (!nextFrame) {
+        m_impl->failed = true;
+        return nextFrame;
+    }
+    m_impl->currentFrame = *nextFrame;
+    return m_impl->currentFrame;
+}
+
+GhosttyTerminalKernel::Result GhosttyTerminalKernel::updateSelection(
+    const TerminalSubscription& subscription,
+    const std::uint64_t viewportRevision,
+    const std::uint16_t column,
+    const std::uint16_t row)
+{
+    std::scoped_lock lock(m_impl->mutex);
+    if (!m_impl->admitted || m_impl->failed) {
+        return std::unexpected(Failure {
+            Failure::Code::MissingCheckpoint,
+            QStringLiteral("Terminal selection requires an admitted checkpoint."),
+        });
+    }
+    if (!sameSubscription(subscription, m_impl->subscription)) {
+        return std::unexpected(Failure {
+            Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal selection belongs to a stale subscription."),
+        });
+    }
+    const auto* frame = m_impl->currentFrame.get();
+    if (frame == nullptr || frame->viewportRevision != viewportRevision) {
+        return std::unexpected(Failure {
+            Failure::Code::StaleFrame,
+            QStringLiteral("Terminal selection does not match the displayed frame."),
+        });
+    }
+    if (m_impl->selectionAnchor.value == nullptr
+        || m_impl->selectionEndpoint.value == nullptr
+        || column >= frame->columns || row >= frame->rows) {
+        return std::unexpected(Failure {
+            Failure::Code::HitTestRace,
+            QStringLiteral("Terminal selection point or anchor is no longer available."),
+        });
+    }
+    if (m_impl->displayRevision == std::numeric_limits<std::uint64_t>::max()) {
+        return std::unexpected(Failure {
+            Failure::Code::ResourceLimit,
+            QStringLiteral("Terminal display revision is exhausted."),
+        });
+    }
+
+    GhosttyPoint endpoint {};
+    endpoint.tag = GHOSTTY_POINT_TAG_VIEWPORT;
+    endpoint.value.coordinate = {column, row};
+    auto result = ghostty_tracked_grid_ref_set(
+        m_impl->selectionEndpoint.value,
+        m_impl->terminal.value,
+        endpoint);
+    if (result != GHOSTTY_SUCCESS) {
+        return std::unexpected(
+            ghosttyFailure(QStringLiteral("selection grid reference"), result));
+    }
+    result = m_impl->refreshSelection();
     if (result != GHOSTTY_SUCCESS) {
         return std::unexpected(ghosttyFailure(QStringLiteral("selection install"), result));
     }
-    auto nextFrame =
-        extractFrame(m_impl->terminal.value, m_impl->renderState.value, m_impl->nextSequence);
+    ++m_impl->displayRevision;
+    auto nextFrame = extractFrame(
+        m_impl->terminal.value,
+        m_impl->renderState.value,
+        m_impl->nextSequence,
+        m_impl->viewportRevision,
+        m_impl->displayRevision);
     if (!nextFrame) {
         m_impl->failed = true;
         return nextFrame;
@@ -924,10 +1425,22 @@ GhosttyTerminalKernel::Result GhosttyTerminalKernel::clearSelection(
     const TerminalSubscription& subscription)
 {
     std::scoped_lock lock(m_impl->mutex);
-    if (!m_impl->admitted || !sameSubscription(subscription, m_impl->subscription)) {
+    if (!m_impl->admitted || m_impl->failed) {
+        return std::unexpected(Failure {
+            Failure::Code::MissingCheckpoint,
+            QStringLiteral("Terminal selection requires an admitted checkpoint."),
+        });
+    }
+    if (!sameSubscription(subscription, m_impl->subscription)) {
         return std::unexpected(Failure {
             Failure::Code::StaleSubscription,
             QStringLiteral("Terminal selection belongs to a stale subscription."),
+        });
+    }
+    if (m_impl->displayRevision == std::numeric_limits<std::uint64_t>::max()) {
+        return std::unexpected(Failure {
+            Failure::Code::ResourceLimit,
+            QStringLiteral("Terminal display revision is exhausted."),
         });
     }
     const auto result = ghostty_terminal_set(
@@ -937,9 +1450,18 @@ GhosttyTerminalKernel::Result GhosttyTerminalKernel::clearSelection(
     if (result != GHOSTTY_SUCCESS) {
         return std::unexpected(ghosttyFailure(QStringLiteral("selection clear"), result));
     }
-    auto nextFrame =
-        extractFrame(m_impl->terminal.value, m_impl->renderState.value, m_impl->nextSequence);
+    m_impl->selectionAnchor.reset();
+    m_impl->selectionEndpoint.reset();
+    m_impl->selectionRectangular = false;
+    ++m_impl->displayRevision;
+    auto nextFrame = extractFrame(
+        m_impl->terminal.value,
+        m_impl->renderState.value,
+        m_impl->nextSequence,
+        m_impl->viewportRevision,
+        m_impl->displayRevision);
     if (!nextFrame) {
+        m_impl->failed = true;
         return nextFrame;
     }
     m_impl->currentFrame = *nextFrame;
@@ -950,7 +1472,13 @@ std::expected<QString, GhosttyTerminalKernel::Failure>
 GhosttyTerminalKernel::selectedText(const TerminalSubscription& subscription)
 {
     std::scoped_lock lock(m_impl->mutex);
-    if (!m_impl->admitted || !sameSubscription(subscription, m_impl->subscription)) {
+    if (!m_impl->admitted || m_impl->failed) {
+        return std::unexpected(Failure {
+            Failure::Code::MissingCheckpoint,
+            QStringLiteral("Terminal selection requires an admitted checkpoint."),
+        });
+    }
+    if (!sameSubscription(subscription, m_impl->subscription)) {
         return std::unexpected(Failure {
             Failure::Code::StaleSubscription,
             QStringLiteral("Terminal selection belongs to a stale subscription."),
@@ -1002,16 +1530,52 @@ GhosttyTerminalKernel::ConfigureResult GhosttyTerminalKernel::configure(
     }
     std::scoped_lock lock(m_impl->mutex);
     if (settings == m_impl->settings) {
-        return {};
+        return std::optional<Frame> {};
     }
+    const auto scrollbackChanged =
+        settings.scrollbackLines != m_impl->settings.scrollbackLines
+        || settings.scrollbackBytes != m_impl->settings.scrollbackBytes;
     if (m_impl->admitted && !m_impl->failed) {
+        if (scrollbackChanged
+            && (m_impl->viewportRevision == std::numeric_limits<std::uint64_t>::max()
+                || m_impl->displayRevision
+                    == std::numeric_limits<std::uint64_t>::max())) {
+            return std::unexpected(Failure {
+                Failure::Code::ResourceLimit,
+                QStringLiteral("Terminal display revision is exhausted."),
+            });
+        }
         if (auto configured = applySettings(m_impl->terminal.value, settings);
             !configured) {
-            return configured;
+            m_impl->failed = true;
+            return std::unexpected(std::move(configured.error()));
+        }
+        if (scrollbackChanged) {
+            const auto selectionResult = m_impl->refreshSelection();
+            if (selectionResult != GHOSTTY_SUCCESS) {
+                m_impl->failed = true;
+                return std::unexpected(
+                    ghosttyFailure(QStringLiteral("selection refresh"), selectionResult));
+            }
+            ++m_impl->viewportRevision;
+            ++m_impl->displayRevision;
+            auto nextFrame = extractFrame(
+                m_impl->terminal.value,
+                m_impl->renderState.value,
+                m_impl->nextSequence,
+                m_impl->viewportRevision,
+                m_impl->displayRevision);
+            if (!nextFrame) {
+                m_impl->failed = true;
+                return std::unexpected(std::move(nextFrame.error()));
+            }
+            m_impl->settings = settings;
+            m_impl->currentFrame = *nextFrame;
+            return std::optional<Frame> {m_impl->currentFrame};
         }
     }
     m_impl->settings = settings;
-    return {};
+    return std::optional<Frame> {};
 }
 
 std::expected<std::size_t, GhosttyTerminalKernel::Failure>

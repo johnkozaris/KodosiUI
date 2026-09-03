@@ -31,6 +31,7 @@ struct Entry {
     TerminalSessionRegistry::Listener listener;
     GhosttyTerminalKernel kernel;
     std::mutex listenerMutex;
+    std::uint64_t lastPublishedDisplayRevision = 0;
     bool active = true;
 };
 
@@ -56,6 +57,10 @@ bool publishFrame(const std::shared_ptr<Entry>& entry, GhosttyTerminalKernel::Re
         return false;
     }
     if (result) {
+        if ((*result)->displayRevision <= entry->lastPublishedDisplayRevision) {
+            return true;
+        }
+        entry->lastPublishedDisplayRevision = (*result)->displayRevision;
         if (entry->listener.frameChanged) {
             entry->listener.frameChanged(*result);
         }
@@ -248,12 +253,81 @@ TerminalSessionRegistry::encodeKey(
         std::move(keyEvent));
 }
 
-GhosttyTerminalKernel::Result TerminalSessionRegistry::select(
+std::expected<QByteArray, GhosttyTerminalKernel::Failure>
+TerminalSessionRegistry::encodePaste(
     const TerminalSubscription& subscription,
-    const std::uint16_t startColumn,
-    const std::uint16_t startRow,
-    const std::uint16_t endColumn,
-    const std::uint16_t endRow,
+    QByteArray text)
+{
+    auto entry = m_impl->exact(subscription);
+    if (!entry) {
+        return std::unexpected(GhosttyTerminalKernel::Failure {
+            GhosttyTerminalKernel::Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal paste belongs to an unregistered subscription."),
+        });
+    }
+    return entry->kernel.encodePaste(subscription, std::move(text));
+}
+
+GhosttyTerminalKernel::Result TerminalSessionRegistry::scrollViewport(
+    const TerminalSubscription& subscription,
+    const int rows)
+{
+    auto entry = m_impl->exact(subscription);
+    if (!entry) {
+        return std::unexpected(GhosttyTerminalKernel::Failure {
+            GhosttyTerminalKernel::Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal scrolling belongs to an unregistered subscription."),
+        });
+    }
+    auto result = entry->kernel.scrollViewport(subscription, rows);
+    publishFrame(entry, result);
+    return result;
+}
+
+GhosttyTerminalKernel::Result TerminalSessionRegistry::scrollViewportToBottom(
+    const TerminalSubscription& subscription)
+{
+    auto entry = m_impl->exact(subscription);
+    if (!entry) {
+        return std::unexpected(GhosttyTerminalKernel::Failure {
+            GhosttyTerminalKernel::Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal scrolling belongs to an unregistered subscription."),
+        });
+    }
+    const auto prior = entry->kernel.frame();
+    auto result = entry->kernel.scrollViewportToBottom(subscription);
+    if (!result || *result != prior) {
+        publishFrame(entry, result);
+    }
+    return result;
+}
+
+std::expected<QString, GhosttyTerminalKernel::Failure>
+TerminalSessionRegistry::linkAt(
+    const TerminalSubscription& subscription,
+    const std::uint64_t viewportRevision,
+    const std::uint16_t column,
+    const std::uint16_t row)
+{
+    auto entry = m_impl->exact(subscription);
+    if (!entry) {
+        return std::unexpected(GhosttyTerminalKernel::Failure {
+            GhosttyTerminalKernel::Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal link lookup belongs to an unregistered subscription."),
+        });
+    }
+    return entry->kernel.linkAt(
+        subscription,
+        viewportRevision,
+        column,
+        row);
+}
+
+GhosttyTerminalKernel::Result TerminalSessionRegistry::beginSelection(
+    const TerminalSubscription& subscription,
+    const std::uint64_t viewportRevision,
+    const std::uint16_t column,
+    const std::uint16_t row,
     const bool rectangular)
 {
     auto entry = m_impl->exact(subscription);
@@ -263,14 +337,39 @@ GhosttyTerminalKernel::Result TerminalSessionRegistry::select(
             QStringLiteral("Terminal selection belongs to an unregistered subscription."),
         });
     }
-    auto result = entry->kernel.select(
+    auto result = entry->kernel.beginSelection(
         subscription,
-        startColumn,
-        startRow,
-        endColumn,
-        endRow,
+        viewportRevision,
+        column,
+        row,
         rectangular);
-    publishFrame(entry, result);
+    if (result || !result.error().isRecoverableHitTestRace()) {
+        publishFrame(entry, result);
+    }
+    return result;
+}
+
+GhosttyTerminalKernel::Result TerminalSessionRegistry::updateSelection(
+    const TerminalSubscription& subscription,
+    const std::uint64_t viewportRevision,
+    const std::uint16_t column,
+    const std::uint16_t row)
+{
+    auto entry = m_impl->exact(subscription);
+    if (!entry) {
+        return std::unexpected(GhosttyTerminalKernel::Failure {
+            GhosttyTerminalKernel::Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal selection belongs to an unregistered subscription."),
+        });
+    }
+    auto result = entry->kernel.updateSelection(
+        subscription,
+        viewportRevision,
+        column,
+        row);
+    if (result || !result.error().isRecoverableHitTestRace()) {
+        publishFrame(entry, result);
+    }
     return result;
 }
 
@@ -316,6 +415,8 @@ GhosttyTerminalKernel::ConfigureResult TerminalSessionRegistry::configure(
     auto result = entry->kernel.configure(settings);
     if (!result) {
         publishFailure(entry, result.error());
+    } else if (result->has_value()) {
+        publishFrame(entry, GhosttyTerminalKernel::Result {**result});
     }
     return result;
 }
