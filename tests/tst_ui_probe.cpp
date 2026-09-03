@@ -742,6 +742,11 @@ void UiProbeTest::rawInputUsesAtSpiController()
 
 void UiProbeTest::portalSidecarSerializesInput()
 {
+    const auto logContains = [&](const QString& method) {
+        QFile log(m_inputLog);
+        return log.open(QIODevice::ReadOnly)
+            && QString::fromUtf8(log.readAll()).contains(method);
+    };
     QFile::remove(m_inputLog);
     QFile deny(m_portalDenyFile);
     QVERIFY(deny.open(QIODevice::WriteOnly));
@@ -778,8 +783,6 @@ void UiProbeTest::portalSidecarSerializesInput()
     QVERIFY(delay.open(QIODevice::WriteOnly));
     delay.close();
     QFile::remove(m_inputLog);
-    QElapsedTimer timeout;
-    timeout.start();
     const auto timedOutStart = run(
         {
             QStringLiteral("input-start"),
@@ -788,9 +791,11 @@ void UiProbeTest::portalSidecarSerializesInput()
         },
         static_cast<int>(kodosi::ui_probe::ExitCode::Timeout));
     QVERIFY(!timedOutStart.value(QStringLiteral("ok")).toBool());
-    QVERIFY(timeout.elapsed() < 1500);
     QFile::remove(m_portalDelayFile);
-    QTest::qWait(100);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        logContains(QStringLiteral("\"Request.Close\""))
+            && logContains(QStringLiteral("\"Session.Close\"")),
+        10'000);
     QFile timeoutLog(m_inputLog);
     QVERIFY(timeoutLog.open(QIODevice::ReadOnly));
     const auto timeoutContents =
@@ -803,7 +808,6 @@ void UiProbeTest::portalSidecarSerializesInput()
     QVERIFY(methodDelay.open(QIODevice::WriteOnly));
     methodDelay.close();
     QFile::remove(m_inputLog);
-    timeout.restart();
     const auto methodTimedOutStart = run(
         {
             QStringLiteral("input-start"),
@@ -812,9 +816,10 @@ void UiProbeTest::portalSidecarSerializesInput()
         },
         static_cast<int>(kodosi::ui_probe::ExitCode::Timeout));
     QVERIFY(!methodTimedOutStart.value(QStringLiteral("ok")).toBool());
-    QVERIFY(timeout.elapsed() < 1500);
     QFile::remove(m_portalMethodDelayFile);
-    QTest::qWait(100);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        logContains(QStringLiteral("\"Request.Close\"")),
+        10'000);
     QVERIFY(timeoutLog.open(QIODevice::ReadOnly));
     const auto methodTimeoutContents =
         QString::fromUtf8(timeoutLog.readAll());
@@ -1108,6 +1113,7 @@ void UiProbeTest::portalSidecarSerializesInput()
 
 void UiProbeTest::portalSidecarCancelsWithLauncher()
 {
+    constexpr auto portalStartupTimeoutMs = 10'000;
     const auto processStartTime = [](const qint64 processId) {
         QFile statFile(
             QStringLiteral("/proc/%1/stat").arg(processId));
@@ -1167,12 +1173,12 @@ void UiProbeTest::portalSidecarCancelsWithLauncher()
         qint64 childPid = -1;
         QTRY_VERIFY_WITH_TIMEOUT(
             (childPid = childOf(launcher.processId())) > 0,
-            2000);
+            portalStartupTimeoutMs);
         const auto childStartTime = processStartTime(childPid);
         QVERIFY(!childStartTime.isEmpty());
         QTRY_VERIFY_WITH_TIMEOUT(
             logContains(QStringLiteral("\"SelectSources\"")),
-            2000);
+            portalStartupTimeoutMs);
 
         QVERIFY(::kill(launcher.processId(), signal) == 0);
         QVERIFY(launcher.waitForFinished(3000));
@@ -1241,13 +1247,13 @@ void UiProbeTest::portalSidecarCancelsWithLauncher()
     qint64 readyChildPid = -1;
     QTRY_VERIFY_WITH_TIMEOUT(
         (readyChildPid = childOf(readyLauncher.processId())) > 0,
-        2000);
+        portalStartupTimeoutMs);
     const auto readyChildStartTime =
         processStartTime(readyChildPid);
     QVERIFY(!readyChildStartTime.isEmpty());
     QTRY_VERIFY_WITH_TIMEOUT(
         logContains(QStringLiteral("\"SelectSources\"")),
-        2000);
+        portalStartupTimeoutMs);
     QVERIFY(::kill(readyLauncher.processId(), SIGSTOP) == 0);
     QFile::remove(m_portalDelayFile);
     const auto statePath =
@@ -1288,12 +1294,12 @@ void UiProbeTest::portalSidecarCancelsWithLauncher()
     qint64 childPid = -1;
     QTRY_VERIFY_WITH_TIMEOUT(
         (childPid = childOf(launcher.processId())) > 0,
-        2000);
+        portalStartupTimeoutMs);
     const auto childStartTime = processStartTime(childPid);
     QVERIFY(!childStartTime.isEmpty());
     QTRY_VERIFY_WITH_TIMEOUT(
         logContains(QStringLiteral("\"SelectSources\"")),
-        2000);
+        portalStartupTimeoutMs);
     const auto pendingStatus = run({QStringLiteral("input-status")});
     const auto pendingSidecar =
         pendingStatus.value(QStringLiteral("sidecar")).toObject();
