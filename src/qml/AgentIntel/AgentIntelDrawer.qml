@@ -182,8 +182,6 @@ KPopover {
     background: Rectangle {
         color: KodosiTheme.surface
         radius: KodosiTheme.radiusLarge
-        border.width: 1
-        border.color: KodosiTheme.seam
     }
 
     contentItem: ColumnLayout {
@@ -699,8 +697,6 @@ KPopover {
                     Layout.preferredWidth: memorySurface.wide ? 228 : -1
                     Layout.preferredHeight: memorySurface.wide ? -1 : 190
                     color: KodosiTheme.surfaceElevated
-                    border.width: 1
-                    border.color: KodosiTheme.seam
                     radius: KodosiTheme.radiusSmall
 
                     ColumnLayout {
@@ -838,9 +834,7 @@ KPopover {
                                         ? KodosiTheme.surface
                                         : memoryItem.hovered
                                           ? KodosiTheme.canvas
-                                          : "transparent"
-                                    border.width: memoryItem.activeFocus ? 1 : 0
-                                    border.color: KodosiTheme.focusRing
+                                          : KodosiTheme.surface
                                     radius: KodosiTheme.radiusSmall
                                 }
 
@@ -878,8 +872,6 @@ KPopover {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     color: KodosiTheme.terminal
-                    border.width: 1
-                    border.color: KodosiTheme.seam
                     radius: KodosiTheme.radiusSmall
 
                     Item {
@@ -1144,8 +1136,6 @@ KPopover {
                         height: conversationRow.implicitHeight + 20
                         radius: KodosiTheme.radiusSmall
                         color: KodosiTheme.surfaceElevated
-                        border.width: 1
-                        border.color: KodosiTheme.seam
                         Accessible.role: Accessible.ListItem
                         Accessible.name: roleLabel.text + ": "
                             + conversationDelegate.content
@@ -1223,8 +1213,6 @@ KPopover {
             Layout.fillWidth: true
             implicitHeight: visible ? steerFooter.implicitHeight + 18 : 0
             color: KodosiTheme.surfaceElevated
-            border.width: 1
-            border.color: KodosiTheme.seam
             bottomLeftRadius: Models.SessionActions.lastError.length === 0
                 ? KodosiTheme.radiusLarge
                 : 0

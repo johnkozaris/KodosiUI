@@ -34,6 +34,10 @@ private slots:
     void projectsInvitationsAtomically();
     void fencesAccountsAndRuntimeGenerations();
     void rejectsMalformedDirectoryWithoutDestroyingState();
+    void retainsSafeStaleDirectoryDuringRecovery();
+    void refreshRequiresBothCurrentSnapshotHalves();
+    void coalescesOverlappingRefreshes();
+    void drainsFailedRefreshBeforeRetry();
 };
 
 namespace {
@@ -104,6 +108,15 @@ void MissionDirectoryModelTest::refreshesAndProjectsDirectory()
         }));
 
     QCOMPARE(model.rowCount(), 1);
+    QVERIFY(model.loading());
+    model.ingestRoomEvent(roomEvent(
+        QStringLiteral("me"),
+        1,
+        {
+            {QStringLiteral("type"), QStringLiteral("room.invitations")},
+            {QStringLiteral("incoming"), QJsonArray {}},
+            {QStringLiteral("outgoing"), QJsonArray {}},
+        }));
     QVERIFY(!model.loading());
     QCOMPARE(
         model.data(model.index(0), kodosi::MissionDirectoryModel::NameRole)
@@ -242,6 +255,268 @@ void MissionDirectoryModelTest::rejectsMalformedDirectoryWithoutDestroyingState(
         }));
     QCOMPARE(errors.count(), 1);
     QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(
+        model.authorityState(),
+        kodosi::MissionDirectoryModel::AuthorityState::Failed);
+    QVERIFY(model.staleDataVisible());
+}
+
+void MissionDirectoryModelTest::retainsSafeStaleDirectoryDuringRecovery()
+{
+    FakeMissionDispatcher dispatcher;
+    kodosi::MissionDirectoryModel model(dispatcher);
+    model.ingestAuthEvent(auth(QStringLiteral("me"), 1));
+    model.ingestRoomEvent(roomEvent(
+        QStringLiteral("me"),
+        1,
+        {
+            {QStringLiteral("type"), QStringLiteral("room.snapshot")},
+            {QStringLiteral("rooms"),
+             QJsonArray {
+                 QJsonObject {
+                     {QStringLiteral("id"), QStringLiteral("safe")},
+                     {QStringLiteral("name"), QStringLiteral("Safe")},
+                     {QStringLiteral("slug"), QStringLiteral("safe")},
+                     {QStringLiteral("ownerUserId"), QStringLiteral("me")},
+                     {QStringLiteral("rosterGeneration"), 1},
+                 },
+             }},
+        }));
+    model.ingestRoomEvent(roomEvent(
+        QStringLiteral("me"),
+        1,
+        {
+            {QStringLiteral("type"), QStringLiteral("room.invitations")},
+            {QStringLiteral("incoming"), QJsonArray {}},
+            {QStringLiteral("outgoing"), QJsonArray {}},
+        }));
+
+    QCOMPARE(
+        model.authorityState(),
+        kodosi::MissionDirectoryModel::AuthorityState::Loaded);
+    QVERIFY(model.canRefresh());
+    QVERIFY(!model.staleDataVisible());
+    QVERIFY(!model.roleNames().values().contains(
+        QByteArrayLiteral("ownerUserId")));
+    QVERIFY(!model.roleNames().values().contains(
+        QByteArrayLiteral("rosterGeneration")));
+
+    dispatcher.reject = true;
+    QVERIFY(!model.refresh());
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(
+        model.authorityState(),
+        kodosi::MissionDirectoryModel::AuthorityState::Failed);
+    QVERIFY(model.staleDataVisible());
+    QVERIFY(model.canRetry());
+
+    dispatcher.reject = false;
+    QVERIFY(model.refresh());
+    QCOMPARE(
+        model.authorityState(),
+        kodosi::MissionDirectoryModel::AuthorityState::Recovering);
+    QCOMPARE(model.rowCount(), 1);
+}
+
+void MissionDirectoryModelTest::refreshRequiresBothCurrentSnapshotHalves()
+{
+    FakeMissionDispatcher dispatcher;
+    kodosi::MissionDirectoryModel model(dispatcher);
+    const auto rooms = [] {
+        return QJsonArray {
+            QJsonObject {
+                {QStringLiteral("id"), QStringLiteral("safe")},
+                {QStringLiteral("name"), QStringLiteral("Safe")},
+                {QStringLiteral("slug"), QStringLiteral("safe")},
+                {QStringLiteral("ownerUserId"), QStringLiteral("me")},
+                {QStringLiteral("rosterGeneration"), 1},
+            },
+        };
+    };
+    const auto sendRooms = [&] {
+        model.ingestRoomEvent(roomEvent(
+            QStringLiteral("me"),
+            1,
+            {
+                {QStringLiteral("type"), QStringLiteral("room.snapshot")},
+                {QStringLiteral("rooms"), rooms()},
+            }));
+    };
+    const auto sendInvitations = [&] {
+        model.ingestRoomEvent(roomEvent(
+            QStringLiteral("me"),
+            1,
+            {
+                {QStringLiteral("type"), QStringLiteral("room.invitations")},
+                {QStringLiteral("incoming"), QJsonArray {}},
+                {QStringLiteral("outgoing"), QJsonArray {}},
+            }));
+    };
+    const auto sendError = [&](const QString& operation, const QString& message) {
+        model.ingestRoomEvent(roomEvent(
+            QStringLiteral("me"),
+            1,
+            {
+                {QStringLiteral("type"), QStringLiteral("room.error")},
+                {QStringLiteral("operation"), operation},
+                {QStringLiteral("message"), message},
+            }));
+    };
+
+    model.ingestAuthEvent(auth(QStringLiteral("me"), 1));
+    sendRooms();
+    sendInvitations();
+    QCOMPARE(
+        model.authorityState(),
+        kodosi::MissionDirectoryModel::AuthorityState::Loaded);
+    QCOMPARE(model.rowCount(), 1);
+
+    QVERIFY(model.refresh());
+    sendError(
+        QStringLiteral("refresh"),
+        QStringLiteral("room refresh failed"));
+    sendInvitations();
+    QCOMPARE(
+        model.authorityState(),
+        kodosi::MissionDirectoryModel::AuthorityState::Failed);
+    QCOMPARE(model.lastError(), QStringLiteral("room refresh failed"));
+    QCOMPARE(model.rowCount(), 1);
+    QVERIFY(model.staleDataVisible());
+
+    QVERIFY(model.refresh());
+    sendInvitations();
+    QCOMPARE(
+        model.authorityState(),
+        kodosi::MissionDirectoryModel::AuthorityState::Recovering);
+    sendRooms();
+    QCOMPARE(
+        model.authorityState(),
+        kodosi::MissionDirectoryModel::AuthorityState::Loaded);
+    QVERIFY(model.lastError().isEmpty());
+
+    QVERIFY(model.refresh());
+    sendRooms();
+    sendError(
+        QStringLiteral("refreshInvitations"),
+        QStringLiteral("invitation refresh failed"));
+    QCOMPARE(
+        model.authorityState(),
+        kodosi::MissionDirectoryModel::AuthorityState::Failed);
+    QCOMPARE(
+        model.lastError(),
+        QStringLiteral("invitation refresh failed"));
+    QCOMPARE(model.rowCount(), 1);
+
+    QVERIFY(model.refresh());
+    sendRooms();
+    QCOMPARE(
+        model.authorityState(),
+        kodosi::MissionDirectoryModel::AuthorityState::Recovering);
+    sendInvitations();
+    QCOMPARE(
+        model.authorityState(),
+        kodosi::MissionDirectoryModel::AuthorityState::Loaded);
+    QVERIFY(model.lastError().isEmpty());
+}
+
+void MissionDirectoryModelTest::coalescesOverlappingRefreshes()
+{
+    FakeMissionDispatcher dispatcher;
+    kodosi::MissionDirectoryModel model(dispatcher);
+    const auto sendRooms = [&] {
+        model.ingestRoomEvent(roomEvent(
+            QStringLiteral("me"),
+            1,
+            {
+                {QStringLiteral("type"), QStringLiteral("room.snapshot")},
+                {QStringLiteral("rooms"), QJsonArray {}},
+            }));
+    };
+    const auto sendInvitations = [&] {
+        model.ingestRoomEvent(roomEvent(
+            QStringLiteral("me"),
+            1,
+            {
+                {QStringLiteral("type"), QStringLiteral("room.invitations")},
+                {QStringLiteral("incoming"), QJsonArray {}},
+                {QStringLiteral("outgoing"), QJsonArray {}},
+            }));
+    };
+
+    model.ingestAuthEvent(auth(QStringLiteral("me"), 1));
+    QCOMPARE(dispatcher.commands.size(), 2);
+    QVERIFY(model.loading());
+
+    QVERIFY(model.refresh());
+    QCOMPARE(dispatcher.commands.size(), 2);
+
+    sendRooms();
+    sendInvitations();
+    QCOMPARE(dispatcher.commands.size(), 4);
+    QVERIFY(model.loading());
+
+    sendInvitations();
+    sendRooms();
+    QCOMPARE(
+        model.authorityState(),
+        kodosi::MissionDirectoryModel::AuthorityState::Loaded);
+    QVERIFY(!model.loading());
+}
+
+void MissionDirectoryModelTest::drainsFailedRefreshBeforeRetry()
+{
+    FakeMissionDispatcher dispatcher;
+    kodosi::MissionDirectoryModel model(dispatcher);
+    const auto sendRooms = [&] {
+        model.ingestRoomEvent(roomEvent(
+            QStringLiteral("me"),
+            1,
+            {
+                {QStringLiteral("type"), QStringLiteral("room.snapshot")},
+                {QStringLiteral("rooms"), QJsonArray {}},
+            }));
+    };
+    const auto sendInvitations = [&] {
+        model.ingestRoomEvent(roomEvent(
+            QStringLiteral("me"),
+            1,
+            {
+                {QStringLiteral("type"), QStringLiteral("room.invitations")},
+                {QStringLiteral("incoming"), QJsonArray {}},
+                {QStringLiteral("outgoing"), QJsonArray {}},
+            }));
+    };
+
+    model.ingestAuthEvent(auth(QStringLiteral("me"), 1));
+    model.ingestRoomEvent(roomEvent(
+        QStringLiteral("me"),
+        1,
+        {
+            {QStringLiteral("type"), QStringLiteral("room.error")},
+            {QStringLiteral("operation"), QStringLiteral("refresh")},
+            {QStringLiteral("message"), QStringLiteral("refresh failed")},
+        }));
+    QCOMPARE(
+        model.authorityState(),
+        kodosi::MissionDirectoryModel::AuthorityState::Failed);
+    QVERIFY(model.loading());
+    QVERIFY(!model.canRetry());
+    QVERIFY(!model.refresh());
+    QCOMPARE(dispatcher.commands.size(), 2);
+
+    sendInvitations();
+    QVERIFY(!model.loading());
+    QVERIFY(model.canRetry());
+
+    QVERIFY(model.refresh());
+    QCOMPARE(dispatcher.commands.size(), 4);
+    sendRooms();
+    QVERIFY(model.loading());
+    sendInvitations();
+    QCOMPARE(
+        model.authorityState(),
+        kodosi::MissionDirectoryModel::AuthorityState::Loaded);
+    QVERIFY(!model.loading());
 }
 
 QTEST_APPLESS_MAIN(MissionDirectoryModelTest)

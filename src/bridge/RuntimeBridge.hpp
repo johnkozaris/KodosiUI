@@ -95,6 +95,8 @@ public:
     [[nodiscard]] virtual bool isRunning() const noexcept = 0;
     [[nodiscard]] virtual Result connectTerminal(
         const TerminalSubscription& subscription) = 0;
+    [[nodiscard]] virtual Result refreshTerminal(
+        const TerminalSubscription& subscription) = 0;
     [[nodiscard]] virtual Result disconnectTerminal(
         const TerminalSubscription& subscription) = 0;
     [[nodiscard]] virtual Result sendTerminalInput(
@@ -139,7 +141,8 @@ public:
     [[nodiscard]] Result send(CommandLane lane, QByteArrayView json) override;
     [[nodiscard]] Result connectTerminal(
         const TerminalSubscription& subscription) override;
-    [[nodiscard]] Result refreshTerminal(const TerminalSubscription& subscription);
+    [[nodiscard]] Result refreshTerminal(
+        const TerminalSubscription& subscription) override;
     [[nodiscard]] Result disconnectTerminal(
         const TerminalSubscription& subscription) override;
     [[nodiscard]] Result sendTerminalInput(

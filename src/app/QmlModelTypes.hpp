@@ -422,6 +422,18 @@ struct MissionTasksModelForeign {
     QML_ANONYMOUS
 };
 
+struct MissionCrewModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::MissionCrewModel)
+    QML_ANONYMOUS
+};
+
+struct MissionScopedAttentionModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::MissionScopedAttentionModel)
+    QML_ANONYMOUS
+};
+
 struct MissionDetailModelForeign {
     Q_GADGET
     QML_FOREIGN(kodosi::MissionDetailModel)

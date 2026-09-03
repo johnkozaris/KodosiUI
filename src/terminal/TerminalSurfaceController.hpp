@@ -25,6 +25,7 @@ public:
         TerminalSessionRegistry& registry,
         RuntimeBridge& runtime,
         SessionCatalogModel& sessions,
+        qint64 checkpointAcquisitionTimeoutMs = 15'000,
         QObject* parent = nullptr);
 
     Q_INVOKABLE [[nodiscard]] bool bind(
@@ -37,15 +38,24 @@ public:
     void setNotificationSink(TerminalNotificationSink* sink) noexcept;
 
 signals:
-    void attachmentRejected(QString sessionId, QString reason);
-    void attachmentReady(QString sessionId);
+    void attachmentRejected(
+        kodosi::TerminalView* surface,
+        QString sessionId,
+        QString reason);
+    void attachmentReady(
+        kodosi::TerminalView* surface,
+        QString sessionId);
 
 private:
     struct Binding {
         QPointer<TerminalView> view;
         QString sessionId;
         QString runtimeIncarnationId;
+        TerminalSubscription subscription;
         QMetaObject::Connection notificationConnection;
+        QMetaObject::Connection readinessConnection;
+        QPointer<QTimer> checkpointTimer;
+        std::uint64_t surfaceGeneration = 0;
         int retryAttempts = 0;
         bool retryPending = false;
         bool retryExhausted = false;
@@ -58,7 +68,9 @@ private:
     TerminalNotificationSink* m_notificationSink = nullptr;
     QVector<Binding> m_bindings;
     std::uint64_t m_nextSubscriptionGeneration = 0;
+    std::uint64_t m_nextSurfaceGeneration = 0;
     QTimer m_attachmentRetryTimer;
+    qint64 m_checkpointAcquisitionTimeoutMs;
     bool m_waitingForFreshCatalog = true;
 
     void runtimeChanged(bool running);
@@ -67,6 +79,8 @@ private:
     void tryAttach(Binding& binding);
     void scheduleRemoteRetry(Binding& binding, QString reason);
     void retryPendingAttachments();
+    void armCheckpointTimeout(Binding& binding);
+    void cancelCheckpointTimeout(Binding& binding);
     void forwardNotification(
         TerminalView* view,
         QString title,

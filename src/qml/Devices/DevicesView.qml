@@ -114,8 +114,6 @@ Item {
                 implicitHeight: currentDevice.implicitHeight + 24
                 radius: KodosiTheme.radiusSmall
                 color: KodosiTheme.surface
-                border.width: 1
-                border.color: KodosiTheme.seam
 
                 RowLayout {
                     id: currentDevice
@@ -128,8 +126,6 @@ Item {
                         Layout.preferredHeight: 34
                         radius: KodosiTheme.radiusSmall
                         color: KodosiTheme.surfaceElevated
-                        border.width: 1
-                        border.color: KodosiTheme.seam
                         KIcon {
                             anchors.centerIn: parent
                             width: 18
@@ -237,8 +233,6 @@ Item {
                         implicitHeight: incomingContent.implicitHeight + 24
                         radius: KodosiTheme.radiusSmall
                         color: KodosiTheme.surfaceElevated
-                        border.width: 1
-                        border.color: KodosiTheme.seamStrong
 
                         ColumnLayout {
                             id: incomingContent
@@ -325,8 +319,6 @@ Item {
                 implicitHeight: selfLinkContent.implicitHeight + 24
                 radius: KodosiTheme.radiusSmall
                 color: KodosiTheme.surfaceElevated
-                border.width: 1
-                border.color: KodosiTheme.seamStrong
 
                 ColumnLayout {
                     id: selfLinkContent
@@ -377,8 +369,6 @@ Item {
                 implicitHeight: selfOutcomeContent.implicitHeight + 24
                 radius: KodosiTheme.radiusSmall
                 color: KodosiTheme.surfaceElevated
-                border.width: 1
-                border.color: KodosiTheme.seamStrong
 
                 RowLayout {
                     id: selfOutcomeContent
@@ -439,8 +429,6 @@ Item {
                 implicitHeight: linkOutcomeContent.implicitHeight + 24
                 radius: KodosiTheme.radiusSmall
                 color: KodosiTheme.surfaceElevated
-                border.width: 1
-                border.color: KodosiTheme.seamStrong
 
                 RowLayout {
                     id: linkOutcomeContent
@@ -498,8 +486,6 @@ Item {
                 implicitHeight: linkContent.implicitHeight + 24
                 radius: KodosiTheme.radiusSmall
                 color: KodosiTheme.surface
-                border.width: 1
-                border.color: KodosiTheme.seam
 
                 ColumnLayout {
                     id: linkContent
@@ -569,13 +555,7 @@ Item {
                 Layout.rightMargin: KodosiTheme.spacing7
                 implicitHeight: deviceErrorContent.implicitHeight + 20
                 radius: KodosiTheme.radiusSmall
-                color: Qt.rgba(
-                    KodosiTheme.danger.r,
-                    KodosiTheme.danger.g,
-                    KodosiTheme.danger.b,
-                    0.08)
-                border.width: 1
-                border.color: KodosiTheme.danger
+                color: KodosiTheme.surfaceRaised
 
                 RowLayout {
                     id: deviceErrorContent
@@ -658,8 +638,6 @@ Item {
                     height: visible ? 70 : 0
                     radius: KodosiTheme.radiusSmall
                     color: KodosiTheme.surface
-                    border.width: 1
-                    border.color: KodosiTheme.seam
 
                     RowLayout {
                         anchors.fill: parent

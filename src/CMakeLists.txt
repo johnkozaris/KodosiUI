@@ -267,11 +267,6 @@ qt_add_qml_module(kodosi-qt
         Kodosi.Models
     QML_FILES
         qml/Main.qml
-        qml/Attention/AttentionButton.qml
-        qml/Attention/AttentionCard.qml
-        qml/Attention/AttentionPanel.qml
-        qml/Attention/AttentionRail.qml
-        qml/Attention/AttentionSpinner.qml
         qml/Auth/AuthOverlay.qml
         qml/Auth/AuthErrorBanner.qml
         qml/Auth/AuthGate.qml

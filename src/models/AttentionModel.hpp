@@ -10,6 +10,7 @@
 #include <QHash>
 #include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 namespace kodosi {
@@ -75,6 +76,30 @@ public:
     };
     Q_ENUM(ActionKind)
 
+    struct ScopedItem {
+        Category category = Category::Agent;
+        QString sessionId;
+        QStringList sessionIds;
+        QString sessionName;
+        QString title;
+        QString summary;
+        Risk risk = Risk::None;
+        Tone tone = Tone::Muted;
+        ActionKind actionKind = ActionKind::None;
+        bool canApprove = false;
+        bool canDeny = false;
+        bool canJump = false;
+        QString sourceToken;
+        int itemCount = 1;
+        QHash<QString, int> sessionCounts;
+    };
+
+    struct ScopedPage {
+        QVector<ScopedItem> items;
+        QHash<QString, int> sessionCounts;
+        int totalCount = 0;
+    };
+
     enum Role {
         CategoryRole = Qt::UserRole + 1,
         SessionIdRole,
@@ -110,6 +135,8 @@ public:
     [[nodiscard]] QString authorityError() const;
     [[nodiscard]] QString operationError() const;
 
+    Q_INVOKABLE [[nodiscard]] bool sessionNeedsAttention(
+        const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool refresh();
     Q_INVOKABLE [[nodiscard]] bool review(const QString& attentionToken);
     Q_INVOKABLE [[nodiscard]] bool jump(const QString& attentionToken);
@@ -117,6 +144,19 @@ public:
     Q_INVOKABLE [[nodiscard]] bool deny(const QString& attentionToken);
     Q_INVOKABLE [[nodiscard]] bool approveAll(const QString& attentionToken);
     Q_INVOKABLE void clearOperationError();
+    [[nodiscard]] QVector<ScopedItem> scopedItems(
+        const QSet<QString>& sessionIds) const;
+    [[nodiscard]] ScopedPage scopedItemPage(
+        const QSet<QString>& sessionIds,
+        int offset,
+        int limit) const;
+    [[nodiscard]] bool actOnScopedItem(
+        const QString& sourceToken,
+        const QSet<QString>& sessionIds,
+        ActionKind action);
+    [[nodiscard]] bool denyScopedItem(
+        const QString& sourceToken,
+        const QSet<QString>& sessionIds);
 
 signals:
     void countChanged();

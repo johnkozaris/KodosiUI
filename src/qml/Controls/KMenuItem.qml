@@ -23,7 +23,7 @@ MenuItem {
     background: Rectangle {
         color: root.highlighted
             ? KodosiTheme.surfaceSelected
-            : "transparent"
+            : KodosiTheme.surface
         radius: KodosiTheme.radiusSmall
     }
 }

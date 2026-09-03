@@ -4,10 +4,13 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#include <atomic>
 #include <charconv>
+#include <deque>
 #include <limits>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <system_error>
 #include <unordered_map>
 #include <utility>
@@ -18,21 +21,29 @@ namespace {
 
 struct Entry {
     Entry(
-        TerminalSubscription value,
+        TerminalSurfaceIdentity value,
         TerminalSessionRegistry::Listener callbacks,
         TerminalKernelSettings settings)
-        : subscription(std::move(value))
+        : identity(std::move(value))
         , listener(std::move(callbacks))
         , kernel(settings)
     {
     }
 
-    TerminalSubscription subscription;
+    TerminalSurfaceIdentity identity;
     TerminalSessionRegistry::Listener listener;
     GhosttyTerminalKernel kernel;
     std::mutex listenerMutex;
     std::uint64_t lastPublishedDisplayRevision = 0;
+    std::atomic_bool needsCheckpoint = true;
     bool active = true;
+};
+
+struct SessionEntry {
+    TerminalSubscription subscription;
+    std::unordered_map<std::uint64_t, std::shared_ptr<Entry>> surfaces;
+    std::deque<std::uint64_t> seedRefreshSurfaceGenerations;
+    bool checkpointAdmitted = false;
 };
 
 bool sameSubscription(
@@ -42,6 +53,14 @@ bool sameSubscription(
     return left.sessionId == right.sessionId
         && left.subscriptionId == right.subscriptionId
         && left.generation == right.generation;
+}
+
+bool sameIdentity(
+    const TerminalSurfaceIdentity& left,
+    const TerminalSurfaceIdentity& right) noexcept
+{
+    return sameSubscription(left.subscription, right.subscription)
+        && left.surfaceGeneration == right.surfaceGeneration;
 }
 
 std::string sessionKey(const QString& sessionId)
@@ -162,18 +181,143 @@ void deactivate(const std::shared_ptr<Entry>& entry)
 
 class TerminalSessionRegistry::Impl final {
 public:
-    std::mutex mutex;
-    std::unordered_map<std::string, std::shared_ptr<Entry>> sessions;
+    static constexpr std::size_t maximumSurfacesPerSession = 8;
+    static constexpr std::size_t maximumSeedRefreshCorrelations = 64;
 
-    std::shared_ptr<Entry> exact(const TerminalSubscription& subscription)
+    std::mutex mutex;
+    std::unordered_map<std::string, SessionEntry> sessions;
+
+    std::shared_ptr<Entry> exact(const TerminalSurfaceIdentity& identity)
     {
         std::scoped_lock lock(mutex);
-        const auto found = sessions.find(sessionKey(subscription.sessionId));
-        if (found == sessions.end()
-            || !sameSubscription(found->second->subscription, subscription)) {
+        const auto session = sessions.find(
+            sessionKey(identity.subscription.sessionId));
+        if (session == sessions.end()
+            || !sameSubscription(
+                session->second.subscription,
+                identity.subscription)) {
             return {};
         }
-        return found->second;
+        const auto surface =
+            session->second.surfaces.find(identity.surfaceGeneration);
+        if (surface != session->second.surfaces.end()
+            && sameIdentity(surface->second->identity, identity)) {
+            return surface->second;
+        }
+        if (identity.surfaceGeneration == 0
+            && session->second.surfaces.size() == 1) {
+            return session->second.surfaces.cbegin()->second;
+        }
+        return {};
+    }
+
+    std::vector<std::shared_ptr<Entry>> exact(
+        const TerminalSubscription& subscription)
+    {
+        std::scoped_lock lock(mutex);
+        const auto session = sessions.find(sessionKey(subscription.sessionId));
+        if (session == sessions.end()
+            || !sameSubscription(session->second.subscription, subscription)) {
+            return {};
+        }
+        std::vector<std::shared_ptr<Entry>> entries;
+        entries.reserve(session->second.surfaces.size());
+        for (const auto& [_, entry] : session->second.surfaces) {
+            entries.push_back(entry);
+        }
+        return entries;
+    }
+
+    std::shared_ptr<Entry> primary(
+        const TerminalSubscription& subscription)
+    {
+        std::scoped_lock lock(mutex);
+        const auto session = sessions.find(sessionKey(subscription.sessionId));
+        if (session == sessions.end()
+            || !sameSubscription(session->second.subscription, subscription)
+            || session->second.surfaces.empty()) {
+            return {};
+        }
+        const auto primary = std::ranges::min_element(
+            session->second.surfaces,
+            {},
+            [](const auto& value) { return value.first; });
+        return primary->second;
+    }
+
+    struct CheckpointTargets {
+        std::vector<std::shared_ptr<Entry>> entries;
+        bool seedOnly;
+    };
+
+    std::optional<CheckpointTargets> checkpointTargets(
+        const TerminalSubscription& subscription)
+    {
+        std::scoped_lock lock(mutex);
+        const auto session = sessions.find(sessionKey(subscription.sessionId));
+        if (session == sessions.end()
+            || !sameSubscription(
+                session->second.subscription,
+                subscription)) {
+            return std::nullopt;
+        }
+        CheckpointTargets targets {
+            .entries = {},
+            .seedOnly =
+                !session->second.seedRefreshSurfaceGenerations.empty(),
+        };
+        if (targets.seedOnly) {
+            while (!session->second.seedRefreshSurfaceGenerations.empty()) {
+                const auto surfaceGeneration =
+                    session->second.seedRefreshSurfaceGenerations.front();
+                session->second.seedRefreshSurfaceGenerations.pop_front();
+                const auto surface =
+                    session->second.surfaces.find(surfaceGeneration);
+                if (surface != session->second.surfaces.end()
+                    && surface->second->needsCheckpoint.load(
+                        std::memory_order_acquire)) {
+                    targets.entries.push_back(surface->second);
+                    break;
+                }
+            }
+        } else {
+            targets.entries.reserve(session->second.surfaces.size());
+            for (const auto& [_, entry] : session->second.surfaces) {
+                if (entry->needsCheckpoint.load(std::memory_order_acquire)) {
+                    targets.entries.push_back(entry);
+                }
+            }
+        }
+        return targets;
+    }
+
+    std::optional<std::vector<std::shared_ptr<Entry>>>
+    pendingCheckpointTargets(
+        const TerminalSubscription& subscription,
+        const bool completeSeedRefresh)
+    {
+        std::scoped_lock lock(mutex);
+        const auto session = sessions.find(sessionKey(subscription.sessionId));
+        if (session == sessions.end()
+            || !sameSubscription(
+                session->second.subscription,
+                subscription)) {
+            return std::nullopt;
+        }
+        if (completeSeedRefresh) {
+            return std::vector<std::shared_ptr<Entry>> {};
+        }
+        std::vector<std::shared_ptr<Entry>> entries;
+        entries.reserve(session->second.surfaces.size());
+        for (const auto& [_, entry] : session->second.surfaces) {
+            if (entry->needsCheckpoint.load(std::memory_order_acquire)) {
+                entries.push_back(entry);
+            }
+        }
+        if (entries.empty()) {
+            session->second.checkpointAdmitted = true;
+        }
+        return entries;
     }
 };
 
@@ -187,9 +331,11 @@ TerminalSessionRegistry::~TerminalSessionRegistry()
     std::vector<std::shared_ptr<Entry>> entries;
     {
         std::scoped_lock lock(m_impl->mutex);
-        entries.reserve(m_impl->sessions.size());
-        for (const auto& [_, entry] : m_impl->sessions) {
-            entries.push_back(entry);
+        for (const auto& [_, session] : m_impl->sessions) {
+            entries.reserve(entries.size() + session.surfaces.size());
+            for (const auto& [__, entry] : session.surfaces) {
+                entries.push_back(entry);
+            }
         }
         m_impl->sessions.clear();
     }
@@ -203,37 +349,147 @@ bool TerminalSessionRegistry::registerSession(
     Listener listener,
     TerminalKernelSettings settings)
 {
-    if (subscription.sessionId.isEmpty() || subscription.subscriptionId.isEmpty()) {
-        return false;
-    }
+    return registerSurface(
+        {
+            .subscription = std::move(subscription),
+            .surfaceGeneration = 0,
+        },
+        std::move(listener),
+        settings)
+        .has_value();
+}
 
+std::optional<TerminalSessionRegistry::SurfaceRegistration>
+TerminalSessionRegistry::registerSurface(
+    TerminalSurfaceIdentity identity,
+    Listener listener,
+    TerminalKernelSettings settings)
+{
+    if (identity.subscription.sessionId.isEmpty()
+        || identity.subscription.subscriptionId.isEmpty()) {
+        return std::nullopt;
+    }
     auto entry = std::make_shared<Entry>(
-        std::move(subscription),
+        std::move(identity),
         std::move(listener),
         settings);
-    const auto key = sessionKey(entry->subscription.sessionId);
+    const auto key = sessionKey(entry->identity.subscription.sessionId);
     std::scoped_lock lock(m_impl->mutex);
-    const auto found = m_impl->sessions.find(key);
-    if (found != m_impl->sessions.end()
-        && found->second->subscription.generation >= entry->subscription.generation) {
-        return false;
+    auto session = m_impl->sessions.find(key);
+    if (session == m_impl->sessions.end()) {
+        SessionEntry created {
+            .subscription = entry->identity.subscription,
+            .surfaces = {},
+            .seedRefreshSurfaceGenerations = {},
+            .checkpointAdmitted = false,
+        };
+        created.surfaces.emplace(
+            entry->identity.surfaceGeneration,
+            std::move(entry));
+        m_impl->sessions.emplace(key, std::move(created));
+        return SurfaceRegistration {
+            .requiresConnection = true,
+            .requiresRefresh = false,
+        };
     }
-    if (found != m_impl->sessions.end()) {
-        deactivate(found->second);
+    if (!sameSubscription(
+            session->second.subscription,
+            entry->identity.subscription)
+        || session->second.surfaces.contains(
+            entry->identity.surfaceGeneration)
+        || session->second.surfaces.size()
+            >= Impl::maximumSurfacesPerSession) {
+        return std::nullopt;
     }
-    m_impl->sessions.insert_or_assign(key, std::move(entry));
-    return true;
+    const auto requiresRefresh = session->second.checkpointAdmitted;
+    if (requiresRefresh
+        && session->second.seedRefreshSurfaceGenerations.size()
+            >= Impl::maximumSeedRefreshCorrelations) {
+        return std::nullopt;
+    }
+    if (requiresRefresh) {
+        session->second.seedRefreshSurfaceGenerations.push_back(
+            entry->identity.surfaceGeneration);
+    }
+    session->second.surfaces.emplace(
+        entry->identity.surfaceGeneration,
+        std::move(entry));
+    return SurfaceRegistration {
+        .requiresConnection = false,
+        .requiresRefresh = requiresRefresh,
+    };
+}
+
+void TerminalSessionRegistry::cancelSurfaceRefresh(
+    const TerminalSurfaceIdentity& identity)
+{
+    std::scoped_lock lock(m_impl->mutex);
+    const auto session = m_impl->sessions.find(
+        sessionKey(identity.subscription.sessionId));
+    if (session == m_impl->sessions.end()
+        || !sameSubscription(
+            session->second.subscription,
+            identity.subscription)) {
+        return;
+    }
+    std::erase(
+        session->second.seedRefreshSurfaceGenerations,
+        identity.surfaceGeneration);
 }
 
 void TerminalSessionRegistry::unregisterSession(const TerminalSubscription& subscription)
 {
+    (void)unregisterSurface({
+        .subscription = subscription,
+        .surfaceGeneration = 0,
+    });
+}
+
+bool TerminalSessionRegistry::unregisterSurface(
+    const TerminalSurfaceIdentity& identity)
+{
     std::scoped_lock lock(m_impl->mutex);
-    const auto found = m_impl->sessions.find(sessionKey(subscription.sessionId));
-    if (found != m_impl->sessions.end()
-        && sameSubscription(found->second->subscription, subscription)) {
-        deactivate(found->second);
-        m_impl->sessions.erase(found);
+    const auto session = m_impl->sessions.find(
+        sessionKey(identity.subscription.sessionId));
+    if (session == m_impl->sessions.end()
+        || !sameSubscription(
+            session->second.subscription,
+            identity.subscription)) {
+        return false;
     }
+    const auto surface =
+        session->second.surfaces.find(identity.surfaceGeneration);
+    if (surface == session->second.surfaces.end()
+        || !sameIdentity(surface->second->identity, identity)) {
+        return false;
+    }
+    std::erase(
+        session->second.seedRefreshSurfaceGenerations,
+        identity.surfaceGeneration);
+    deactivate(surface->second);
+    session->second.surfaces.erase(surface);
+    if (session->second.surfaces.empty()) {
+        m_impl->sessions.erase(session);
+        return true;
+    }
+    return false;
+}
+
+std::expected<QByteArray, GhosttyTerminalKernel::Failure>
+TerminalSessionRegistry::encodeKey(
+    const TerminalSurfaceIdentity& identity,
+    TerminalKeyEvent keyEvent)
+{
+    auto entry = m_impl->exact(identity);
+    if (!entry) {
+        return std::unexpected(GhosttyTerminalKernel::Failure {
+            GhosttyTerminalKernel::Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal key input belongs to an unregistered surface."),
+        });
+    }
+    return entry->kernel.encodeKey(
+        identity.subscription,
+        std::move(keyEvent));
 }
 
 std::expected<QByteArray, GhosttyTerminalKernel::Failure>
@@ -241,16 +497,29 @@ TerminalSessionRegistry::encodeKey(
     const TerminalSubscription& subscription,
     TerminalKeyEvent keyEvent)
 {
-    auto entry = m_impl->exact(subscription);
+    return encodeKey(
+        {
+            .subscription = subscription,
+            .surfaceGeneration = 0,
+        },
+        std::move(keyEvent));
+}
+
+std::expected<QByteArray, GhosttyTerminalKernel::Failure>
+TerminalSessionRegistry::encodePaste(
+    const TerminalSurfaceIdentity& identity,
+    QByteArray text)
+{
+    auto entry = m_impl->exact(identity);
     if (!entry) {
         return std::unexpected(GhosttyTerminalKernel::Failure {
             GhosttyTerminalKernel::Failure::Code::StaleSubscription,
-            QStringLiteral("Terminal key input belongs to an unregistered subscription."),
+            QStringLiteral("Terminal paste belongs to an unregistered surface."),
         });
     }
-    return entry->kernel.encodeKey(
-        subscription,
-        std::move(keyEvent));
+    return entry->kernel.encodePaste(
+        identity.subscription,
+        std::move(text));
 }
 
 std::expected<QByteArray, GhosttyTerminalKernel::Failure>
@@ -258,48 +527,88 @@ TerminalSessionRegistry::encodePaste(
     const TerminalSubscription& subscription,
     QByteArray text)
 {
-    auto entry = m_impl->exact(subscription);
+    return encodePaste(
+        {
+            .subscription = subscription,
+            .surfaceGeneration = 0,
+        },
+        std::move(text));
+}
+
+GhosttyTerminalKernel::Result TerminalSessionRegistry::scrollViewport(
+    const TerminalSurfaceIdentity& identity,
+    const int rows)
+{
+    auto entry = m_impl->exact(identity);
     if (!entry) {
         return std::unexpected(GhosttyTerminalKernel::Failure {
             GhosttyTerminalKernel::Failure::Code::StaleSubscription,
-            QStringLiteral("Terminal paste belongs to an unregistered subscription."),
+            QStringLiteral("Terminal scrolling belongs to an unregistered surface."),
         });
     }
-    return entry->kernel.encodePaste(subscription, std::move(text));
+    auto result = entry->kernel.scrollViewport(identity.subscription, rows);
+    publishFrame(entry, result);
+    return result;
 }
 
 GhosttyTerminalKernel::Result TerminalSessionRegistry::scrollViewport(
     const TerminalSubscription& subscription,
     const int rows)
 {
-    auto entry = m_impl->exact(subscription);
+    return scrollViewport(
+        {
+            .subscription = subscription,
+            .surfaceGeneration = 0,
+        },
+        rows);
+}
+
+GhosttyTerminalKernel::Result TerminalSessionRegistry::scrollViewportToBottom(
+    const TerminalSurfaceIdentity& identity)
+{
+    auto entry = m_impl->exact(identity);
     if (!entry) {
         return std::unexpected(GhosttyTerminalKernel::Failure {
             GhosttyTerminalKernel::Failure::Code::StaleSubscription,
-            QStringLiteral("Terminal scrolling belongs to an unregistered subscription."),
+            QStringLiteral("Terminal scrolling belongs to an unregistered surface."),
         });
     }
-    auto result = entry->kernel.scrollViewport(subscription, rows);
-    publishFrame(entry, result);
+    const auto prior = entry->kernel.frame();
+    auto result = entry->kernel.scrollViewportToBottom(identity.subscription);
+    if (!result || *result != prior) {
+        publishFrame(entry, result);
+    }
     return result;
 }
 
 GhosttyTerminalKernel::Result TerminalSessionRegistry::scrollViewportToBottom(
     const TerminalSubscription& subscription)
 {
-    auto entry = m_impl->exact(subscription);
+    return scrollViewportToBottom({
+        .subscription = subscription,
+        .surfaceGeneration = 0,
+    });
+}
+
+std::expected<QString, GhosttyTerminalKernel::Failure>
+TerminalSessionRegistry::linkAt(
+    const TerminalSurfaceIdentity& identity,
+    const std::uint64_t viewportRevision,
+    const std::uint16_t column,
+    const std::uint16_t row)
+{
+    auto entry = m_impl->exact(identity);
     if (!entry) {
         return std::unexpected(GhosttyTerminalKernel::Failure {
             GhosttyTerminalKernel::Failure::Code::StaleSubscription,
-            QStringLiteral("Terminal scrolling belongs to an unregistered subscription."),
+            QStringLiteral("Terminal link lookup belongs to an unregistered surface."),
         });
     }
-    const auto prior = entry->kernel.frame();
-    auto result = entry->kernel.scrollViewportToBottom(subscription);
-    if (!result || *result != prior) {
-        publishFrame(entry, result);
-    }
-    return result;
+    return entry->kernel.linkAt(
+        identity.subscription,
+        viewportRevision,
+        column,
+        row);
 }
 
 std::expected<QString, GhosttyTerminalKernel::Failure>
@@ -309,18 +618,40 @@ TerminalSessionRegistry::linkAt(
     const std::uint16_t column,
     const std::uint16_t row)
 {
-    auto entry = m_impl->exact(subscription);
-    if (!entry) {
-        return std::unexpected(GhosttyTerminalKernel::Failure {
-            GhosttyTerminalKernel::Failure::Code::StaleSubscription,
-            QStringLiteral("Terminal link lookup belongs to an unregistered subscription."),
-        });
-    }
-    return entry->kernel.linkAt(
-        subscription,
+    return linkAt(
+        {
+            .subscription = subscription,
+            .surfaceGeneration = 0,
+        },
         viewportRevision,
         column,
         row);
+}
+
+GhosttyTerminalKernel::Result TerminalSessionRegistry::beginSelection(
+    const TerminalSurfaceIdentity& identity,
+    const std::uint64_t viewportRevision,
+    const std::uint16_t column,
+    const std::uint16_t row,
+    const bool rectangular)
+{
+    auto entry = m_impl->exact(identity);
+    if (!entry) {
+        return std::unexpected(GhosttyTerminalKernel::Failure {
+            GhosttyTerminalKernel::Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal selection belongs to an unregistered surface."),
+        });
+    }
+    auto result = entry->kernel.beginSelection(
+        identity.subscription,
+        viewportRevision,
+        column,
+        row,
+        rectangular);
+    if (result || !result.error().isRecoverableHitTestRace()) {
+        publishFrame(entry, result);
+    }
+    return result;
 }
 
 GhosttyTerminalKernel::Result TerminalSessionRegistry::beginSelection(
@@ -330,19 +661,35 @@ GhosttyTerminalKernel::Result TerminalSessionRegistry::beginSelection(
     const std::uint16_t row,
     const bool rectangular)
 {
-    auto entry = m_impl->exact(subscription);
-    if (!entry) {
-        return std::unexpected(GhosttyTerminalKernel::Failure {
-            GhosttyTerminalKernel::Failure::Code::StaleSubscription,
-            QStringLiteral("Terminal selection belongs to an unregistered subscription."),
-        });
-    }
-    auto result = entry->kernel.beginSelection(
-        subscription,
+    return beginSelection(
+        {
+            .subscription = subscription,
+            .surfaceGeneration = 0,
+        },
         viewportRevision,
         column,
         row,
         rectangular);
+}
+
+GhosttyTerminalKernel::Result TerminalSessionRegistry::updateSelection(
+    const TerminalSurfaceIdentity& identity,
+    const std::uint64_t viewportRevision,
+    const std::uint16_t column,
+    const std::uint16_t row)
+{
+    auto entry = m_impl->exact(identity);
+    if (!entry) {
+        return std::unexpected(GhosttyTerminalKernel::Failure {
+            GhosttyTerminalKernel::Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal selection belongs to an unregistered surface."),
+        });
+    }
+    auto result = entry->kernel.updateSelection(
+        identity.subscription,
+        viewportRevision,
+        column,
+        row);
     if (result || !result.error().isRecoverableHitTestRace()) {
         publishFrame(entry, result);
     }
@@ -355,61 +702,71 @@ GhosttyTerminalKernel::Result TerminalSessionRegistry::updateSelection(
     const std::uint16_t column,
     const std::uint16_t row)
 {
-    auto entry = m_impl->exact(subscription);
-    if (!entry) {
-        return std::unexpected(GhosttyTerminalKernel::Failure {
-            GhosttyTerminalKernel::Failure::Code::StaleSubscription,
-            QStringLiteral("Terminal selection belongs to an unregistered subscription."),
-        });
-    }
-    auto result = entry->kernel.updateSelection(
-        subscription,
+    return updateSelection(
+        {
+            .subscription = subscription,
+            .surfaceGeneration = 0,
+        },
         viewportRevision,
         column,
         row);
-    if (result || !result.error().isRecoverableHitTestRace()) {
-        publishFrame(entry, result);
+}
+
+GhosttyTerminalKernel::Result TerminalSessionRegistry::clearSelection(
+    const TerminalSurfaceIdentity& identity)
+{
+    auto entry = m_impl->exact(identity);
+    if (!entry) {
+        return std::unexpected(GhosttyTerminalKernel::Failure {
+            GhosttyTerminalKernel::Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal selection belongs to an unregistered surface."),
+        });
     }
+    auto result = entry->kernel.clearSelection(identity.subscription);
+    publishFrame(entry, result);
     return result;
 }
 
 GhosttyTerminalKernel::Result TerminalSessionRegistry::clearSelection(
     const TerminalSubscription& subscription)
 {
-    auto entry = m_impl->exact(subscription);
+    return clearSelection({
+        .subscription = subscription,
+        .surfaceGeneration = 0,
+    });
+}
+
+std::expected<QString, GhosttyTerminalKernel::Failure>
+TerminalSessionRegistry::selectedText(const TerminalSurfaceIdentity& identity)
+{
+    auto entry = m_impl->exact(identity);
     if (!entry) {
         return std::unexpected(GhosttyTerminalKernel::Failure {
             GhosttyTerminalKernel::Failure::Code::StaleSubscription,
-            QStringLiteral("Terminal selection belongs to an unregistered subscription."),
+            QStringLiteral("Terminal selection belongs to an unregistered surface."),
         });
     }
-    auto result = entry->kernel.clearSelection(subscription);
-    publishFrame(entry, result);
-    return result;
+    return entry->kernel.selectedText(identity.subscription);
 }
 
 std::expected<QString, GhosttyTerminalKernel::Failure>
 TerminalSessionRegistry::selectedText(const TerminalSubscription& subscription)
 {
-    auto entry = m_impl->exact(subscription);
-    if (!entry) {
-        return std::unexpected(GhosttyTerminalKernel::Failure {
-            GhosttyTerminalKernel::Failure::Code::StaleSubscription,
-            QStringLiteral("Terminal selection belongs to an unregistered subscription."),
-        });
-    }
-    return entry->kernel.selectedText(subscription);
+    return selectedText({
+        .subscription = subscription,
+        .surfaceGeneration = 0,
+    });
 }
 
 GhosttyTerminalKernel::ConfigureResult TerminalSessionRegistry::configure(
-    const TerminalSubscription& subscription,
+    const TerminalSurfaceIdentity& identity,
     TerminalKernelSettings settings)
 {
-    auto entry = m_impl->exact(subscription);
+    auto entry = m_impl->exact(identity);
     if (!entry) {
         return std::unexpected(GhosttyTerminalKernel::Failure {
             GhosttyTerminalKernel::Failure::Code::StaleSubscription,
-            QStringLiteral("Terminal settings belong to an unregistered subscription."),
+            QStringLiteral("Terminal settings belong to an unregistered surface."),
         });
     }
     auto result = entry->kernel.configure(settings);
@@ -421,18 +778,38 @@ GhosttyTerminalKernel::ConfigureResult TerminalSessionRegistry::configure(
     return result;
 }
 
+GhosttyTerminalKernel::ConfigureResult TerminalSessionRegistry::configure(
+    const TerminalSubscription& subscription,
+    TerminalKernelSettings settings)
+{
+    return configure(
+        {
+            .subscription = subscription,
+            .surfaceGeneration = 0,
+        },
+        settings);
+}
+
 void TerminalSessionRegistry::receiveData(TerminalData data) noexcept
 {
     ScopedPerformanceSpan span(
         PerformanceCategory::Terminal,
         QStringLiteral("frame.apply"),
         8);
-    if (auto entry = m_impl->exact(data.subscription)) {
-        if (!publishFrame(entry, entry->kernel.applyData(data))) {
-            span.setOutcome(QStringLiteral("inactive"));
-        }
-    } else {
+    const auto entries = m_impl->exact(data.subscription);
+    if (entries.empty()) {
         span.setOutcome(QStringLiteral("stale"));
+        return;
+    }
+    bool current = false;
+    for (const auto& entry : entries) {
+        if (entry->needsCheckpoint.load(std::memory_order_acquire)) {
+            continue;
+        }
+        current = publishFrame(entry, entry->kernel.applyData(data)) || current;
+    }
+    if (!current) {
+        span.setOutcome(QStringLiteral("inactive"));
     }
 }
 
@@ -442,17 +819,23 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
         PerformanceCategory::Terminal,
         QStringLiteral("frame.control"),
         8);
-    auto entry = m_impl->exact(control.subscription);
-    if (!entry) {
+    const auto entries = m_impl->exact(control.subscription);
+    if (entries.empty()) {
         span.setOutcome(QStringLiteral("stale"));
         return;
     }
+    const auto publishFailureToAll = [&entries](
+                                         GhosttyTerminalKernel::Failure failure) {
+        for (const auto& entry : entries) {
+            publishFailure(entry, failure);
+        }
+    };
 
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(control.json, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
         span.setOutcome(QStringLiteral("invalid"));
-        publishFailure(entry, {
+        publishFailureToAll({
             GhosttyTerminalKernel::Failure::Code::GhosttyRejected,
             QStringLiteral("Terminal control frame is not valid JSON."),
         });
@@ -469,32 +852,39 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
             || *rows > std::numeric_limits<std::uint16_t>::max()
             || *columns == 0
             || *columns > std::numeric_limits<std::uint16_t>::max()) {
-            publishFailure(entry, {
+            publishFailureToAll({
                 GhosttyTerminalKernel::Failure::Code::ResourceLimit,
                 QStringLiteral("Terminal resize control fields are invalid."),
             });
             return;
         }
-        publishFrame(
-            entry,
-            entry->kernel.applyResize(
+        for (const auto& entry : entries) {
+            if (entry->needsCheckpoint.load(std::memory_order_acquire)) {
+                continue;
+            }
+            publishFrame(
+                entry,
+                entry->kernel.applyResize(
                 control.subscription,
                 *atSequence,
                 static_cast<std::uint16_t>(*rows),
                 static_cast<std::uint16_t>(*columns)));
+        }
     } else if (type == QStringLiteral("Closed")) {
         const auto finalSequence =
             unsignedJsonField(control.json, QByteArrayLiteral("finalSequence"));
         if (!finalSequence) {
-            publishFailure(entry, {
+            publishFailureToAll({
                 GhosttyTerminalKernel::Failure::Code::GhosttyRejected,
                 QStringLiteral("Terminal close control fields are invalid."),
             });
             return;
         }
-        std::scoped_lock lock(entry->listenerMutex);
-        if (entry->active && entry->listener.closed) {
-            entry->listener.closed();
+        for (const auto& entry : entries) {
+            std::scoped_lock lock(entry->listenerMutex);
+            if (entry->active && entry->listener.closed) {
+                entry->listener.closed();
+            }
         }
     } else if (type == QStringLiteral("term.focusApplied")
         || type == QStringLiteral("term.focusRejected")) {
@@ -505,21 +895,24 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
         const auto reason = object.value(QStringLiteral("reason"));
         if (!requestId.isString() || !runtimeIncarnationId.isString()
             || (rejected && !reason.isString())) {
-            publishFailure(entry, {
+            publishFailureToAll({
                 GhosttyTerminalKernel::Failure::Code::GhosttyRejected,
                 QStringLiteral("Terminal focus result fields are invalid."),
             });
             return;
         }
-        publishValue(
-            entry,
-            &TerminalSessionRegistry::Listener::focusCompleted,
-            TerminalFocusOutcome {
-                .applied = !rejected,
-                .requestId = requestId.toString(),
-                .runtimeIncarnationId = runtimeIncarnationId.toString(),
-                .reason = rejected ? reason.toString() : QString {},
-            });
+        const TerminalFocusOutcome outcome {
+            .applied = !rejected,
+            .requestId = requestId.toString(),
+            .runtimeIncarnationId = runtimeIncarnationId.toString(),
+            .reason = rejected ? reason.toString() : QString {},
+        };
+        for (const auto& entry : entries) {
+            publishValue(
+                entry,
+                &TerminalSessionRegistry::Listener::focusCompleted,
+                outcome);
+        }
     } else if (type == QStringLiteral("term.resizeApplied")
         || type == QStringLiteral("term.resizeRejected")) {
         const auto sessionId = object.value(QStringLiteral("sessionId"));
@@ -564,16 +957,13 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
             || sessionId.toString() != control.subscription.sessionId
             || subscriptionId.toString() != control.subscription.subscriptionId
             || *subscriptionGeneration != control.subscription.generation) {
-            publishFailure(entry, {
+            publishFailureToAll({
                 GhosttyTerminalKernel::Failure::Code::GhosttyRejected,
                 QStringLiteral("Terminal resize result fields are invalid."),
             });
             return;
         }
-        publishValue(
-            entry,
-            &TerminalSessionRegistry::Listener::resizeCompleted,
-            TerminalResizeOutcome {
+        const TerminalResizeOutcome outcome {
                 .applied = !rejected,
                 .sessionId = sessionId.toString(),
                 .requestId = requestId.toString(),
@@ -589,7 +979,17 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
                 .cellWidthPixels = static_cast<std::uint32_t>(*cellWidthPixels),
                 .cellHeightPixels = static_cast<std::uint32_t>(*cellHeightPixels),
                 .reason = rejected ? reason.toString() : QString {},
-            });
+        };
+        for (const auto& entry : entries) {
+            if (entry->identity.surfaceGeneration != 0
+                && entry->identity.surfaceGeneration != *surfaceGeneration) {
+                continue;
+            }
+            publishValue(
+                entry,
+                &TerminalSessionRegistry::Listener::resizeCompleted,
+                outcome);
+        }
     } else if (type == QStringLiteral("term.notification")) {
         const auto sessionId = object.value(QStringLiteral("sessionId"));
         const auto title = object.value(QStringLiteral("title"));
@@ -600,21 +1000,23 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
         if (!sessionId.isString()
             || sessionId.toString() != control.subscription.sessionId
             || !optionalString(title) || !optionalString(body)) {
-            publishFailure(entry, {
+            publishFailureToAll({
                 GhosttyTerminalKernel::Failure::Code::GhosttyRejected,
                 QStringLiteral("Terminal notification fields are invalid."),
             });
             return;
         }
-        publishValue(
-            entry,
-            &TerminalSessionRegistry::Listener::notificationRequested,
-            TerminalNotification {
-                .title = title.isString() ? title.toString() : QString {},
-                .body = body.isString() ? body.toString() : QString {},
-            });
+        if (const auto entry = m_impl->primary(control.subscription)) {
+            publishValue(
+                entry,
+                &TerminalSessionRegistry::Listener::notificationRequested,
+                TerminalNotification {
+                    .title = title.isString() ? title.toString() : QString {},
+                    .body = body.isString() ? body.toString() : QString {},
+                });
+        }
     } else {
-        publishFailure(entry, {
+        publishFailureToAll({
             GhosttyTerminalKernel::Failure::Code::GhosttyRejected,
             QStringLiteral("Terminal control type is unsupported."),
         });
@@ -623,8 +1025,8 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
 
 void TerminalSessionRegistry::receiveConnectResult(TerminalConnectResult result) noexcept
 {
-    if (auto entry = m_impl->exact(result.subscription);
-        entry) {
+    const auto entries = m_impl->exact(result.subscription);
+    for (const auto& entry : entries) {
         std::scoped_lock lock(entry->listenerMutex);
         if (entry->active && entry->listener.connectionCompleted) {
             entry->listener.connectionCompleted(result.result);
@@ -639,20 +1041,54 @@ bool TerminalSessionRegistry::installSemanticCheckpoint(
         PerformanceCategory::Terminal,
         QStringLiteral("frame.checkpoint"),
         16);
-    auto entry = m_impl->exact(checkpoint.subscription);
-    if (!entry) {
+    auto targets = m_impl->checkpointTargets(checkpoint.subscription);
+    if (!targets) {
         span.setOutcome(QStringLiteral("stale"));
         return false;
     }
-    auto result = entry->kernel.installCheckpoint(checkpoint);
-    const auto accepted = result.has_value();
-    const auto current = publishFrame(entry, std::move(result));
-    if (!accepted) {
+    if (targets->entries.empty()) {
+        return targets->seedOnly;
+    }
+    bool allAccepted = true;
+    bool anyCurrent = false;
+    const auto install =
+        [&](const std::vector<std::shared_ptr<Entry>>& entries) {
+            for (const auto& entry : entries) {
+                auto result = entry->kernel.installCheckpoint(checkpoint);
+                const auto accepted = result.has_value();
+                if (accepted) {
+                    entry->needsCheckpoint.store(
+                        false,
+                        std::memory_order_release);
+                }
+                const auto current =
+                    publishFrame(entry, std::move(result));
+                if (current) {
+                    anyCurrent = true;
+                    allAccepted = allAccepted && accepted;
+                }
+            }
+        };
+    install(targets->entries);
+    while (allAccepted) {
+        auto additional = m_impl->pendingCheckpointTargets(
+            checkpoint.subscription,
+            targets->seedOnly);
+        if (!additional) {
+            allAccepted = false;
+            break;
+        }
+        if (additional->empty()) {
+            break;
+        }
+        install(*additional);
+    }
+    if (!allAccepted) {
         span.setOutcome(QStringLiteral("rejected"));
-    } else if (!current) {
+    } else if (!anyCurrent) {
         span.setOutcome(QStringLiteral("inactive"));
     }
-    return accepted && current;
+    return allAccepted && anyCurrent;
 }
 
 } // namespace kodosi

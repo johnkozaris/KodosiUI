@@ -29,8 +29,6 @@ Item {
             Layout.preferredWidth: root.wide ? 260 : -1
             Layout.preferredHeight: root.wide ? -1 : 210
             color: KodosiTheme.surfaceElevated
-            border.width: 1
-            border.color: KodosiTheme.seam
             radius: KodosiTheme.radiusSmall
 
             ColumnLayout {
@@ -176,9 +174,7 @@ Item {
                                 ? KodosiTheme.surface
                                 : agentItem.hovered
                                   ? KodosiTheme.canvas
-                                  : "transparent"
-                            border.width: agentItem.activeFocus ? 1 : 0
-                            border.color: KodosiTheme.focusRing
+                                  : KodosiTheme.surface
                             radius: KodosiTheme.radiusSmall
                         }
 
@@ -250,8 +246,6 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: KodosiTheme.terminal
-            border.width: 1
-            border.color: KodosiTheme.seam
             radius: KodosiTheme.radiusSmall
 
             Item {

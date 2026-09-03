@@ -84,6 +84,12 @@ for path in sorted(QML.rglob("*.qml")):
         fail(f"raw Qt Quick control remains in {relative}")
     if path.name != "KodosiTheme.qml" and COLOR_LITERAL.search(text):
         fail(f"palette literal outside KodosiTheme.qml in {relative}")
+    if re.search(r"\bborder\.(?:width|color)\s*:", text):
+        fail(f"element outline remains in {relative}")
+    if "Qt.rgba(" in text:
+        fail(f"transparent color remains in {relative}")
+    if path.name != "KIcon.qml" and '"transparent"' in text:
+        fail(f"transparent surface remains in {relative}")
     for description, pattern in FORBIDDEN_UI_SOURCE.items():
         if pattern.search(text):
             fail(f"forbidden {description} detected in {relative}")
@@ -114,6 +120,16 @@ for prohibition in (
     "Decorative serif italic accents",
     "The Space Grotesk and Instrument Serif pairing",
     "Grain overlays on gradients",
+    "Thin outlines around controls, cards, rows, dialogs, or panels",
+    "Transparent or alpha-tinted UI surfaces",
+    "Counts or badges inside navigation tabs",
+    "Connection or Local status furniture in the top bar",
+    "A separate Attention section in the session sidebar",
+    "Helper labels, captions, and explanatory copy beside obvious controls",
+    "Multiple Mission panes visible at the same time",
+    "Controls added only to expose internal backend state",
+    "Session rows with mode initials, counts, or repeated project metadata",
+    "New UI patterns that do not exist in the shipping Swift client",
 ):
     if prohibition not in ui_donts:
         fail(f"missing binding UI prohibition {prohibition!r}")
@@ -232,10 +248,7 @@ for contract in (
     "setShellAccessibilityIgnored(",
     "enabled: !window.blockingOverlayOpen",
     'objectName: "header.sidebar.toggle"',
-    'objectName: "header.settings"',
     'objectName: "header.utility.menu"',
-    'objectName: "header.attention"',
-    'objectName: "header.tab.devices"',
     'objectName: "header.logo"',
     'Accessible.name: qsTr("Kodosi")',
     'source: "assets/kodosi-logo-dark.png"',
@@ -244,11 +257,19 @@ for contract in (
 ):
     if contract not in main:
         fail(f"missing shell contract {contract!r}")
+for removed in (
+    'objectName: "header.settings"',
+    'objectName: "header.attention"',
+    'objectName: "header.tab.devices"',
+    "badgeCount:",
+    "StatusPill {",
+):
+    if removed in main:
+        fail(f"removed shell noise returned: {removed!r}")
 
 appearance_menu = (QML / "Appearance" / "AppearanceMenu.qml").read_text()
 for contract in (
     'objectName: "panel.utility"',
-    'objectName: "panel.utility.close"',
     'objectName: "panel.utility.settings"',
     'objectName: "panel.utility.appearance.light"',
     'objectName: "panel.utility.appearance.dark"',
@@ -262,20 +283,12 @@ for contract in (
         fail(f"missing appearance menu contract {contract!r}")
 
 busy_indicator = (CONTROL_DIR / "KBusyIndicator.qml").read_text()
-attention_spinner = (QML / "Attention" / "AttentionSpinner.qml").read_text()
 for contract in (
     "duration: KodosiTheme.motionSpinner",
     "running: root.running && !KodosiTheme.reduceMotion",
 ):
     if contract not in busy_indicator:
         fail(f"missing reduced-motion busy indicator contract {contract!r}")
-for contract in (
-    "running: root.running && !KodosiTheme.reduceMotion",
-    "KodosiTheme.motionAttentionStagger",
-    "duration: KodosiTheme.motionFast",
-):
-    if contract not in attention_spinner:
-        fail(f"missing reduced-motion attention contract {contract!r}")
 for path in sorted(QML.rglob("*.qml")):
     text = path.read_text()
     if re.search(r"\bduration:\s*(?:900|[^(]*\*\s*120)\b", text):
@@ -325,10 +338,7 @@ for contract in (
     '".remove"',
     '".select"',
     '".focus"',
-    '".intel"',
-    '".mode"',
-    '".interrupt"',
-    '".close"',
+    '".overflow"',
     '".retry"',
     "width < 340 ? 0",
     "width < 640 ? 1 : 2",
@@ -376,7 +386,6 @@ button = (CONTROL_DIR / "KButton.qml").read_text()
 for contract in (
     "readonly property bool selected: checkable && checked",
     "KodosiTheme.surfaceSelected",
-    "KodosiTheme.accentMuted",
 ):
     if contract not in button:
         fail(f"missing checked-button contract {contract!r}")
@@ -467,12 +476,6 @@ for action in (
 
 for relative, object_prefix, confirmation_flag in (
     (Path("Devices/DevicesView.qml"), "devices.revoke.", "device.confirming"),
-    (
-        Path("People/MissionDetailView.qml"),
-        "missions.member.remove.",
-        "member.confirmingRemoval",
-    ),
-    (Path("People/PeopleView.qml"), "people.remove.", "person.confirmingRemoval"),
 ):
     source = (QML / relative).read_text()
     start = source.find(f'objectName: "{object_prefix}"')

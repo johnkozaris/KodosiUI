@@ -31,8 +31,6 @@ Control {
     background: Rectangle {
         color: KodosiTheme.surface
         radius: KodosiTheme.radiusMedium
-        border.color: KodosiTheme.seam
-        border.width: 1
     }
 
     padding: KodosiTheme.spacing4

@@ -865,16 +865,25 @@ void TerminalView::setFocusedSizeAuthority(const bool focused)
     }
 }
 
+TerminalSurfaceIdentity TerminalView::surfaceIdentity() const
+{
+    return {
+        .subscription = m_subscription,
+        .surfaceGeneration = m_surfaceGeneration,
+    };
+}
+
 bool TerminalView::attach(
     TerminalSessionRegistry& registry,
     TerminalCommandDispatcher& runtime,
     TerminalSubscription subscription,
-    QString expectedRuntimeIncarnationId)
+    QString expectedRuntimeIncarnationId,
+    const std::uint64_t surfaceGeneration)
 {
     Q_ASSERT(thread() == QThread::currentThread());
     detach();
     if (subscription.sessionId.isEmpty() || subscription.subscriptionId.isEmpty()
-        || expectedRuntimeIncarnationId.isEmpty()) {
+        || expectedRuntimeIncarnationId.isEmpty() || surfaceGeneration == 0) {
         return false;
     }
 
@@ -882,17 +891,12 @@ bool TerminalView::attach(
     m_runtime = &runtime;
     m_subscription = std::move(subscription);
     m_expectedRuntimeIncarnationId = std::move(expectedRuntimeIncarnationId);
-    if (m_nextSurfaceGeneration == std::numeric_limits<std::uint64_t>::max()) {
-        m_registry = nullptr;
-        m_runtime = nullptr;
-        return false;
-    }
-    m_surfaceGeneration = ++m_nextSurfaceGeneration;
+    m_surfaceGeneration = surfaceGeneration;
     m_renderPerformanceGeneration.fetch_add(1, std::memory_order_acq_rel);
     const auto epoch = m_attachmentEpoch.fetch_add(1, std::memory_order_acq_rel) + 1;
     m_frameMailbox.reset(epoch);
-    const auto registered = m_registry->registerSession(
-        m_subscription,
+    const auto registered = m_registry->registerSurface(
+        surfaceIdentity(),
         {
             .frameChanged = [this, epoch](auto frame) {
                 enqueueFrame(epoch, std::move(frame));
@@ -975,9 +979,17 @@ bool TerminalView::attach(
         return false;
     }
 
-    if (auto connected = m_runtime->connectTerminal(m_subscription); !connected) {
+    auto connected = registered->requiresConnection
+        ? m_runtime->connectTerminal(m_subscription)
+        : registered->requiresRefresh
+        ? m_runtime->refreshTerminal(m_subscription)
+        : TerminalCommandDispatcher::Result {};
+    if (!connected) {
         const auto message = connected.error().message;
-        m_registry->unregisterSession(m_subscription);
+        if (registered->requiresRefresh) {
+            m_registry->cancelSurfaceRefresh(surfaceIdentity());
+        }
+        (void)m_registry->unregisterSurface(surfaceIdentity());
         m_registry = nullptr;
         m_runtime = nullptr;
         emit terminalError(message);
@@ -1012,10 +1024,11 @@ void TerminalView::detach()
     m_frameMailbox.reset(epoch);
     auto* registry = std::exchange(m_registry, nullptr);
     auto* runtime = std::exchange(m_runtime, nullptr);
+    bool disconnectSubscription = false;
     if (registry != nullptr) {
-        registry->unregisterSession(m_subscription);
+        disconnectSubscription = registry->unregisterSurface(surfaceIdentity());
     }
-    if (runtime != nullptr && runtime->isRunning()) {
+    if (disconnectSubscription && runtime != nullptr && runtime->isRunning()) {
         (void)runtime->disconnectTerminal(m_subscription);
     }
     m_subscription = {};
@@ -1426,7 +1439,7 @@ void TerminalView::wheelEvent(QWheelEvent* event)
     }
     const auto rows = wheelRows(event);
     if (rows != 0) {
-        auto scrolled = m_registry->scrollViewport(m_subscription, rows);
+        auto scrolled = m_registry->scrollViewport(surfaceIdentity(), rows);
         if (!scrolled) {
             emit terminalError(scrolled.error().message);
         }
@@ -1563,7 +1576,7 @@ void TerminalView::pasteClipboard()
         emit terminalError(QStringLiteral("Terminal input queue is full; input was not accepted."));
         return;
     }
-    auto encoded = m_registry->encodePaste(m_subscription, std::move(text));
+    auto encoded = m_registry->encodePaste(surfaceIdentity(), std::move(text));
     if (!encoded) {
         emit terminalError(encoded.error().message);
         return;
@@ -1601,7 +1614,7 @@ bool TerminalView::sendKey(QKeyEvent* event, const TerminalKeyAction action)
         text.clear();
     }
     auto encoded = m_registry->encodeKey(
-        m_subscription,
+        surfaceIdentity(),
         {
             .key = *key,
             .action = action,
@@ -1629,7 +1642,7 @@ bool TerminalView::enqueueInput(QByteArray bytes)
         emit terminalError(QStringLiteral("Terminal input queue is full; input was not accepted."));
         return false;
     }
-    auto bottom = m_registry->scrollViewportToBottom(m_subscription);
+    auto bottom = m_registry->scrollViewportToBottom(surfaceIdentity());
     if (!bottom) {
         emit terminalError(bottom.error().message);
         return false;
@@ -2001,7 +2014,7 @@ std::optional<QUrl> TerminalView::linkAtCell(
         return std::nullopt;
     }
     auto value = m_registry->linkAt(
-        m_subscription,
+        surfaceIdentity(),
         m_frame->viewportRevision,
         static_cast<std::uint16_t>(cell.x()),
         static_cast<std::uint16_t>(cell.y()));
@@ -2069,7 +2082,7 @@ void TerminalView::beginSelection(const QPoint& anchor)
         return;
     }
     auto selected = m_registry->beginSelection(
-        m_subscription,
+        surfaceIdentity(),
         m_frame->viewportRevision,
         static_cast<std::uint16_t>(anchor.x()),
         static_cast<std::uint16_t>(anchor.y()));
@@ -2085,14 +2098,14 @@ void TerminalView::updateSelection(const QPoint& endpoint)
         return;
     }
     auto selected = m_registry->updateSelection(
-        m_subscription,
+        surfaceIdentity(),
         m_frame->viewportRevision,
         static_cast<std::uint16_t>(endpoint.x()),
         static_cast<std::uint16_t>(endpoint.y()));
     if (!selected) {
         if (selected.error().isRecoverableHitTestRace()) {
             m_selecting = false;
-            if (auto cleared = m_registry->clearSelection(m_subscription);
+            if (auto cleared = m_registry->clearSelection(surfaceIdentity());
                 !cleared) {
                 emit terminalError(cleared.error().message);
             }
@@ -2107,7 +2120,7 @@ bool TerminalView::copySelection()
     if (m_registry == nullptr) {
         return false;
     }
-    auto text = m_registry->selectedText(m_subscription);
+    auto text = m_registry->selectedText(surfaceIdentity());
     if (!text) {
         emit terminalError(text.error().message);
         return true;
@@ -2136,7 +2149,7 @@ void TerminalView::configureAttachedKernel()
         return;
     }
     if (auto configured =
-            m_registry->configure(m_subscription, kernelSettings());
+            m_registry->configure(surfaceIdentity(), kernelSettings());
         !configured) {
         emit terminalError(configured.error().message);
     }

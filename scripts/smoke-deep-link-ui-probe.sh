@@ -87,6 +87,7 @@ QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
 app_pid=$!
 
 app_handle=
+banner_ready=false
 for _ in $(seq 1 100); do
     if "$probe" apps >"$artifact_dir/status-apps.json" 2>/dev/null; then
         app_handle=$(
@@ -96,14 +97,15 @@ for _ in $(seq 1 100); do
     fi
     if [[ -n "$app_handle" ]] \
         && "$probe" wait --app "$app_handle" --pid "$app_pid" \
-            id=deepLink.status --state showing --timeout-ms 500 \
+            id=deepLink.status --state showing --timeout-ms 2000 \
             >"$artifact_dir/status-banner.json" 2>/dev/null; then
+        banner_ready=true
         break
     fi
     kill -0 "$app_pid"
     sleep 0.1
 done
-if [[ -z "$app_handle" ]]; then
+if [[ -z "$app_handle" || "$banner_ready" != true ]]; then
     echo "The compact status probe did not become accessible." >&2
     exit 4
 fi
@@ -243,12 +245,12 @@ if [[ -z "$session_id" ]]; then
 fi
 
 "$probe" find --app "$app_handle" --pid "$app_pid" \
-    --id header.tab.devices >"$artifact_dir/devices.json"
-devices_handle=$(json_value matches.0.handle <"$artifact_dir/devices.json")
-"$probe" click "$devices_handle" >"$artifact_dir/devices-click.json"
+    --id header.tab.missions >"$artifact_dir/missions.json"
+missions_handle=$(json_value matches.0.handle <"$artifact_dir/missions.json")
+"$probe" click "$missions_handle" >"$artifact_dir/missions-click.json"
 "$probe" wait --app "$app_handle" --pid "$app_pid" \
-    id=surface.devices --state showing --timeout-ms 5000 \
-    >"$artifact_dir/devices-view.json"
+    id=surface.missions --state showing --timeout-ms 5000 \
+    >"$artifact_dir/missions-view.json"
 
 set +e
 XDG_CONFIG_HOME="$config_dir" \

@@ -28,6 +28,7 @@
 #include <QWheelEvent>
 #include <QtTest/QTest>
 
+#include <functional>
 #include <optional>
 #include <utility>
 
@@ -77,6 +78,12 @@ public:
         const kodosi::TerminalSubscription&) override
     {
         ++connectCount;
+        return {};
+    }
+
+    Result refreshTerminal(
+        const kodosi::TerminalSubscription&) override
+    {
         return {};
     }
 
@@ -146,16 +153,37 @@ public:
     }
 
     Result connectTerminal(
-        const kodosi::TerminalSubscription&) override
+        const kodosi::TerminalSubscription& subscription) override
     {
         ++connectCount;
+        connectedSubscriptions.append(subscription);
+        return {};
+    }
+
+    Result refreshTerminal(
+        const kodosi::TerminalSubscription& subscription) override
+    {
+        ++refreshCount;
+        refreshedSubscriptions.append(subscription);
+        if (refreshFailures > 0) {
+            --refreshFailures;
+            return std::unexpected(kodosi::RuntimeFailure {
+                .code = kodosi::RuntimeFailure::Code::FfiRejected,
+                .ffiResult = ffiBusy,
+                .message = QStringLiteral("Busy"),
+            });
+        }
+        if (refreshHandler) {
+            refreshHandler(subscription);
+        }
         return {};
     }
 
     Result disconnectTerminal(
-        const kodosi::TerminalSubscription&) override
+        const kodosi::TerminalSubscription& subscription) override
     {
         ++disconnectCount;
+        disconnectedSubscriptions.append(subscription);
         return {};
     }
 
@@ -169,8 +197,14 @@ public:
     }
 
     int connectCount = 0;
+    int refreshCount = 0;
+    int refreshFailures = 0;
     int disconnectCount = 0;
     int inputCount = 0;
+    QVector<kodosi::TerminalSubscription> connectedSubscriptions;
+    QVector<kodosi::TerminalSubscription> refreshedSubscriptions;
+    QVector<kodosi::TerminalSubscription> disconnectedSubscriptions;
+    std::function<void(const kodosi::TerminalSubscription&)> refreshHandler;
 };
 
 QByteArray checkpointFor(const QByteArray& bytes, const std::uint16_t columns, const std::uint16_t rows)
@@ -261,6 +295,7 @@ class TerminalKernelTest final : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase();
     void checkpointPrecedesContiguousRawData();
     void failedCheckpointPreservesPriorFrame();
     void resizeRequiresExactSequenceBoundary();
@@ -301,7 +336,18 @@ private slots:
     void terminalViewDefersResizeWhileEffectivelyHidden();
     void surfaceControllerFencesSessionIncarnations();
     void surfaceControllerKeepsBindingsIndependent();
+    void surfaceControllerKeepsSameSessionSurfacesIndependent();
+    void surfaceControllerRetriesFailedSeedRefresh();
+    void surfaceControllerTimesOutAcceptedSeedRefresh();
+    void surfaceControllerScopesAttachmentOutcomes();
+    void registryRetiresAbandonedSeedCapacity();
+    void registryRoutesMultiSurfaceControlExactly();
 };
+
+void TerminalKernelTest::initTestCase()
+{
+    qRegisterMetaType<kodosi::TerminalView*>();
+}
 
 void TerminalKernelTest::checkpointPrecedesContiguousRawData()
 {
@@ -2343,10 +2389,468 @@ void TerminalKernelTest::surfaceControllerKeepsBindingsIndependent()
         R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.removed","sessionId":"second"})"));
     QCOMPARE(rejected.count(), 1);
     QCOMPARE(
-        rejected.constFirst().constFirst().toString(),
+        rejected.constFirst().at(1).toString(),
         QStringLiteral("second"));
     QVERIFY(!firstView.terminalReady());
     QVERIFY(!secondView.terminalReady());
+}
+
+void TerminalKernelTest::surfaceControllerKeepsSameSessionSurfacesIndependent()
+{
+    kodosi::TerminalSessionRegistry registry;
+    FakeRuntimeBridge runtime(registry);
+    kodosi::SessionCatalogModel sessions;
+    kodosi::TerminalSurfaceController controller(registry, runtime, sessions);
+    kodosi::TerminalView stageView;
+    kodosi::TerminalView focusView;
+    stageView.setWidth(400);
+    stageView.setHeight(160);
+    focusView.setWidth(400);
+    focusView.setHeight(160);
+    QSignalSpy stageNotifications(
+        &stageView,
+        &kodosi::TerminalView::terminalNotificationRequested);
+    QSignalSpy focusNotifications(
+        &focusView,
+        &kodosi::TerminalView::terminalNotificationRequested);
+    QSignalSpy stageConnections(
+        &stageView,
+        &kodosi::TerminalView::connectionCompleted);
+    QSignalSpy focusConnections(
+        &focusView,
+        &kodosi::TerminalView::connectionCompleted);
+    QSignalSpy stageFrames(
+        &stageView,
+        &kodosi::TerminalView::frameChanged);
+
+    sessions.ingestAuthEvent(QByteArrayLiteral(
+        R"({"type":"auth.ready","userId":"user","accountEpoch":1})"));
+    sessions.ingestSessionEvent(QByteArrayLiteral(
+        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.list","sessions":[{"kind":"local","id":"shared","incarnationId":"inc-shared","name":"Shared","project":"/repo","mode":"normal","status":"active","recovery":"live","scope":"justMe","access":"inject"}]})"));
+
+    QVERIFY(controller.bind(&stageView, QStringLiteral("shared")));
+    QCOMPARE(runtime.connectedSubscriptions.size(), 1);
+    const auto stageSubscription = runtime.connectedSubscriptions.constFirst();
+
+    QByteArray output;
+    for (int line = 0; line < 20; ++line) {
+        output += QByteArrayLiteral("row-");
+        output += QByteArray::number(line).rightJustified(2, '0');
+        output += QByteArrayLiteral("\r\n");
+    }
+    QVERIFY(registry.installSemanticCheckpoint({
+        stageSubscription,
+        1,
+        5,
+        12,
+        checkpointFor(output, 12, 5),
+    }));
+    registry.receiveConnectResult({stageSubscription, ffiOk});
+    QCoreApplication::processEvents();
+
+    QVERIFY(stageView.terminalReady());
+    QCOMPARE(stageConnections.size(), 1);
+
+    QWheelEvent top(
+        QPointF(20, 20),
+        QPointF(20, 20),
+        {},
+        QPoint(0, 120 * 100),
+        Qt::NoButton,
+        Qt::NoModifier,
+        Qt::ScrollUpdate,
+        false);
+    QCoreApplication::sendEvent(&stageView, &top);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        stageView.accessibleText().contains(QStringLiteral("row-00")),
+        250);
+    const auto cell = kodosi::TerminalRasterizer::cellSize(
+        QFontDatabase::systemFont(QFontDatabase::FixedFont),
+        stageView.lineHeight());
+    const QPointF anchor(cell.width() * 0.5, cell.height() * 0.5);
+    const QPointF endpoint(cell.width() * 5.5, cell.height() * 0.5);
+    QMouseEvent press(
+        QEvent::MouseButtonPress,
+        anchor,
+        anchor,
+        Qt::LeftButton,
+        Qt::LeftButton,
+        Qt::NoModifier);
+    QMouseEvent move(
+        QEvent::MouseMove,
+        endpoint,
+        endpoint,
+        Qt::NoButton,
+        Qt::LeftButton,
+        Qt::NoModifier);
+    QMouseEvent release(
+        QEvent::MouseButtonRelease,
+        endpoint,
+        endpoint,
+        Qt::LeftButton,
+        Qt::NoButton,
+        Qt::NoModifier);
+    QCoreApplication::sendEvent(&stageView, &press);
+    QCoreApplication::sendEvent(&stageView, &move);
+    QCoreApplication::sendEvent(&stageView, &release);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        stageView.accessibleSelection().first
+            != stageView.accessibleSelection().second,
+        250);
+    const auto stageText = stageView.accessibleText();
+    const auto stageSelection = stageView.accessibleSelection();
+
+    bool refreshCheckpointInstalled = false;
+    runtime.refreshHandler =
+        [&](const kodosi::TerminalSubscription& subscription) {
+            refreshCheckpointInstalled =
+                registry.installSemanticCheckpoint({
+                    subscription,
+                    1,
+                    5,
+                    12,
+                    checkpointFor(output, 12, 5),
+                });
+        };
+    QVERIFY(controller.bind(&focusView, QStringLiteral("shared")));
+    QCOMPARE(runtime.refreshedSubscriptions.size(), 1);
+    const auto focusSubscription = runtime.refreshedSubscriptions.constFirst();
+    QCOMPARE(stageSubscription.sessionId, focusSubscription.sessionId);
+    QCOMPARE(stageSubscription.subscriptionId, focusSubscription.subscriptionId);
+    QCOMPARE(stageSubscription.generation, focusSubscription.generation);
+    QVERIFY(refreshCheckpointInstalled);
+    QCoreApplication::processEvents();
+
+    QVERIFY(stageView.terminalReady());
+    QVERIFY(focusView.terminalReady());
+    QCOMPARE(stageView.accessibleText(), stageText);
+    QCOMPARE(stageView.accessibleSelection(), stageSelection);
+    QVERIFY(focusView.accessibleText().contains(QStringLiteral("row-19")));
+
+    registry.receiveControl({
+        stageSubscription,
+        QByteArrayLiteral(
+            R"({"type":"term.notification","sessionId":"shared","title":"Stage","body":"stage-only"})"),
+    });
+    QCoreApplication::processEvents();
+    QCOMPARE(stageNotifications.size(), 1);
+    QCOMPARE(focusNotifications.size(), 0);
+    QCOMPARE(stageNotifications.constFirst().at(1).toString(), QStringLiteral("stage-only"));
+
+    controller.detach(&focusView);
+    QCOMPARE(runtime.disconnectedSubscriptions.size(), 0);
+    QVERIFY(!focusView.terminalReady());
+    QVERIFY(stageView.terminalReady());
+    QCOMPARE(stageView.accessibleText(), stageText);
+    QCOMPARE(stageView.accessibleSelection(), stageSelection);
+
+    const auto stageFrameCount = stageFrames.count();
+    registry.receiveData({
+        stageSubscription,
+        1,
+        QByteArrayLiteral(" live"),
+    });
+    registry.receiveControl({
+        stageSubscription,
+        QByteArrayLiteral(
+            R"({"type":"term.notification","sessionId":"shared","title":"Focus","body":"focus-only"})"),
+    });
+    QCoreApplication::processEvents();
+
+    QVERIFY(stageView.terminalReady());
+    QVERIFY(stageFrames.count() > stageFrameCount);
+    QCOMPARE(stageNotifications.size(), 2);
+    QCOMPARE(stageNotifications.constLast().at(1).toString(), QStringLiteral("focus-only"));
+
+    controller.detach(&stageView);
+    QCOMPARE(runtime.disconnectedSubscriptions.size(), 1);
+    QCOMPARE(
+        runtime.disconnectedSubscriptions.constFirst().subscriptionId,
+        stageSubscription.subscriptionId);
+}
+
+void TerminalKernelTest::surfaceControllerRetriesFailedSeedRefresh()
+{
+    kodosi::TerminalSessionRegistry registry;
+    FakeRuntimeBridge runtime(registry);
+    kodosi::SessionCatalogModel sessions;
+    kodosi::TerminalSurfaceController controller(registry, runtime, sessions);
+    kodosi::TerminalView firstView;
+    kodosi::TerminalView secondView;
+    firstView.setWidth(400);
+    firstView.setHeight(160);
+    secondView.setWidth(400);
+    secondView.setHeight(160);
+
+    sessions.ingestAuthEvent(QByteArrayLiteral(
+        R"({"type":"auth.ready","userId":"user","accountEpoch":1})"));
+    sessions.ingestSessionEvent(QByteArrayLiteral(
+        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.list","sessions":[{"kind":"local","id":"shared","incarnationId":"inc-shared","name":"Shared","project":"/repo","mode":"normal","status":"active","recovery":"live","scope":"justMe","access":"inject"}]})"));
+
+    QVERIFY(controller.bind(&firstView, QStringLiteral("shared")));
+    QCOMPARE(runtime.connectedSubscriptions.size(), 1);
+    const auto subscription = runtime.connectedSubscriptions.constFirst();
+    makeTerminalReady(registry, subscription);
+    QVERIFY(firstView.terminalReady());
+
+    runtime.refreshFailures = 1;
+    QVERIFY(controller.bind(&secondView, QStringLiteral("shared")));
+    QCOMPARE(runtime.refreshCount, 1);
+    QVERIFY(firstView.terminalReady());
+    QVERIFY(!secondView.terminalReady());
+
+    bool refreshCheckpointInstalled = false;
+    runtime.refreshHandler =
+        [&](const kodosi::TerminalSubscription& refreshed) {
+            refreshCheckpointInstalled =
+                registry.installSemanticCheckpoint({
+                    refreshed,
+                    1,
+                    24,
+                    80,
+                    checkpointFor(QByteArrayLiteral("retry"), 80, 24),
+                });
+        };
+    QVERIFY(controller.retry(&secondView, QStringLiteral("shared")));
+    QCOMPARE(runtime.refreshCount, 2);
+    QVERIFY(refreshCheckpointInstalled);
+    QCoreApplication::processEvents();
+
+    QVERIFY(firstView.terminalReady());
+    QVERIFY(secondView.terminalReady());
+    QVERIFY(secondView.accessibleText().contains(QStringLiteral("retry")));
+}
+
+void TerminalKernelTest::surfaceControllerTimesOutAcceptedSeedRefresh()
+{
+    kodosi::TerminalSessionRegistry registry;
+    FakeRuntimeBridge runtime(registry);
+    kodosi::SessionCatalogModel sessions;
+    kodosi::TerminalSurfaceController controller(
+        registry,
+        runtime,
+        sessions,
+        50);
+    kodosi::TerminalView firstView;
+    kodosi::TerminalView secondView;
+    firstView.setWidth(400);
+    firstView.setHeight(160);
+    secondView.setWidth(400);
+    secondView.setHeight(160);
+    QSignalSpy rejected(
+        &controller,
+        &kodosi::TerminalSurfaceController::attachmentRejected);
+
+    sessions.ingestAuthEvent(QByteArrayLiteral(
+        R"({"type":"auth.ready","userId":"user","accountEpoch":1})"));
+    sessions.ingestSessionEvent(QByteArrayLiteral(
+        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.list","sessions":[{"kind":"local","id":"shared","incarnationId":"inc-shared","name":"Shared","project":"/repo","mode":"normal","status":"active","recovery":"live","scope":"justMe","access":"inject"}]})"));
+
+    QVERIFY(controller.bind(&firstView, QStringLiteral("shared")));
+    const auto subscription = runtime.connectedSubscriptions.constFirst();
+    makeTerminalReady(registry, subscription);
+    QVERIFY(firstView.terminalReady());
+
+    QVERIFY(controller.bind(&secondView, QStringLiteral("shared")));
+    QCOMPARE(runtime.refreshCount, 1);
+    QVERIFY(firstView.terminalReady());
+    QVERIFY(!secondView.terminalReady());
+    QTRY_COMPARE_WITH_TIMEOUT(rejected.count(), 1, 250);
+    QCOMPARE(
+        rejected.constFirst().at(0).value<kodosi::TerminalView*>(),
+        &secondView);
+    QVERIFY(firstView.terminalReady());
+    QVERIFY(!secondView.terminalReady());
+
+    bool refreshCheckpointInstalled = false;
+    runtime.refreshHandler =
+        [&](const kodosi::TerminalSubscription& refreshed) {
+            refreshCheckpointInstalled =
+                registry.installSemanticCheckpoint({
+                    refreshed,
+                    3,
+                    24,
+                    80,
+                    checkpointFor(QByteArrayLiteral("retry"), 80, 24),
+                });
+        };
+    QVERIFY(controller.retry(&secondView, QStringLiteral("shared")));
+    QCOMPARE(runtime.refreshCount, 2);
+    QVERIFY(refreshCheckpointInstalled);
+    QCoreApplication::processEvents();
+
+    QVERIFY(firstView.terminalReady());
+    QVERIFY(secondView.terminalReady());
+    QVERIFY(secondView.accessibleText().contains(QStringLiteral("retry")));
+}
+
+void TerminalKernelTest::surfaceControllerScopesAttachmentOutcomes()
+{
+    kodosi::TerminalSessionRegistry registry;
+    FakeRuntimeBridge runtime(registry);
+    kodosi::SessionCatalogModel sessions;
+    kodosi::TerminalSurfaceController controller(registry, runtime, sessions);
+    kodosi::TerminalView firstView;
+    kodosi::TerminalView secondView;
+    QString firstState = QStringLiteral("healthy");
+    QString secondState = QStringLiteral("connecting");
+
+    connect(
+        &controller,
+        &kodosi::TerminalSurfaceController::attachmentRejected,
+        this,
+        [&](kodosi::TerminalView* surface, const QString&, const QString& reason) {
+            if (surface == &firstView) {
+                firstState = reason;
+            } else if (surface == &secondView) {
+                secondState = reason;
+            }
+        });
+    connect(
+        &controller,
+        &kodosi::TerminalSurfaceController::attachmentReady,
+        this,
+        [&](kodosi::TerminalView* surface, const QString&) {
+            if (surface == &firstView) {
+                firstState = QStringLiteral("ready");
+            } else if (surface == &secondView) {
+                secondState = QStringLiteral("ready");
+            }
+        });
+
+    sessions.ingestAuthEvent(QByteArrayLiteral(
+        R"({"type":"auth.ready","userId":"user","accountEpoch":1})"));
+    sessions.ingestSessionEvent(QByteArrayLiteral(
+        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.list","sessions":[{"kind":"local","id":"shared","incarnationId":"inc-shared","name":"Shared","project":"/repo","mode":"normal","status":"active","recovery":"live","scope":"justMe","access":"inject"}]})"));
+
+    QVERIFY(controller.bind(&firstView, QStringLiteral("shared")));
+    const auto subscription = runtime.connectedSubscriptions.constFirst();
+    makeTerminalReady(registry, subscription);
+    QCOMPARE(firstState, QStringLiteral("ready"));
+
+    firstState = QStringLiteral("healthy");
+    runtime.refreshFailures = 1;
+    QVERIFY(controller.bind(&secondView, QStringLiteral("shared")));
+    QCOMPARE(firstState, QStringLiteral("healthy"));
+    QCOMPARE(
+        secondState,
+        QStringLiteral("The runtime rejected the terminal attachment."));
+    QVERIFY(firstView.terminalReady());
+    QVERIFY(!secondView.terminalReady());
+}
+
+void TerminalKernelTest::registryRetiresAbandonedSeedCapacity()
+{
+    kodosi::TerminalSessionRegistry registry;
+    const kodosi::TerminalSubscription subscription {
+        QStringLiteral("seed-capacity"),
+        QStringLiteral("seed-capacity-subscription"),
+        32,
+    };
+    const kodosi::TerminalSurfaceIdentity primary {
+        .subscription = subscription,
+        .surfaceGeneration = 1,
+    };
+    const auto primaryRegistration =
+        registry.registerSurface(primary, {});
+    QVERIFY(primaryRegistration.has_value());
+    QVERIFY(primaryRegistration->requiresConnection);
+    QVERIFY(registry.installSemanticCheckpoint({
+        subscription,
+        1,
+        24,
+        80,
+        checkpointFor(QByteArrayLiteral("ready"), 80, 24),
+    }));
+
+    for (std::uint64_t generation = 2; generation < 72; ++generation) {
+        const kodosi::TerminalSurfaceIdentity secondary {
+            .subscription = subscription,
+            .surfaceGeneration = generation,
+        };
+        const auto registration =
+            registry.registerSurface(secondary, {});
+        QVERIFY(registration.has_value());
+        QVERIFY(registration->requiresRefresh);
+        QVERIFY(!registry.unregisterSurface(secondary));
+    }
+}
+
+void TerminalKernelTest::registryRoutesMultiSurfaceControlExactly()
+{
+    const kodosi::TerminalSubscription subscription {
+        QStringLiteral("shared-registry"),
+        QStringLiteral("shared-subscription"),
+        31,
+    };
+    const kodosi::TerminalSurfaceIdentity first {
+        .subscription = subscription,
+        .surfaceGeneration = 41,
+    };
+    const kodosi::TerminalSurfaceIdentity second {
+        .subscription = subscription,
+        .surfaceGeneration = 42,
+    };
+    int firstFrames = 0;
+    int secondFrames = 0;
+    int firstResizeOutcomes = 0;
+    int secondResizeOutcomes = 0;
+    kodosi::TerminalSessionRegistry registry;
+    const auto firstRegistration = registry.registerSurface(
+        first,
+        {
+            .frameChanged = [&](auto) { ++firstFrames; },
+            .resizeCompleted = [&](auto) { ++firstResizeOutcomes; },
+        });
+    QVERIFY(firstRegistration);
+    QVERIFY(firstRegistration->requiresConnection);
+    const auto secondRegistration = registry.registerSurface(
+        second,
+        {
+            .frameChanged = [&](auto) { ++secondFrames; },
+            .resizeCompleted = [&](auto) { ++secondResizeOutcomes; },
+        });
+    QVERIFY(secondRegistration);
+    QVERIFY(!secondRegistration->requiresConnection);
+    QVERIFY(!secondRegistration->requiresRefresh);
+    QVERIFY(!registry.registerSurface(
+        {
+            .subscription = {
+                QStringLiteral("shared-registry"),
+                QStringLiteral("replacement-subscription"),
+                32,
+            },
+            .surfaceGeneration = 43,
+        },
+        {}));
+
+    QVERIFY(registry.installSemanticCheckpoint({
+        subscription,
+        1,
+        3,
+        24,
+        checkpointFor(QByteArrayLiteral("shared"), 24, 3),
+    }));
+    QCOMPARE(firstFrames, 1);
+    QCOMPARE(secondFrames, 1);
+
+    registry.receiveControl({
+        subscription,
+        QByteArrayLiteral(
+            R"({"type":"term.resizeApplied","sessionId":"shared-registry","requestId":"resize-second","expectedRuntimeIncarnationId":"incarnation","subscriptionId":"shared-subscription","subscriptionGeneration":31,"surfaceGeneration":42,"cols":24,"rows":3,"widthPixels":216,"heightPixels":54,"cellWidthPixels":9,"cellHeightPixels":18})"),
+    });
+    QCOMPARE(firstResizeOutcomes, 0);
+    QCOMPARE(secondResizeOutcomes, 1);
+
+    QVERIFY(!registry.unregisterSurface(first));
+    registry.receiveData({
+        subscription,
+        1,
+        QByteArrayLiteral(" active"),
+    });
+    QCOMPARE(firstFrames, 1);
+    QCOMPARE(secondFrames, 2);
+    QVERIFY(registry.unregisterSurface(second));
 }
 
 void TerminalKernelTest::registryConsumesNormativeControlWireWithoutLosingU64Precision()

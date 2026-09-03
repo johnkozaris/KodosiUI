@@ -19,7 +19,7 @@ KPopover {
     property bool authBusy: false
 
     parent: Overlay.overlay
-    width: Math.min(320, parent ? parent.width - 24 : 320)
+    width: Math.min(240, parent ? parent.width - 24 : 240)
     height: contentColumn.implicitHeight
     modal: true
     dim: false
@@ -47,7 +47,7 @@ KPopover {
 
     onOpened: {
         reposition()
-        closeButton.forceActiveFocus(Qt.PopupFocusReason)
+        settingsButton.forceActiveFocus(Qt.PopupFocusReason)
     }
 
     contentItem: ColumnLayout {
@@ -60,62 +60,8 @@ KPopover {
             : qsTr("Appearance and app controls")
         spacing: 0
 
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 58
-            color: KodosiTheme.surfaceElevated
-            topLeftRadius: KodosiTheme.radiusLarge
-            topRightRadius: KodosiTheme.radiusLarge
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: KodosiTheme.spacing5
-                anchors.rightMargin: KodosiTheme.spacing3
-                spacing: KodosiTheme.spacing3
-
-                KIcon {
-                    Layout.preferredWidth: 22
-                    Layout.preferredHeight: 22
-                    name: "account"
-                    color: KodosiTheme.accent
-                }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 1
-
-                    PlainLabel {
-                        text: root.signedIn
-                            ? qsTr("Your Kodosi")
-                            : qsTr("Kodosi controls")
-                        color: KodosiTheme.textPrimary
-                        font.pixelSize: 13
-                        font.weight: Font.DemiBold
-                    }
-
-                    PlainLabel {
-                        text: root.signedIn
-                            ? qsTr("Account, appearance, and app controls")
-                            : qsTr("Appearance and app controls")
-                        color: KodosiTheme.textSecondary
-                        font.pixelSize: 9
-                        elide: Text.ElideRight
-                    }
-                }
-
-                KIconButton {
-                    id: closeButton
-                    objectName: "panel.utility.close"
-                    Accessible.id: objectName
-                    glyph: "close"
-                    size: 28
-                    Accessible.name: qsTr("Close app controls")
-                    onClicked: root.close()
-                }
-            }
-        }
-
         KButton {
+            id: settingsButton
             objectName: "panel.utility.settings"
             Accessible.id: objectName
             Layout.fillWidth: true
@@ -125,8 +71,6 @@ KPopover {
             variant: "quiet"
             iconName: "settings"
             text: qsTr("Settings")
-            secondaryText: qsTr("Preferences, trust, and supervision")
-            secondaryMaximumWidth: 208
             contentLeftAligned: true
             Accessible.name: qsTr("Open settings")
             onClicked: {
@@ -144,8 +88,6 @@ KPopover {
             variant: "quiet"
             iconName: "command"
             text: qsTr("Keyboard shortcuts")
-            secondaryText: qsTr("Desktop commands and navigation")
-            secondaryMaximumWidth: 208
             contentLeftAligned: true
             Accessible.name: qsTr("Open keyboard shortcuts")
             onClicked: {
@@ -171,13 +113,6 @@ KPopover {
             ButtonGroup {
                 id: appearanceGroup
                 exclusive: true
-            }
-
-            PlainLabel {
-                text: qsTr("Appearance")
-                color: KodosiTheme.textSecondary
-                font.pixelSize: 10
-                font.weight: Font.DemiBold
             }
 
             KSegmentedBar {
@@ -244,16 +179,6 @@ KPopover {
 
             PlainLabel {
                 Layout.fillWidth: true
-                text: Models.Appearance.preference
-                    === Models.Appearance.System
-                    ? qsTr("Follows the desktop appearance.")
-                    : qsTr("Overrides the desktop appearance.")
-                color: KodosiTheme.textTertiary
-                font.pixelSize: 9
-            }
-
-            PlainLabel {
-                Layout.fillWidth: true
                 visible: Models.Appearance.settingsError.length > 0
                 text: Models.Appearance.settingsError
                 color: KodosiTheme.danger
@@ -283,10 +208,6 @@ KPopover {
                 : root.authBusy
                   ? qsTr("Signing in")
                   : qsTr("Sign in")
-            secondaryText: root.signedIn
-                ? qsTr("Local agents keep running")
-                : qsTr("Connect your Kodosi account")
-            secondaryMaximumWidth: 208
             contentLeftAligned: true
             enabled: !root.authBusy
             Accessible.name: text

@@ -33,7 +33,7 @@ SpinBox {
             ? KodosiTheme.surfaceSelected
             : root.up.hovered
               ? KodosiTheme.surfaceElevated
-              : "transparent"
+              : KodosiTheme.surface
         topRightRadius: KodosiTheme.radiusSmall
 
         KIcon {
@@ -54,7 +54,7 @@ SpinBox {
             ? KodosiTheme.surfaceSelected
             : root.down.hovered
               ? KodosiTheme.surfaceElevated
-              : "transparent"
+              : KodosiTheme.surface
         bottomRightRadius: KodosiTheme.radiusSmall
 
         KIcon {
@@ -69,10 +69,6 @@ SpinBox {
     background: Rectangle {
         color: KodosiTheme.input
         radius: KodosiTheme.radiusSmall
-        border.width: 1
-        border.color: root.activeFocus
-            ? KodosiTheme.focusRing
-            : KodosiTheme.controlBorder
     }
 
     Rectangle {

@@ -11,8 +11,6 @@ Menu {
         implicitWidth: 190
         color: KodosiTheme.surfaceRaised
         radius: KodosiTheme.radiusLarge
-        border.width: 1
-        border.color: KodosiTheme.seamStrong
 
         Rectangle {
             anchors.fill: parent

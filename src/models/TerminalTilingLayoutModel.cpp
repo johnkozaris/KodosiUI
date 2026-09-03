@@ -707,6 +707,9 @@ int TerminalTilingLayoutModel::adaptiveColumnCount(
     if (sessionCount <= 1 || width <= 0 || height <= 0) {
         return std::max(1, sessionCount);
     }
+    if (width < singleColumnBreakpoint) {
+        return 1;
+    }
     const auto minimumWidth = minimumTileWidth();
     const auto columnsThatFit = std::max(
         1,

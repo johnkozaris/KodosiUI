@@ -93,9 +93,9 @@ tree = json.load(sys.stdin)
 forbidden = {
     "app.header",
     "header.sidebar.toggle",
-    "header.attention",
-    "header.settings",
-    "header.account",
+    "header.utility.menu",
+    "header.tab.my-agents",
+    "header.tab.missions",
     "sidebar.sessions",
     "stage",
 }
@@ -115,6 +115,28 @@ leaked = sorted(ids & forbidden)
 if leaked:
     raise SystemExit("underlying shell leaked into modal tree: " + ", ".join(leaked))
 '
+}
+
+assert_tree_id() {
+    python3 -c '
+import json, sys
+expected = sys.argv[1]
+tree = json.load(sys.stdin)
+found = False
+def visit(value):
+    global found
+    if isinstance(value, dict):
+        if value.get("id") == expected:
+            found = True
+        for child in value.values():
+            visit(child)
+    elif isinstance(value, list):
+        for child in value:
+            visit(child)
+visit(tree)
+if not found:
+    raise SystemExit("accessible tree is missing " + expected)
+' "$1"
 }
 
 app_handle_for_pid() {
@@ -144,11 +166,14 @@ start_synthetic_app() {
         shift 2
     fi
     stop_current_app
-    XDG_CONFIG_HOME="$config_dir" \
-        KODOSI_DATA_ROOT="$data_root" \
-        KODOSI_PRODUCTION_DATA_ROOT="$production_data_root" \
-        QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
-        "$app" "$@" >"$artifact_dir/$stem.log" 2>&1 &
+    (
+        exec env \
+            XDG_CONFIG_HOME="$config_dir" \
+            KODOSI_DATA_ROOT="$data_root" \
+            KODOSI_PRODUCTION_DATA_ROOT="$production_data_root" \
+            QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
+            "$app" "$@"
+    ) >"$artifact_dir/$stem.log" 2>&1 &
     app_pid=$!
 
     local ready=false
@@ -159,7 +184,26 @@ start_synthetic_app() {
                     <"$artifact_dir/$stem-apps.json" || true
             )
         fi
-        if [[ -n "$app_handle" ]] \
+        if [[ -n "$app_handle" \
+            && "$readiness_id" == QApplication.window.main ]] \
+            && python3 -c '
+import json, sys
+handle = sys.argv[1]
+apps = json.load(sys.stdin)["applications"]
+matches = [app for app in apps if app.get("handle") == handle]
+raise SystemExit(
+    0 if len(matches) == 1
+    and any(
+        window.get("id") == "QApplication.window.main"
+        and "showing" in window.get("states", [])
+        for window in matches[0].get("windows", [])
+    )
+    else 1
+)
+' "$app_handle" <"$artifact_dir/$stem-apps.json"; then
+            ready=true
+            break
+        elif [[ -n "$app_handle" ]] \
             && "$probe" find --app "$app_handle" --id "$readiness_id" \
             >"$artifact_dir/$stem-ready.json" 2>/dev/null; then
             if python3 -c '
@@ -188,6 +232,59 @@ parity_only=${KODOSI_UI_PROBE_AGENT_PARITY_ONLY:-0}
 if [[ "$parity_only" != 0 && "$parity_only" != 1 ]]; then
     echo "KODOSI_UI_PROBE_AGENT_PARITY_ONLY must be 0 or 1." >&2
     exit 2
+fi
+missions_only=${KODOSI_UI_PROBE_MISSIONS_ONLY:-0}
+if [[ "$missions_only" != 0 && "$missions_only" != 1 ]]; then
+    echo "KODOSI_UI_PROBE_MISSIONS_ONLY must be 0 or 1." >&2
+    exit 2
+fi
+if [[ "$missions_only" == 1 ]]; then
+    parity_only=1
+
+    start_synthetic_app \
+        missions-real \
+        --ready-id QApplication.window.main
+    "$probe" find --app "$app_handle" --id header.tab.missions \
+        >"$artifact_dir/missions-real-tab.json"
+    missions_real_tab_handle=$(
+        json_value matches.0.handle \
+            <"$artifact_dir/missions-real-tab.json"
+    )
+    "$probe" click "$missions_real_tab_handle" \
+        >"$artifact_dir/missions-real-tab-click.json"
+    "$probe" wait --app "$app_handle" id=surface.missions \
+        --state showing --timeout-ms 5000 \
+        >"$artifact_dir/missions-real-surface.json"
+    if "$probe" wait --app "$app_handle" id=missions.refresh \
+        --state showing --timeout-ms 1000 \
+        >"$artifact_dir/missions-real-directory.json" 2>/dev/null; then
+        "$probe" tree --app "$app_handle" --depth 12 \
+            >"$artifact_dir/missions-real-directory-tree.json"
+        python3 -c '
+import json, sys
+tree = json.load(sys.stdin)
+ids = set()
+def visit(value):
+    if isinstance(value, dict):
+        item_id = value.get("id")
+        if isinstance(item_id, str):
+            ids.add(item_id)
+        for child in value.values():
+            visit(child)
+    elif isinstance(value, list):
+        for child in value:
+            visit(child)
+visit(tree)
+if not any(item.startswith("missions.item.") for item in ids):
+    if "missions.directory.empty" not in ids:
+        raise SystemExit("real Mission directory has no bounded state")
+' <"$artifact_dir/missions-real-directory-tree.json"
+    else
+        "$probe" wait --app "$app_handle" id=auth.gate.missions \
+            --state showing --timeout-ms 5000 \
+            >"$artifact_dir/missions-real-auth-gate.json"
+    fi
+    stop_current_app
 fi
 
 if [[ "$parity_only" != 1 ]]; then
@@ -236,38 +333,15 @@ test "$(
     json_value app.processId <"$artifact_dir/tree.json"
 )" = "$app_pid"
 
-"$probe" find --app "$app_handle" --id header.attention \
-    >"$artifact_dir/attention-button.json"
-attention_handle=$(
-    json_value matches.0.handle <"$artifact_dir/attention-button.json"
+"$probe" find --app "$app_handle" --id header.utility.menu \
+    >"$artifact_dir/utility-button.json"
+utility_handle=$(
+    json_value matches.0.handle <"$artifact_dir/utility-button.json"
 )
-"$probe" click "$attention_handle" >"$artifact_dir/attention-click.json"
-"$probe" wait --app "$app_handle" id=panel.attention \
-    --state showing --timeout-ms 5000 >"$artifact_dir/attention-panel.json"
-"$probe" tree --app "$app_handle" --depth 5 \
-    >"$artifact_dir/attention-tree.json"
-assert_shell_hidden_by_modal <"$artifact_dir/attention-tree.json"
-if [[ "$attention_mode" == populated ]]; then
-    "$probe" wait --app "$app_handle" id=panel.attention.list \
-        --state showing --timeout-ms 5000 \
-        >"$artifact_dir/attention-list.json"
-    "$probe" wait --app "$app_handle" id=sidebar.attention.rail \
-        --state showing --timeout-ms 5000 \
-        >"$artifact_dir/attention-rail.json"
-else
-    "$probe" wait --app "$app_handle" id=panel.attention.empty \
-        --state showing --timeout-ms 5000 \
-        >"$artifact_dir/attention-empty.json"
-fi
-"$probe" find --app "$app_handle" --id panel.attention.close \
-    >"$artifact_dir/attention-close.json"
-attention_close_handle=$(
-    json_value matches.0.handle <"$artifact_dir/attention-close.json"
-)
-"$probe" click "$attention_close_handle" \
-    >"$artifact_dir/attention-close-click.json"
-
-"$probe" find --app "$app_handle" --id header.settings \
+"$probe" click "$utility_handle" >"$artifact_dir/utility-click.json"
+"$probe" wait --app "$app_handle" id=panel.utility.content \
+    --state showing --timeout-ms 5000 >"$artifact_dir/utility-panel.json"
+"$probe" find --app "$app_handle" --id panel.utility.settings \
     >"$artifact_dir/settings-button.json"
 settings_handle=$(
     json_value matches.0.handle <"$artifact_dir/settings-button.json"
@@ -491,7 +565,30 @@ create_cancel_handle=$(
     --state showing --timeout-ms 5000 \
     >"$artifact_dir/sidebar-expanded.json"
 
-"$probe" find --app "$app_handle" --id header.tab.devices \
+"$probe" click "$utility_handle" >"$artifact_dir/devices-utility-click.json"
+"$probe" wait --app "$app_handle" id=panel.utility.content \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/devices-utility-panel.json"
+"$probe" find --app "$app_handle" --id panel.utility.settings \
+    >"$artifact_dir/devices-settings-button.json"
+devices_settings_handle=$(
+    json_value matches.0.handle \
+        <"$artifact_dir/devices-settings-button.json"
+)
+"$probe" click "$devices_settings_handle" \
+    >"$artifact_dir/devices-settings-click.json"
+"$probe" wait --app "$app_handle" id=panel.settings \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/devices-settings-panel.json"
+"$probe" find --app "$app_handle" --id panel.settings.tab.account \
+    >"$artifact_dir/devices-account-tab.json"
+devices_account_handle=$(
+    json_value matches.0.handle <"$artifact_dir/devices-account-tab.json"
+)
+"$probe" click "$devices_account_handle" \
+    >"$artifact_dir/devices-account-click.json"
+"$probe" find --app "$app_handle" \
+    --id panel.settings.account.openDevices \
     >"$artifact_dir/devices-button.json"
 devices_handle=$(
     json_value matches.0.handle <"$artifact_dir/devices-button.json"
@@ -508,6 +605,77 @@ missions_handle=$(
 "$probe" click "$missions_handle" >"$artifact_dir/missions-click.json"
 "$probe" wait --app "$app_handle" id=surface.missions \
     --state showing --timeout-ms 5000 >"$artifact_dir/missions-surface.json"
+if "$probe" wait --app "$app_handle" id=missions.refresh \
+    --state showing --timeout-ms 1000 \
+    >"$artifact_dir/missions-directory-refresh.json" 2>/dev/null; then
+    "$probe" tree --app "$app_handle" --depth 9 \
+        >"$artifact_dir/missions-directory-tree.json"
+    first_mission_id=$(
+        python3 -c '
+import json, sys
+tree = json.load(sys.stdin)
+matches = []
+def visit(value):
+    if isinstance(value, dict):
+        item_id = value.get("id")
+        if (
+            isinstance(item_id, str)
+            and item_id.startswith("missions.item.")
+        ):
+            matches.append(item_id)
+        for child in value.values():
+            visit(child)
+    elif isinstance(value, list):
+        for child in value:
+            visit(child)
+visit(tree)
+print(sorted(set(matches))[0] if matches else "")
+' <"$artifact_dir/missions-directory-tree.json"
+    )
+    if [[ -n "$first_mission_id" ]]; then
+        "$probe" find --app "$app_handle" --id "$first_mission_id" \
+            >"$artifact_dir/missions-real-item.json"
+        mission_item_handle=$(
+            json_value matches.0.handle \
+                <"$artifact_dir/missions-real-item.json"
+        )
+        "$probe" click "$mission_item_handle" \
+            >"$artifact_dir/missions-real-open.json"
+        "$probe" wait --app "$app_handle" id=missions.detail \
+            --state showing --timeout-ms 5000 \
+            >"$artifact_dir/missions-real-detail.json"
+    else
+        python3 -c '
+import json, sys
+tree = json.load(sys.stdin)
+ids = set()
+def visit(value):
+    if isinstance(value, dict):
+        item_id = value.get("id")
+        if isinstance(item_id, str):
+            ids.add(item_id)
+        for child in value.values():
+            visit(child)
+    elif isinstance(value, list):
+        for child in value:
+            visit(child)
+visit(tree)
+expected = {
+    "missions.directory.empty",
+    "missions.directory.loading",
+    "missions.directory.failure",
+    "missions.directory.recovery",
+    "missions.directory.state",
+}
+if not ids.intersection(expected):
+    raise SystemExit("Mission directory exposed no bounded empty/loading/recovery/failure state")
+' <"$artifact_dir/missions-directory-tree.json"
+    fi
+else
+    "$probe" wait --app "$app_handle" id=auth.gate.missions \
+        --state showing --timeout-ms 5000 \
+        >"$artifact_dir/missions-auth-gate.json"
+fi
 
 "$probe" find --app "$app_handle" --id header.tab.my-agents \
     >"$artifact_dir/agents-button.json"
@@ -541,6 +709,75 @@ fi
 fi
 
 stop_current_app
+
+start_synthetic_app \
+    missions-pending-compact \
+    --ready-id QApplication.window.main \
+    --ui-probe-missions-pending \
+    --window-size 820x560
+"$probe" tree --app "$app_handle" --depth 14 \
+    >"$artifact_dir/missions-pending-compact.json"
+assert_tree_id missions.chat \
+    <"$artifact_dir/missions-pending-compact.json"
+
+start_synthetic_app \
+    missions-unknown-wide \
+    --ready-id QApplication.window.main \
+    --ui-probe-missions-unknown \
+    --window-size 1240x800
+"$probe" tree --app "$app_handle" --depth 14 \
+    >"$artifact_dir/missions-unknown-wide.json"
+assert_tree_id missions.chat \
+    <"$artifact_dir/missions-unknown-wide.json"
+
+start_synthetic_app \
+    missions-focus-compact \
+    --ready-id QApplication.window.main \
+    --ui-probe-missions-focus \
+    --window-size 820x560
+"$probe" tree --app "$app_handle" --depth 14 \
+    >"$artifact_dir/missions-focus-compact.json"
+assert_tree_id missions.chat \
+    <"$artifact_dir/missions-focus-compact.json"
+assert_tree_id missions.detail.people \
+    <"$artifact_dir/missions-focus-compact.json"
+"$probe" find --app "$app_handle" --id missions.detail.people \
+    >"$artifact_dir/missions-focus-compact-people.json"
+focus_people_handle=$(
+    json_value matches.0.handle \
+        <"$artifact_dir/missions-focus-compact-people.json"
+)
+"$probe" click "$focus_people_handle" \
+    >"$artifact_dir/missions-focus-compact-people-click.json"
+"$probe" wait --app "$app_handle" id=missions.focus.actions \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/missions-focus-compact-actions.json"
+
+start_synthetic_app \
+    missions-focus-wide \
+    --ready-id QApplication.window.main \
+    --ui-probe-missions-focus \
+    --window-size 1240x800
+"$probe" tree --app "$app_handle" --depth 14 \
+    >"$artifact_dir/missions-focus-wide.json"
+assert_tree_id missions.chat \
+    <"$artifact_dir/missions-focus-wide.json"
+"$probe" find --app "$app_handle" --id missions.detail.people \
+    >"$artifact_dir/missions-focus-wide-people.json"
+focus_people_handle=$(
+    json_value matches.0.handle \
+        <"$artifact_dir/missions-focus-wide-people.json"
+)
+"$probe" click "$focus_people_handle" \
+    >"$artifact_dir/missions-focus-wide-people-click.json"
+"$probe" wait --app "$app_handle" id=missions.focus.actions \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/missions-focus-wide-actions.json"
+
+if [[ "$missions_only" == 1 ]]; then
+    echo "kodosi-ui-probe Mission real/synthetic smoke passed (PID $app_pid)"
+    exit 0
+fi
 
 start_synthetic_app \
     resume-agent-work \
@@ -619,10 +856,10 @@ start_synthetic_app \
 python3 -c '
 import json, sys
 bounds = json.load(sys.stdin)["element"]["bounds"]
-if not 1160 <= bounds["width"] <= 1240:
-    raise SystemExit("wide Project Intelligence does not use the window width")
-if not 720 <= bounds["height"] <= 800:
-    raise SystemExit("wide Project Intelligence does not use the window height")
+if not 1000 <= bounds["width"] <= 1080:
+    raise SystemExit("wide Project Intelligence is not compact")
+if not 560 <= bounds["height"] <= 680:
+    raise SystemExit("wide Project Intelligence is not compact")
 ' <"$artifact_dir/project-intel-wide-panel.json"
 "$probe" find --app "$app_handle" \
     --id panel.projectIntel.source.selected \
@@ -1395,7 +1632,7 @@ startup_retry_handle=$(
 )
 "$probe" click "$startup_retry_handle" \
     >"$artifact_dir/startup-failure-retry-click.json"
-"$probe" wait --app "$app_handle" id=header.settings \
+"$probe" wait --app "$app_handle" id=header.utility.menu \
     --state showing --timeout-ms 30000 \
     >"$artifact_dir/startup-failure-ready.json"
 "$probe" wait --app "$app_handle" id=deepLink.status \
@@ -1549,7 +1786,35 @@ print(matches[0]["id"].removeprefix("sidebar.session."))
 )
 test -n "$ready_session_id"
 
-"$probe" find --app "$app_handle" --id header.tab.devices \
+"$probe" find --app "$app_handle" --id header.utility.menu \
+    >"$artifact_dir/ready-utility.json"
+ready_utility_handle=$(
+    json_value matches.0.handle <"$artifact_dir/ready-utility.json"
+)
+"$probe" click "$ready_utility_handle" \
+    >"$artifact_dir/ready-utility-click.json"
+"$probe" wait --app "$app_handle" id=panel.utility.content \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/ready-utility-panel.json"
+"$probe" find --app "$app_handle" --id panel.utility.settings \
+    >"$artifact_dir/ready-settings.json"
+ready_settings_handle=$(
+    json_value matches.0.handle <"$artifact_dir/ready-settings.json"
+)
+"$probe" click "$ready_settings_handle" \
+    >"$artifact_dir/ready-settings-click.json"
+"$probe" wait --app "$app_handle" id=panel.settings \
+    --state showing --timeout-ms 5000 \
+    >"$artifact_dir/ready-settings-panel.json"
+"$probe" find --app "$app_handle" --id panel.settings.tab.account \
+    >"$artifact_dir/ready-account-tab.json"
+ready_account_handle=$(
+    json_value matches.0.handle <"$artifact_dir/ready-account-tab.json"
+)
+"$probe" click "$ready_account_handle" \
+    >"$artifact_dir/ready-account-click.json"
+"$probe" find --app "$app_handle" \
+    --id panel.settings.account.openDevices \
     >"$artifact_dir/ready-devices-tab.json"
 ready_devices_handle=$(
     json_value matches.0.handle <"$artifact_dir/ready-devices-tab.json"

@@ -15,9 +15,7 @@ Control {
             width: 18
             height: 18
             radius: 9
-            color: "transparent"
-            border.width: 2
-            border.color: KodosiTheme.seamStrong
+            color: KodosiTheme.surface
         }
 
         Rectangle {

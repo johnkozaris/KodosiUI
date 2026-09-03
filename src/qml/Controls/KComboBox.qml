@@ -38,10 +38,6 @@ ComboBox {
             ? KodosiTheme.surfaceSelected
             : KodosiTheme.input
         radius: KodosiTheme.radiusSmall
-        border.width: 1
-        border.color: root.activeFocus
-            ? KodosiTheme.focusRing
-            : KodosiTheme.controlBorder
     }
 
     delegate: KMenuItem {
@@ -69,8 +65,6 @@ ComboBox {
         background: Rectangle {
             color: KodosiTheme.surfaceRaised
             radius: KodosiTheme.radiusLarge
-            border.width: 1
-            border.color: KodosiTheme.seamStrong
         }
     }
 }

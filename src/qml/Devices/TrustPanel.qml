@@ -10,8 +10,6 @@ Rectangle {
     implicitHeight: content.implicitHeight + 24
     radius: KodosiTheme.radiusSmall
     color: KodosiTheme.surface
-    border.width: 1
-    border.color: KodosiTheme.seam
 
     ColumnLayout {
         id: content

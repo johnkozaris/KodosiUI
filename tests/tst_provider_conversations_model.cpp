@@ -748,7 +748,9 @@ void ProviderConversationsModelTest::qmlContractKeepsAuthorityNative()
     QVERIFY(sidebar.open(QIODevice::ReadOnly));
     const auto sidebarQml = sidebar.readAll();
     QVERIFY(sidebarQml.contains(
-        "text: qsTr(\"Hidden sessions\")"));
+        "Accessible.name: qsTr(\"Hidden sessions\")"));
+    QVERIFY(sidebarQml.contains(
+        "objectName: \"sidebar.session.resumeAgentWork\""));
     QVERIFY(sidebarQml.contains(
         "onClicked: root.resumeAgentWorkRequested()"));
 }

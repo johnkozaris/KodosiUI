@@ -19,11 +19,5 @@ TextField {
     background: Rectangle {
         color: KodosiTheme.input
         radius: KodosiTheme.radiusSmall
-        border.width: 1
-        border.color: root.activeFocus
-            ? KodosiTheme.focusRing
-            : root.acceptableInput
-              ? KodosiTheme.controlBorder
-              : KodosiTheme.danger
     }
 }

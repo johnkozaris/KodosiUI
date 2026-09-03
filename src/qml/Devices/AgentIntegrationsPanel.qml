@@ -10,8 +10,6 @@ Rectangle {
     implicitHeight: content.implicitHeight + 24
     radius: KodosiTheme.radiusSmall
     color: KodosiTheme.surface
-    border.width: 1
-    border.color: KodosiTheme.seam
 
     function stateLabel(state) {
         if (state === Models.AgentGlobal.Loading)
@@ -173,13 +171,6 @@ Rectangle {
                     height: 25
                     radius: KodosiTheme.radiusSmall
                     color: KodosiTheme.surfaceElevated
-                    border.width: 1
-                    border.color: healthKind === "healthy"
-                        ? KodosiTheme.success
-                        : healthKind === "unreachable"
-                          || healthKind === "misconfigured"
-                          ? KodosiTheme.danger
-                          : KodosiTheme.seam
 
                     PlainLabel {
                         id: serverLabel

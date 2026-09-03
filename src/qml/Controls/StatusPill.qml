@@ -36,7 +36,5 @@ Control {
     background: Rectangle {
         radius: KodosiTheme.radiusSmall
         color: KodosiTheme.surfaceElevated
-        border.width: 1
-        border.color: KodosiTheme.seam
     }
 }

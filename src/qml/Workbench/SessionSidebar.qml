@@ -194,37 +194,51 @@ Item {
 
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: 104
+            Layout.preferredHeight: 52
 
-            ColumnLayout {
+            RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: KodosiTheme.spacing5
-                anchors.rightMargin: KodosiTheme.spacing5
-                anchors.topMargin: KodosiTheme.spacing5
-                anchors.bottomMargin: KodosiTheme.spacing4
+                anchors.rightMargin: KodosiTheme.spacing3
                 spacing: KodosiTheme.spacing2
 
-                KButton {
+                PlainLabel {
+                    Layout.fillWidth: true
+                    text: qsTr("Sessions")
+                    color: KodosiTheme.textPrimary
+                    font.pixelSize: 13
+                    font.weight: Font.DemiBold
+                }
+
+                KIconButton {
+                    objectName: "sidebar.session.hidden"
+                    Accessible.id: objectName
+                    visible: Models.SessionActions.hiddenSessions.count > 0
+                    glyph: "eye"
+                    Accessible.name: qsTr("Hidden sessions")
+                    onClicked: {
+                        root.hiddenOpen = !root.hiddenOpen
+                        if (root.hiddenOpen)
+                            Models.SessionActions.refreshHidden()
+                    }
+                }
+
+                KIconButton {
+                    objectName: "sidebar.session.resumeAgentWork"
+                    Accessible.id: objectName
+                    glyph: "history"
+                    Accessible.name: qsTr("Resume Agent Work")
+                    onClicked: root.resumeAgentWorkRequested()
+                }
+
+                KIconButton {
                     id: newSessionButton
                     objectName: "sidebar.session.new"
                     Accessible.id: objectName
-                    Layout.fillWidth: true
-                    variant: "primary"
-                    iconName: "plus"
-                    text: qsTr("New Session")
+                    glyph: "plus"
                     Accessible.name: qsTr("Create session")
                     enabled: !Models.SessionActions.creating
                     onClicked: root.createOpen = !root.createOpen
-                }
-
-                KButton {
-                    objectName: "sidebar.session.resumeAgentWork"
-                    Accessible.id: objectName
-                    Layout.fillWidth: true
-                    iconName: "history"
-                    text: qsTr("Resume Agent Work")
-                    Accessible.name: text
-                    onClicked: root.resumeAgentWorkRequested()
                 }
             }
 
@@ -234,56 +248,6 @@ Item {
                 anchors.bottom: parent.bottom
                 height: 1
                 color: KodosiTheme.seam
-            }
-        }
-
-        AttentionRail {
-            Layout.fillWidth: true
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.leftMargin: KodosiTheme.spacing5
-            Layout.rightMargin: KodosiTheme.spacing4
-            Layout.topMargin: KodosiTheme.spacing3
-            spacing: KodosiTheme.spacing2
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 1
-                PlainLabel {
-                    text: qsTr("SESSIONS")
-                    color: KodosiTheme.textTertiary
-                    font.pixelSize: 9
-                    font.weight: Font.DemiBold
-                    font.letterSpacing: 1.1
-                }
-                PlainLabel {
-                    text: Models.Sessions.count === 1
-                        ? qsTr("1 active record")
-                        : qsTr("%1 active records").arg(Models.Sessions.count)
-                    color: KodosiTheme.textSecondary
-                    font.pixelSize: 10
-                }
-            }
-
-            KButton {
-                objectName: "sidebar.session.hidden"
-                Accessible.id: objectName
-                compact: true
-                variant: "quiet"
-                iconName: "eye"
-                text: qsTr("Hidden sessions")
-                Accessible.name: Models.SessionActions.hiddenSessions.count
-                    === 1
-                    ? qsTr("Hidden sessions, 1 session")
-                    : qsTr("Hidden sessions, %1 sessions").arg(
-                        Models.SessionActions.hiddenSessions.count)
-                onClicked: {
-                    root.hiddenOpen = !root.hiddenOpen
-                    if (root.hiddenOpen)
-                        Models.SessionActions.refreshHidden()
-                }
             }
         }
 
@@ -298,13 +262,6 @@ Item {
                 anchors.fill: parent
                 anchors.margins: 10
                 spacing: 6
-
-                PlainLabel {
-                    text: qsTr("Start a local agent")
-                    color: KodosiTheme.textPrimary
-                    font.pixelSize: 11
-                    font.weight: Font.DemiBold
-                }
 
                 KTextField {
                     id: createName
@@ -387,13 +344,7 @@ Item {
                     visible: root.desktopFileError.length > 0
                     Layout.fillWidth: true
                     implicitHeight: desktopFileErrorRow.implicitHeight + 12
-                    color: Qt.rgba(
-                        KodosiTheme.danger.r,
-                        KodosiTheme.danger.g,
-                        KodosiTheme.danger.b,
-                        0.08)
-                    border.width: 1
-                    border.color: KodosiTheme.danger
+                    color: KodosiTheme.surfaceRaised
                     radius: KodosiTheme.radiusSmall
 
                     RowLayout {
@@ -576,6 +527,9 @@ Item {
                 readonly property string sessionStatus: status
                 readonly property bool selected:
                     root.selectedSessionId === sessionId
+                readonly property bool needsAttention:
+                    Models.Attention.runningCount >= 0
+                    && Models.Attention.sessionNeedsAttention(sessionId)
 
                 objectName: "sidebar.session." + sessionId
                 Accessible.id: objectName
@@ -585,7 +539,7 @@ Item {
                 Accessible.selected: selected
                 x: KodosiTheme.spacing3
                 width: ListView.view.width - KodosiTheme.spacing3 * 2
-                height: 60
+                height: 46
                 leftPadding: KodosiTheme.spacing5
                 rightPadding: KodosiTheme.spacing4
                 onClicked: root.activateDelegate(sessionRow)
@@ -605,7 +559,9 @@ Item {
                         Layout.preferredWidth: 7
                         Layout.preferredHeight: 7
                         radius: 4
-                        color: sessionRow.status === "active"
+                        color: sessionRow.needsAttention
+                            ? KodosiTheme.warning
+                            : sessionRow.status === "active"
                             ? KodosiTheme.success
                             : sessionRow.status === "blocked"
                               ? KodosiTheme.danger
@@ -614,13 +570,14 @@ Item {
                                 : KodosiTheme.warning
                     }
 
-                    ColumnLayout {
+                    Item {
                         Layout.fillWidth: true
-                        spacing: 2
 
                         PlainLabel {
                             visible: !sessionRow.renameOpen
-                            Layout.fillWidth: true
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
                             text: sessionRow.name
                             color: sessionRow.selected
                                 ? KodosiTheme.textPrimary
@@ -635,7 +592,7 @@ Item {
                                 + sessionRow.sessionId
                             Accessible.id: objectName
                             visible: sessionRow.renameOpen
-                            Layout.fillWidth: true
+                            anchors.fill: parent
                             text: sessionRow.renameText
                             onTextChanged: sessionRow.renameText = text
                             maximumLength: 128
@@ -643,26 +600,6 @@ Item {
                             onAccepted: sessionRow.commitRename()
                             Keys.onEscapePressed: sessionRow.renameOpen = false
                         }
-
-                        PlainLabel {
-                            Layout.fillWidth: true
-                            text: sessionRow.project
-                            color: KodosiTheme.textSecondary
-                            opacity: 0.72
-                            font.pixelSize: 10
-                            elide: Text.ElideMiddle
-                        }
-                    }
-
-                    PlainLabel {
-                        text: sessionRow.mode.substring(0, 1).toUpperCase()
-                        color: sessionRow.mode === "autopilot"
-                            ? KodosiTheme.success
-                            : sessionRow.mode === "plan"
-                              ? KodosiTheme.reconnecting
-                              : KodosiTheme.textSecondary
-                        font.pixelSize: 9
-                        font.weight: Font.Bold
                     }
 
                     KButton {
@@ -805,9 +742,7 @@ Item {
                     color: sessionRow.selected
                         ? KodosiTheme.surfaceSelected
                         : sessionRow.hovered ? KodosiTheme.surfaceElevated
-                                             : "transparent"
-                    border.width: sessionRow.activeFocus ? 1 : 0
-                    border.color: KodosiTheme.focusRing
+                                             : KodosiTheme.surface
                     radius: KodosiTheme.radiusMedium
                 }
 
@@ -819,44 +754,6 @@ Item {
                 text: qsTr("No sessions yet")
                 color: KodosiTheme.textSecondary
                 font.pixelSize: 12
-            }
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 38
-            color: "transparent"
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: KodosiTheme.spacing5
-                anchors.rightMargin: KodosiTheme.spacing5
-
-                Rectangle {
-                    Layout.preferredWidth: 6
-                    Layout.preferredHeight: 6
-                    radius: 3
-                    color: Models.AuthState.signedIn
-                        ? KodosiTheme.success
-                        : KodosiTheme.warning
-                }
-
-                PlainLabel {
-                    Layout.fillWidth: true
-                    text: Models.AuthState.signedIn
-                        ? qsTr("Account connected")
-                        : qsTr("Local workspace")
-                    color: KodosiTheme.textSecondary
-                    font.pixelSize: 10
-                }
-            }
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: parent.top
-                height: 1
-                color: KodosiTheme.seam
             }
         }
 
@@ -1075,7 +972,6 @@ Item {
                     + KodosiTheme.spacing4 * 2
                 radius: KodosiTheme.radiusSmall
                 color: KodosiTheme.surfaceElevated
-                border.color: KodosiTheme.seam
 
                 ColumnLayout {
                     id: accessLayout

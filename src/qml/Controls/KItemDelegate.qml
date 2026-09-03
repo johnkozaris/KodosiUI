@@ -15,9 +15,7 @@ ItemDelegate {
               ? KodosiTheme.surfaceSelected
               : root.hovered
                 ? KodosiTheme.surfaceElevated
-                : "transparent"
+                : KodosiTheme.surface
         radius: KodosiTheme.radiusSmall
-        border.width: root.activeFocus ? 1 : 0
-        border.color: KodosiTheme.focusRing
     }
 }

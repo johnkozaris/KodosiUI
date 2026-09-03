@@ -13,6 +13,8 @@ ApplicationWindow {
     property string selectedMode
     readonly property int themeMotionFast: KodosiTheme.motionFast
     readonly property int themeMotionNormal: KodosiTheme.motionNormal
+    readonly property real sidebarActualWidth:
+        Math.min(KodosiTheme.sidebarWidth, Math.max(190, width * 0.28))
     readonly property color themeCanvas: KodosiTheme.canvas
     readonly property color themeSurface: KodosiTheme.surface
     readonly property color themeTextPrimary: KodosiTheme.textPrimary
@@ -51,7 +53,6 @@ ApplicationWindow {
         || settingsDrawer.opened
         || utilityMenu.opened
         || keyboardShortcutsOverlay.opened
-        || attentionPanel.opened
         || agentIntelDrawer.opened
         || projectIntelModal.opened
         || resumeAgentWorkModal.opened
@@ -133,7 +134,6 @@ ApplicationWindow {
             return false
         if (!activateSessionWithRemote(sessionId, openRemote))
             return false
-        attentionPanel.close()
         settingsDrawer.close()
         diagnosticsDrawer.close()
         agentIntelDrawer.openForSession(
@@ -147,7 +147,6 @@ ApplicationWindow {
     function closeDeepLinkOverlays() {
         utilityMenu.close()
         keyboardShortcutsOverlay.close()
-        attentionPanel.close()
         settingsDrawer.close()
         agentIntelDrawer.close()
         projectIntelModal.close()
@@ -239,7 +238,6 @@ ApplicationWindow {
     function openProjectIntelForSession(sessionId) {
         if (sessionId.length === 0)
             return false
-        attentionPanel.close()
         settingsDrawer.close()
         diagnosticsDrawer.close()
         agentIntelDrawer.close()
@@ -248,7 +246,6 @@ ApplicationWindow {
     }
 
     function openProjectIntelSource(sourceId) {
-        attentionPanel.close()
         settingsDrawer.close()
         diagnosticsDrawer.close()
         agentIntelDrawer.close()
@@ -257,7 +254,6 @@ ApplicationWindow {
     }
 
     function openResumeAgentWork() {
-        attentionPanel.close()
         settingsDrawer.close()
         diagnosticsDrawer.close()
         agentIntelDrawer.close()
@@ -267,7 +263,6 @@ ApplicationWindow {
     }
 
     function openAgentSettings() {
-        attentionPanel.close()
         agentIntelDrawer.close()
         diagnosticsDrawer.close()
         settingsDrawer.openAgents()
@@ -280,18 +275,7 @@ ApplicationWindow {
         return openAgentIntel(sessionId, identityToken)
     }
 
-    function toggleAttention() {
-        agentIntelDrawer.close()
-        settingsDrawer.close()
-        diagnosticsDrawer.close()
-        if (attentionPanel.opened)
-            attentionPanel.close()
-        else
-            attentionPanel.open()
-    }
-
     function showDevices() {
-        attentionPanel.close()
         agentIntelDrawer.close()
         settingsDrawer.close()
         diagnosticsDrawer.close()
@@ -302,7 +286,6 @@ ApplicationWindow {
         if ((authOverlay.visible || startupOverlay.visible)
                 && !diagnosticsDrawer.opened)
             return
-        attentionPanel.close()
         agentIntelDrawer.close()
         settingsDrawer.close()
         if (diagnosticsDrawer.opened)
@@ -316,7 +299,6 @@ ApplicationWindow {
             return
         utilityMenu.close()
         keyboardShortcutsOverlay.close()
-        attentionPanel.close()
         settingsDrawer.close()
         agentIntelDrawer.close()
         projectIntelModal.close()
@@ -326,7 +308,6 @@ ApplicationWindow {
 
     function openSettings() {
         utilityMenu.close()
-        attentionPanel.close()
         agentIntelDrawer.close()
         diagnosticsDrawer.close()
         settingsDrawer.open()
@@ -334,7 +315,6 @@ ApplicationWindow {
 
     function openAccountSettings() {
         utilityMenu.close()
-        attentionPanel.close()
         agentIntelDrawer.close()
         diagnosticsDrawer.close()
         settingsDrawer.openAccount()
@@ -382,7 +362,6 @@ ApplicationWindow {
     }
 
     function toggleUtilityMenu() {
-        attentionPanel.close()
         agentIntelDrawer.close()
         settingsDrawer.close()
         diagnosticsDrawer.close()
@@ -441,7 +420,7 @@ ApplicationWindow {
                 RowLayout {
                     Layout.minimumWidth: Models.DesktopState.activeView === 0
                         && Models.DesktopState.sidebarOpen
-                        ? KodosiTheme.sidebarWidth
+                        ? window.sidebarActualWidth
                         : 180
                     Layout.maximumWidth: Layout.minimumWidth
                     Layout.fillHeight: true
@@ -494,125 +473,45 @@ ApplicationWindow {
 
                     KSegmentedBar {
                         anchors.centerIn: parent
-                        width: 304
-                        height: 42
+                        width: 224
+                        height: 36
 
                         NavTab {
-                            Layout.preferredWidth: 149
+                            Layout.preferredWidth: 110
                             accessibleId: "my-agents"
                             iconName: "command"
                             title: qsTr("My Agents")
-                            caption: qsTr("Workbench")
                             selected: Models.DesktopState.activeView === 0
-                            badgeCount: Models.Attention.count
                             onClicked: Models.DesktopState.activeView = 0
                         }
 
                         NavTab {
-                            Layout.preferredWidth: 149
+                            Layout.preferredWidth: 110
                             accessibleId: "missions"
                             iconName: "people"
                             title: qsTr("Missions")
-                            caption: qsTr("Collaborate")
                             selected: Models.DesktopState.activeView === 1
-                            badgeCount: Models.Missions.invitations.incomingCount
                             onClicked: Models.DesktopState.activeView = 1
                         }
                     }
                 }
 
                 RowLayout {
-                    Layout.minimumWidth: window.width < 1000 ? 218 : 304
+                    Layout.minimumWidth: 48
                     Layout.maximumWidth: Layout.minimumWidth
                     Layout.fillHeight: true
                     Layout.rightMargin: KodosiTheme.spacing5
-                    spacing: KodosiTheme.spacing2
-
-                    StatusPill {
-                        visible: window.width >= 1100
-                        text: Models.AuthState.signedIn
-                            ? qsTr("Connected")
-                            : qsTr("Local")
-                        tone: Models.AuthState.signedIn
-                            ? KodosiTheme.success
-                            : KodosiTheme.warning
-                    }
+                    spacing: 0
 
                     KIconButton {
-                        id: attentionButton
-                        objectName: "header.attention"
-                        Accessible.id: objectName
-                        glyph: "bell"
-                        Accessible.name: Models.Attention.count > 0
-                            ? qsTr("Open Attention, %1 items").arg(
-                                Models.Attention.count)
-                            : qsTr("Open Attention")
-                        onClicked: window.toggleAttention()
-
-                        Rectangle {
-                            visible: Models.Attention.count > 0
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            width: 14
-                            height: 14
-                            radius: 7
-                            color: KodosiTheme.accent
-                            border.width: 2
-                            border.color: KodosiTheme.surface
-                        }
-                    }
-
-                    KIconButton {
-                        objectName: "header.tab.devices"
-                        Accessible.id: objectName
-                        glyph: "devices"
-                        Accessible.name: qsTr("Open Account and Devices")
-                        visible: Models.AuthState.signedIn
-                        onClicked: window.showDevices()
-                    }
-
-                    KButton {
-                        objectName: "header.auth.signIn"
-                        Accessible.id: objectName
-                        visible: !Models.AuthState.signedIn
-                        variant: "secondary"
-                        iconName: "login"
-                        text: window.width < 1000
-                            ? ""
-                            : Models.AuthActions.busy
-                              ? qsTr("Signing in")
-                              : qsTr("Sign in")
-                        compact: window.width < 1000
-                        enabled: !Models.AuthActions.busy
-                        Accessible.name: qsTr("Sign in to Kodosi")
-                        onClicked: Models.AuthActions.beginSignIn()
-                    }
-
-                    KIconButton {
-                        id: settingsButton
-                        objectName: "header.settings"
-                        Accessible.id: objectName
-                        glyph: "settings"
-                        Accessible.name: qsTr("Open settings")
-                        onClicked: window.openSettings()
-                    }
-
-                    KButton {
                         id: utilityButton
                         objectName: "header.utility.menu"
                         Accessible.id: objectName
-                        variant: "secondary"
-                        iconName: "account"
-                        text: window.width < 1000
-                            ? ""
-                            : Models.AuthState.signedIn
-                              ? qsTr("Account")
-                              : qsTr("Kodosi")
+                        glyph: "account"
                         Accessible.name: Models.AuthState.signedIn
                             ? qsTr("Account menu")
                             : qsTr("App menu")
                         enabled: !Models.AuthActions.busy
-                        compact: window.width < 1000
                         onClicked: window.toggleUtilityMenu()
                     }
                 }
@@ -659,7 +558,7 @@ ApplicationWindow {
                         Models.DesktopState.selectedSessionId
                     visible: Models.DesktopState.sidebarOpen
                     Layout.fillHeight: true
-                    Layout.preferredWidth: KodosiTheme.sidebarWidth
+                    Layout.preferredWidth: window.sidebarActualWidth
                     onSessionSelectionRequested: (sessionId, openRemote) =>
                         window.requestSessionSelection(sessionId, openRemote)
                     onProjectIntelligenceRequested: sessionId =>
@@ -740,7 +639,6 @@ ApplicationWindow {
         onVisibleChanged: {
             if (!visible)
                 return
-            attentionPanel.close()
             settingsDrawer.close()
             agentIntelDrawer.close()
             diagnosticsDrawer.close()
@@ -769,8 +667,6 @@ ApplicationWindow {
         z: 10000
         radius: KodosiTheme.radiusMedium
         color: KodosiTheme.surfaceElevated
-        border.width: 1
-        border.color: KodosiTheme.seam
         Accessible.role: Accessible.AlertMessage
         Accessible.name: deepLinkStatusLabel.text
         Accessible.ignored: !deepLinkStatus.available
@@ -923,7 +819,6 @@ ApplicationWindow {
         target: Models.Attention
 
         function onNavigationRequested(sessionId, approvalIdentityToken) {
-            attentionPanel.close()
             if (approvalIdentityToken.length > 0)
                 window.openAgentIntel(sessionId, approvalIdentityToken)
             else
@@ -974,10 +869,6 @@ ApplicationWindow {
         function onAuthorityStateChanged() {
             window.synchronizeSelectedSessionMetadata()
         }
-    }
-
-    AttentionPanel {
-        id: attentionPanel
     }
 
     AppearanceMenu {
@@ -1108,7 +999,6 @@ ApplicationWindow {
                 return
             utilityMenu.close()
             keyboardShortcutsOverlay.close()
-            attentionPanel.close()
             settingsDrawer.close()
             agentIntelDrawer.close()
             projectIntelModal.close()

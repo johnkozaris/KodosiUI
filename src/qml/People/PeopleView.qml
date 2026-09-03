@@ -6,20 +6,57 @@ import Kodosi.Models 1.0 as Models
 
 Item {
     id: root
+
     objectName: "surface.missions"
     Accessible.id: objectName
     Accessible.role: Accessible.Pane
     Accessible.name: qsTr("Missions")
 
     property string selectedMissionId
+    property string selectedMissionName
+    property bool createOpen: false
+    readonly property bool compact: width < 1000
     signal signInRequested()
+
+    function openMission(missionId, missionName) {
+        if (!Models.MissionDetail.openMission(missionId))
+            return
+        selectedMissionId = missionId
+        selectedMissionName = missionName
+        createOpen = false
+    }
+
+    function closeMission() {
+        Models.MissionDetail.closeMission()
+        selectedMissionId = ""
+        selectedMissionName = ""
+    }
+
+    Component.onCompleted: {
+        selectedMissionId = Models.MissionDetail.missionId
+        if (selectedMissionId.length > 0)
+            selectedMissionName = qsTr("Mission")
+    }
 
     Connections {
         target: Models.MissionDetail
 
         function onStateChanged() {
-            if (Models.MissionDetail.missionId.length === 0)
+            if (Models.MissionDetail.missionId.length === 0) {
                 root.selectedMissionId = ""
+                root.selectedMissionName = ""
+            } else if (root.selectedMissionId.length === 0) {
+                root.selectedMissionId = Models.MissionDetail.missionId
+                root.selectedMissionName = qsTr("Mission")
+            }
+        }
+    }
+
+    Connections {
+        target: Models.MissionActions
+
+        function onMissionCreated(missionId) {
+            root.createOpen = false
         }
     }
 
@@ -33,514 +70,255 @@ Item {
         visible: !Models.AuthState.signedIn
         accessibleId: "auth.gate.missions"
         title: qsTr("Sign in to use Missions")
-        detail: qsTr(
-            "Sign in to create Missions, invite people, and share supervision. Local My Agents stays available.")
+        detail: qsTr("My Agents stays local.")
         onSignInRequested: root.signInRequested()
     }
 
-    ColumnLayout {
+    RowLayout {
         anchors.fill: parent
-        anchors.margins: KodosiTheme.spacing7
-        spacing: KodosiTheme.spacing5
         visible: Models.AuthState.signedIn
-        Accessible.ignored: !visible
+        spacing: 0
 
-        RowLayout {
-            Layout.fillWidth: true
+        Rectangle {
+            visible: !root.compact || root.selectedMissionId.length === 0
+            Layout.preferredWidth: root.compact ? -1 : 232
+            Layout.fillWidth: root.compact
+            Layout.fillHeight: true
+            color: KodosiTheme.surface
 
             ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 3
+                anchors.fill: parent
+                spacing: 0
 
-                PlainLabel {
-                    text: qsTr("Missions")
-                    color: KodosiTheme.textPrimary
-                    font.pixelSize: 20
-                    font.weight: Font.DemiBold
-                }
-
-                PlainLabel {
-                    text: qsTr("Encrypted collaboration with people and agents")
-                    color: KodosiTheme.textSecondary
-                    font.pixelSize: 12
-                }
-
-                PlainLabel {
-                    visible: Models.MissionActions.lastError.length > 0
+                RowLayout {
                     Layout.fillWidth: true
-                    text: Models.MissionActions.lastError
+                    Layout.preferredHeight: 48
+                    Layout.leftMargin: KodosiTheme.spacing5
+                    Layout.rightMargin: KodosiTheme.spacing3
+                    spacing: KodosiTheme.spacing2
+
+                    PlainLabel {
+                        Layout.fillWidth: true
+                        text: qsTr("Missions")
+                        color: KodosiTheme.textPrimary
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                    }
+
+                    KIconButton {
+                        objectName: "missions.refresh"
+                        Accessible.id: objectName
+                        visible: Models.Missions.canRefresh
+                        glyph: "refresh"
+                        Accessible.name: qsTr("Refresh Missions")
+                        onClicked: Models.Missions.refresh()
+                    }
+
+                    KIconButton {
+                        objectName: "missions.create.open"
+                        Accessible.id: objectName
+                        glyph: "plus"
+                        Accessible.name: qsTr("New Mission")
+                        onClicked: root.createOpen = !root.createOpen
+                    }
+                }
+
+                Rectangle {
+                    visible: root.createOpen
+                        || Models.MissionActions.hasCreateMissionDraft
+                    Layout.fillWidth: true
+                    implicitHeight: createColumn.implicitHeight + 16
+                    color: KodosiTheme.surfaceRaised
+
+                    ColumnLayout {
+                        id: createColumn
+                        anchors.fill: parent
+                        anchors.margins: KodosiTheme.spacing3
+                        spacing: KodosiTheme.spacing2
+
+                        KTextField {
+                            objectName: "missions.create.name"
+                            Accessible.id: objectName
+                            Layout.fillWidth: true
+                            placeholderText: qsTr("Mission name")
+                            text: Models.MissionActions.createMissionName
+                            maximumLength: 128
+                            onTextEdited:
+                                Models.MissionActions.setCreateMissionName(text)
+                        }
+
+                        KTextField {
+                            objectName: "missions.create.slug"
+                            Accessible.id: objectName
+                            Layout.fillWidth: true
+                            placeholderText: qsTr("mission-slug")
+                            text: Models.MissionActions.createMissionSlug
+                            maximumLength: 64
+                            onTextEdited:
+                                Models.MissionActions.setCreateMissionSlug(text)
+                            onAccepted: {
+                                if (Models.MissionActions
+                                    .createMissionCanSubmit)
+                                    Models.MissionActions.createMission()
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.alignment: Qt.AlignRight
+
+                            KButton {
+                                objectName: "missions.create.cancel"
+                                Accessible.id: objectName
+                                text: qsTr("Cancel")
+                                variant: "quiet"
+                                compact: true
+                                enabled:
+                                    Models.MissionActions.createMissionCanDiscard
+                                onClicked: {
+                                    if (Models.MissionActions
+                                            .discardCreateMission())
+                                        root.createOpen = false
+                                }
+                            }
+
+                            KButton {
+                                objectName: "missions.create.submit"
+                                Accessible.id: objectName
+                                text: qsTr("Create")
+                                variant: "primary"
+                                compact: true
+                                enabled:
+                                    Models.MissionActions.createMissionCanSubmit
+                                onClicked:
+                                    Models.MissionActions.createMission()
+                            }
+                        }
+
+                        PlainLabel {
+                            visible:
+                                Models.MissionActions.createMissionError.length
+                                > 0
+                            Layout.fillWidth: true
+                            text: Models.MissionActions.createMissionError
+                            color: KodosiTheme.danger
+                            wrapMode: Text.Wrap
+                        }
+
+                        RowLayout {
+                            visible:
+                                Models.MissionActions.createMissionCanCheck
+                                || Models.MissionActions.createMissionCanRetry
+                            Layout.alignment: Qt.AlignRight
+
+                            KButton {
+                                objectName: "missions.create.check"
+                                Accessible.id: objectName
+                                visible:
+                                    Models.MissionActions.createMissionCanCheck
+                                text: qsTr("Check")
+                                compact: true
+                                onClicked:
+                                    Models.MissionActions.checkCreateMission()
+                            }
+
+                            KButton {
+                                objectName: "missions.create.retry"
+                                Accessible.id: objectName
+                                visible:
+                                    Models.MissionActions.createMissionCanRetry
+                                text: qsTr("Retry")
+                                compact: true
+                                onClicked:
+                                    Models.MissionActions.retryCreateMission()
+                            }
+                        }
+                    }
+                }
+
+                PlainLabel {
+                    visible: Models.Missions.lastError.length > 0
+                    Layout.fillWidth: true
+                    Layout.margins: KodosiTheme.spacing3
+                    text: Models.Missions.lastError
                     color: KodosiTheme.danger
-                    font.pixelSize: 11
                     wrapMode: Text.Wrap
                 }
-            }
 
-            KButton {
-                objectName: "missions.unknown.discard"
-                Accessible.id: objectName
-                visible: Models.MissionActions.canDiscardUnknown
-                text: qsTr("Discard unconfirmed change")
-                Accessible.name: text
-                onClicked: Models.MissionActions.discardUnknown()
-            }
+                ListView {
+                    id: missionList
+                    objectName: "missions.directory"
+                    Accessible.id: objectName
+                    Accessible.name: qsTr("Missions")
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    model: Models.Missions
+                    clip: true
+                    spacing: 2
+                    topMargin: KodosiTheme.spacing2
+                    bottomMargin: KodosiTheme.spacing2
 
-            KButton {
-                objectName: "missions.unknown.retry"
-                Accessible.id: objectName
-                visible: Models.MissionActions.canRetryUnknown
-                text: qsTr("Retry reconciliation")
-                Accessible.name: text
-                onClicked: Models.MissionActions.retryUnknown()
-            }
+                    delegate: KButton {
+                        required property string missionId
+                        required property string name
+                        readonly property string missionName: name
 
-            StatusPill {
-                text: Models.AuthState.signedIn
-                    ? qsTr("%1 Missions").arg(Models.Missions.count)
-                    : qsTr("Sign in required")
-                tone: Models.AuthState.signedIn
-                    ? KodosiTheme.success
-                    : KodosiTheme.warning
+                        width: ListView.view.width
+                            - KodosiTheme.spacing3 * 2
+                        x: KodosiTheme.spacing3
+                        implicitHeight: 42
+                        objectName: "missions.item." + missionId
+                        Accessible.id: objectName
+                        text: name
+                        variant: "quiet"
+                        tonalSelection: true
+                        checkable: true
+                        checked: root.selectedMissionId === missionId
+                        contentLeftAligned: true
+                        onClicked:
+                            root.openMission(missionId, missionName)
+                    }
+                }
+
+                PlainLabel {
+                    objectName: "missions.directory.empty"
+                    Accessible.id: objectName
+                    visible: Models.Missions.authorityState
+                        === Models.Missions.Loaded
+                        && Models.Missions.count === 0
+                        && !root.createOpen
+                    Layout.alignment: Qt.AlignCenter
+                    text: qsTr("No Missions")
+                    color: KodosiTheme.textSecondary
+                }
             }
         }
 
-        RowLayout {
+        Rectangle {
+            visible: !root.compact
+            Layout.preferredWidth: 1
+            Layout.fillHeight: true
+            color: KodosiTheme.seam
+        }
+
+        MissionDetailView {
+            visible: root.selectedMissionId.length > 0
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: KodosiTheme.spacing5
+            missionId: root.selectedMissionId
+            missionName: root.selectedMissionName
+            onCloseRequested: root.closeMission()
+        }
 
-            Rectangle {
-                Layout.preferredWidth: 330
-                Layout.fillHeight: true
-                radius: KodosiTheme.radiusSmall
-                color: KodosiTheme.surface
-                border.width: 1
-                border.color: KodosiTheme.seam
+        Item {
+            visible: !root.compact
+                && root.selectedMissionId.length === 0
+            Layout.fillWidth: true
+            Layout.fillHeight: true
 
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: KodosiTheme.spacing4
-                    spacing: KodosiTheme.spacing3
-
-                    PlainLabel {
-                        text: qsTr("Your Missions")
-                        color: KodosiTheme.textPrimary
-                        font.pixelSize: 12
-                        font.weight: Font.DemiBold
-                    }
-
-                    ListView {
-                        id: missionList
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        model: Models.Missions
-                        spacing: 2
-                        clip: true
-
-                        delegate: KItemDelegate {
-                            id: mission
-
-                            required property string missionId
-                            required property string name
-                            required property string slug
-
-                            objectName: "missions.directory." + missionId
-                            Accessible.id: objectName
-                            Accessible.name: name
-                            Accessible.description: slug
-                            width: ListView.view.width
-                            height: 50
-                            onClicked: {
-                                if (Models.MissionDetail.openMission(missionId))
-                                    root.selectedMissionId = missionId
-                            }
-
-                            contentItem: RowLayout {
-                                spacing: KodosiTheme.spacing3
-
-                                Rectangle {
-                                    Layout.preferredWidth: 26
-                                    Layout.preferredHeight: 26
-                                    radius: KodosiTheme.radiusSmall
-                                    color: KodosiTheme.surfaceElevated
-                                    border.width: 1
-                                    border.color: KodosiTheme.seam
-
-                                    KIcon {
-                                        anchors.centerIn: parent
-                                        width: 15
-                                        height: 15
-                                        name: "mission"
-                                        color: KodosiTheme.success
-                                    }
-                                }
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 1
-
-                                    PlainLabel {
-                                        text: mission.name
-                                        color: KodosiTheme.textPrimary
-                                        font.pixelSize: 12
-                                        font.weight: Font.DemiBold
-                                        elide: Text.ElideRight
-                                    }
-
-                                    PlainLabel {
-                                        text: mission.slug
-                                        color: KodosiTheme.textSecondary
-                                        font.pixelSize: 10
-                                    }
-                                }
-                            }
-
-                            background: Rectangle {
-                                radius: KodosiTheme.radiusSmall
-                                color: root.selectedMissionId === mission.missionId
-                                    ? KodosiTheme.surfaceElevated
-                                    : mission.hovered
-                                      ? Qt.lighter(KodosiTheme.surface, 1.08)
-                                      : "transparent"
-                                border.width: mission.activeFocus ? 1 : 0
-                                border.color: KodosiTheme.focusRing
-                            }
-                        }
-
-                        PlainLabel {
-                            anchors.centerIn: parent
-                            visible: Models.Missions.count === 0
-                            text: Models.Missions.loading
-                                ? qsTr("Loading Missions...")
-                                : qsTr("No Missions yet")
-                            color: KodosiTheme.textSecondary
-                            font.pixelSize: 11
-                        }
-                    }
-                }
-            }
-
-            Rectangle {
-                visible: root.selectedMissionId.length === 0
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                radius: KodosiTheme.radiusSmall
-                color: KodosiTheme.surface
-                border.width: 1
-                border.color: KodosiTheme.seam
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: KodosiTheme.spacing5
-                    spacing: KodosiTheme.spacing5
-
-                    PlainLabel {
-                        text: Models.Missions.invitations.incomingCount > 0
-                            ? qsTr("Mission invitations")
-                            : qsTr("People")
-                        color: KodosiTheme.textPrimary
-                        font.pixelSize: 14
-                        font.weight: Font.DemiBold
-                    }
-
-                    ListView {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight:
-                            Math.min(150, contentHeight)
-                        visible: Models.Missions.invitations.count > 0
-                        model: Models.Missions.invitations
-                        spacing: 3
-
-                        delegate: KItemDelegate {
-                            id: invitation
-
-                            required property string invitationId
-                            required property string roomId
-                            required property string roomName
-                            required property string counterpartyHandle
-                            required property int direction
-
-                            objectName: "missions.invitation." + invitationId
-                            Accessible.id: objectName
-                            Accessible.name: roomName
-                            width: ListView.view.width
-                            height: 52
-
-                            contentItem: RowLayout {
-                                PlainLabel {
-                                    Layout.fillWidth: true
-                                    text: invitation.direction === 0
-                                        ? qsTr("%1 invited you to %2")
-                                              .arg(invitation.counterpartyHandle)
-                                              .arg(invitation.roomName)
-                                        : qsTr("Invitation to %1")
-                                              .arg(invitation.roomName)
-                                    color: KodosiTheme.textPrimary
-                                    font.pixelSize: 11
-                                    elide: Text.ElideRight
-                                }
-
-                                PlainLabel {
-                                    text: invitation.direction === 0
-                                        ? qsTr("Incoming")
-                                        : qsTr("Sent")
-                                    color: invitation.direction === 0
-                                        ? KodosiTheme.warning
-                                        : KodosiTheme.textSecondary
-                                    font.pixelSize: 10
-                                    font.weight: Font.DemiBold
-                                }
-
-                                KButton {
-                                    objectName: "missions.invitation.accept."
-                                        + invitation.invitationId
-                                    Accessible.id: objectName
-                                    visible: invitation.direction === 0
-                                    text: qsTr("Accept")
-                                    Accessible.name: qsTr(
-                                        "Accept invitation to %1").arg(
-                                            invitation.roomName)
-                                    enabled: Models.MissionActions
-                                        .pendingMissionIds.indexOf(
-                                            invitation.roomId) === -1
-                                    onClicked: Models.MissionActions
-                                        .acceptInvitation(
-                                            invitation.invitationId)
-                                }
-
-                                KButton {
-                                    objectName: "missions.invitation.decline."
-                                        + invitation.invitationId
-                                    Accessible.id: objectName
-                                    visible: invitation.direction === 0
-                                    text: qsTr("Decline")
-                                    Accessible.name: qsTr(
-                                        "Decline invitation to %1").arg(
-                                            invitation.roomName)
-                                    enabled: Models.MissionActions
-                                        .pendingMissionIds.indexOf(
-                                            invitation.roomId) === -1
-                                    onClicked: Models.MissionActions
-                                        .declineInvitation(
-                                            invitation.invitationId)
-                                }
-
-                                KButton {
-                                    objectName: "missions.invitation.cancel."
-                                        + invitation.invitationId
-                                    Accessible.id: objectName
-                                    visible: invitation.direction === 1
-                                    text: qsTr("Cancel")
-                                    Accessible.name: qsTr(
-                                        "Cancel invitation to %1").arg(
-                                            invitation.roomName)
-                                    enabled: Models.MissionActions
-                                        .pendingMissionIds.indexOf(
-                                            invitation.roomId) === -1
-                                    onClicked: Models.MissionActions
-                                        .cancelInvitation(
-                                            invitation.invitationId)
-                                }
-                            }
-
-                            background: Rectangle {
-                                radius: KodosiTheme.radiusSmall
-                                color: KodosiTheme.surfaceElevated
-                                border.width: 1
-                                border.color: KodosiTheme.seam
-                            }
-                        }
-                    }
-
-                    RowLayout {
-                        visible: Models.AuthState.signedIn
-                        Layout.fillWidth: true
-                        spacing: KodosiTheme.spacing3
-
-                        KTextField {
-                            id: friendHandle
-                            objectName: "people.request.handle"
-                            Accessible.id: objectName
-                            Layout.fillWidth: true
-                            placeholderText: qsTr("@username")
-                            Accessible.name: qsTr("Friend username")
-                            onAccepted: sendRequestButton.clicked()
-                        }
-
-                        KButton {
-                            id: sendRequestButton
-                            objectName: "people.request.send"
-                            Accessible.id: objectName
-                            text: qsTr("Add person")
-                            Accessible.name: text
-                            enabled: friendHandle.text.trim().length > 0
-                            onClicked: {
-                                if (Models.PeopleActions.sendRequest(friendHandle.text))
-                                    friendHandle.clear()
-                            }
-                        }
-                    }
-
-                    PlainLabel {
-                        visible: Models.PeopleActions.lastError.length > 0
-                        Layout.fillWidth: true
-                        text: Models.PeopleActions.lastError
-                        color: KodosiTheme.danger
-                        font.pixelSize: 10
-                        wrapMode: Text.Wrap
-                    }
-
-                    ListView {
-                        id: peopleList
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        model: Models.People
-                        spacing: 2
-                        clip: true
-
-                        delegate: KItemDelegate {
-                            id: person
-
-                            required property string userId
-                            required property string handle
-                            required property string displayName
-                            required property int relationship
-                            property bool confirmingRemoval: false
-
-                            objectName: "missions.person." + userId
-                            Accessible.id: objectName
-                            Accessible.name: displayName
-                            Accessible.description: "@" + handle
-                            width: ListView.view.width
-                            height: 54
-
-                            contentItem: RowLayout {
-                                spacing: KodosiTheme.spacing4
-
-                                Rectangle {
-                                    Layout.preferredWidth: 30
-                                    Layout.preferredHeight: 30
-                                    radius: 15
-                                    color: person.relationship === 0
-                                        ? KodosiTheme.success
-                                        : KodosiTheme.warning
-
-                                    PlainLabel {
-                                        anchors.centerIn: parent
-                                        text: person.displayName
-                                            .substring(0, 1).toUpperCase()
-                                        color: KodosiTheme.accentForeground
-                                        font.pixelSize: 12
-                                        font.weight: Font.Bold
-                                    }
-                                }
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 1
-
-                                    PlainLabel {
-                                        text: person.displayName
-                                        color: KodosiTheme.textPrimary
-                                        font.pixelSize: 12
-                                        font.weight: Font.DemiBold
-                                    }
-
-                                    PlainLabel {
-                                        text: "@" + person.handle
-                                        color: KodosiTheme.textSecondary
-                                        font.pixelSize: 10
-                                    }
-                                }
-
-                                RowLayout {
-                                    spacing: 4
-
-                                    KButton {
-                                        visible: person.relationship === 1
-                                        objectName: "people.accept." + person.userId
-                                        Accessible.id: objectName
-                                        text: qsTr("Accept")
-                                        Accessible.name: text
-                                        onClicked:
-                                            Models.PeopleActions.accept(person.handle)
-                                    }
-
-                                    KButton {
-                                        visible: person.relationship === 1
-                                        objectName: "people.reject." + person.userId
-                                        Accessible.id: objectName
-                                        text: qsTr("Reject")
-                                        Accessible.name: text
-                                        onClicked:
-                                            Models.PeopleActions.reject(person.handle)
-                                    }
-
-                                    KButton {
-                                        visible: person.relationship === 2
-                                        objectName: "people.cancel." + person.userId
-                                        Accessible.id: objectName
-                                        text: qsTr("Cancel")
-                                        Accessible.name: text
-                                        onClicked:
-                                            Models.PeopleActions.cancel(person.handle)
-                                    }
-
-                                    KButton {
-                                        visible: person.relationship === 0
-                                        objectName: "people.remove." + person.userId
-                                        Accessible.id: objectName
-                                        text: person.confirmingRemoval
-                                            ? qsTr("Confirm remove")
-                                            : qsTr("Remove")
-                                        variant: person.confirmingRemoval
-                                            ? "danger"
-                                            : "secondary"
-                                        Accessible.name: text
-                                        onClicked: {
-                                            if (!person.confirmingRemoval) {
-                                                person.confirmingRemoval = true
-                                            } else {
-                                                Models.PeopleActions.remove(person.handle)
-                                                person.confirmingRemoval = false
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            background: Rectangle {
-                                radius: KodosiTheme.radiusSmall
-                                color: person.hovered
-                                    ? KodosiTheme.surfaceElevated
-                                    : "transparent"
-                                border.width: person.activeFocus ? 1 : 0
-                                border.color: KodosiTheme.focusRing
-                            }
-                        }
-
-                        PlainLabel {
-                            anchors.centerIn: parent
-                            visible: Models.People.count === 0
-                            text: Models.AuthState.signedIn
-                                ? qsTr("No people here yet")
-                                : qsTr("Sign in to open Missions")
-                            color: KodosiTheme.textSecondary
-                            font.pixelSize: 12
-                        }
-                    }
-
-                }
-            }
-
-            MissionDetailView {
-                visible: root.selectedMissionId.length > 0
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                missionId: root.selectedMissionId
-                onCloseRequested: {
-                    Models.MissionDetail.closeMission()
-                    root.selectedMissionId = ""
-                }
+            PlainLabel {
+                anchors.centerIn: parent
+                text: qsTr("Select a Mission")
+                color: KodosiTheme.textSecondary
             }
         }
     }

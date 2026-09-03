@@ -14,12 +14,15 @@ TerminalSurfaceController::TerminalSurfaceController(
     TerminalSessionRegistry& registry,
     RuntimeBridge& runtime,
     SessionCatalogModel& sessions,
+    const qint64 checkpointAcquisitionTimeoutMs,
     QObject* parent)
     : QObject(parent)
     , m_registry(registry)
     , m_runtime(runtime)
     , m_sessions(sessions)
+    , m_checkpointAcquisitionTimeoutMs(checkpointAcquisitionTimeoutMs)
 {
+    Q_ASSERT(checkpointAcquisitionTimeoutMs >= 0);
     m_attachmentRetryTimer.setSingleShot(true);
     m_attachmentRetryTimer.setInterval(250);
     connect(
@@ -50,6 +53,7 @@ bool TerminalSurfaceController::bind(
 {
     if (view == nullptr || sessionId.isEmpty()) {
         emit attachmentRejected(
+            view,
             sessionId,
             QStringLiteral("The selected terminal session is invalid."));
         return false;
@@ -59,12 +63,14 @@ bool TerminalSurfaceController::bind(
         m_sessions.presentationSession(sessionId);
     if (!currentIncarnation && !m_waitingForFreshCatalog) {
         emit attachmentRejected(
+            view,
             sessionId,
             QStringLiteral("The selected session is no longer available."));
         return false;
     }
     if (presentation && !presentation->canRetainPresentation) {
         emit attachmentRejected(
+            view,
             sessionId,
             QStringLiteral("The selected session can no longer present a terminal."));
         return false;
@@ -77,7 +83,10 @@ bool TerminalSurfaceController::bind(
             .view = view,
             .sessionId = sessionId,
             .runtimeIncarnationId = currentIncarnation.value_or(QString {}),
+            .subscription = {},
             .notificationConnection = {},
+            .readinessConnection = {},
+            .checkpointTimer = {},
             .attached = false,
         });
         m_bindings.back().notificationConnection = connect(
@@ -96,10 +105,37 @@ bool TerminalSurfaceController::bind(
             presentation && presentation->canSendFocus,
             presentation && presentation->canResize);
         connect(view, &QObject::destroyed, this, [this, view] {
-            m_bindings.removeIf([&](const Binding& binding) {
-                return binding.view == view || binding.view.isNull();
-            });
+            for (auto binding = m_bindings.begin();
+                 binding != m_bindings.end();) {
+                if (binding->view != view && !binding->view.isNull()) {
+                    ++binding;
+                    continue;
+                }
+                cancelCheckpointTimeout(*binding);
+                disconnect(binding->notificationConnection);
+                disconnect(binding->readinessConnection);
+                binding = m_bindings.erase(binding);
+            }
         });
+        m_bindings.back().readinessConnection = connect(
+            view,
+            &TerminalView::terminalReadyChanged,
+            this,
+            [this, view] {
+                const auto binding = std::ranges::find_if(
+                    m_bindings,
+                    [&](const Binding& value) { return value.view == view; });
+                if (binding == m_bindings.end()
+                    || !binding->attached || binding->view == nullptr
+                    || !binding->view->terminalReady()
+                    || binding->checkpointTimer == nullptr) {
+                    return;
+                }
+                cancelCheckpointTimeout(*binding);
+                emit attachmentReady(
+                    binding->view.data(),
+                    binding->sessionId);
+            });
         connect(
             view,
             &TerminalView::connectionCompleted,
@@ -115,10 +151,17 @@ bool TerminalSurfaceController::bind(
                     binding->retryAttempts = 0;
                     binding->retryPending = false;
                     binding->retryExhausted = false;
-                    emit attachmentReady(binding->sessionId);
+                    if (binding->checkpointTimer == nullptr) {
+                        emit attachmentReady(
+                            binding->view.data(),
+                            binding->sessionId);
+                    }
                     return;
                 }
+                cancelCheckpointTimeout(*binding);
                 binding->view->detach();
+                binding->subscription = {};
+                binding->surfaceGeneration = 0;
                 binding->attached = false;
                 scheduleRemoteRetry(
                     *binding,
@@ -131,6 +174,9 @@ bool TerminalSurfaceController::bind(
                 m_bindings,
                 [&](const Binding& value) { return value.view == view; });
             if (binding != m_bindings.end()) {
+                cancelCheckpointTimeout(*binding);
+                binding->subscription = {};
+                binding->surfaceGeneration = 0;
                 binding->attached = false;
             }
         });
@@ -146,9 +192,12 @@ bool TerminalSurfaceController::bind(
         tryAttach(*found);
         return true;
     }
+    cancelCheckpointTimeout(*found);
     view->detach();
     found->sessionId = sessionId;
     found->runtimeIncarnationId = currentIncarnation.value_or(QString {});
+    found->subscription = {};
+    found->surfaceGeneration = 0;
     found->retryAttempts = 0;
     found->retryPending = false;
     found->retryExhausted = false;
@@ -173,6 +222,7 @@ bool TerminalSurfaceController::retry(
     if (view == nullptr || sessionId.isEmpty() || !currentIncarnation
         || !presentation || !presentation->canRetainPresentation) {
         emit attachmentRejected(
+            view,
             sessionId,
             QStringLiteral("The selected session is no longer available."));
         return false;
@@ -183,9 +233,12 @@ bool TerminalSurfaceController::retry(
     if (found == m_bindings.end()) {
         return bind(view, sessionId);
     }
+    cancelCheckpointTimeout(*found);
     view->detach();
     found->sessionId = sessionId;
     found->runtimeIncarnationId = *currentIncarnation;
+    found->subscription = {};
+    found->surfaceGeneration = 0;
     found->retryAttempts = 0;
     found->retryPending = false;
     found->retryExhausted = false;
@@ -208,9 +261,11 @@ void TerminalSurfaceController::detach(TerminalView* view)
         return;
     }
     if (found->view != nullptr) {
+        cancelCheckpointTimeout(*found);
         found->view->detach();
     }
     disconnect(found->notificationConnection);
+    disconnect(found->readinessConnection);
     m_bindings.erase(found);
 }
 
@@ -225,10 +280,13 @@ void TerminalSurfaceController::runtimeChanged(const bool running)
     m_attachmentRetryTimer.stop();
     m_waitingForFreshCatalog = true;
     for (auto& binding : m_bindings) {
+        cancelCheckpointTimeout(binding);
         if (binding.view != nullptr) {
             binding.view->detach();
         }
         binding.runtimeIncarnationId.clear();
+        binding.subscription = {};
+        binding.surfaceGeneration = 0;
         binding.retryAttempts = 0;
         binding.retryPending = false;
         binding.retryExhausted = false;
@@ -251,6 +309,7 @@ void TerminalSurfaceController::reconcile()
     if (!m_sessions.hasAuthoritativeSnapshot()) {
         m_waitingForFreshCatalog = true;
         for (auto& binding : m_bindings) {
+            cancelCheckpointTimeout(binding);
             if (binding.view != nullptr) {
                 binding.view->setTerminalCapabilities(
                     false,
@@ -260,6 +319,8 @@ void TerminalSurfaceController::reconcile()
                 binding.view->detach();
             }
             binding.runtimeIncarnationId.clear();
+            binding.subscription = {};
+            binding.surfaceGeneration = 0;
             binding.retryPending = false;
             binding.attached = false;
         }
@@ -277,11 +338,16 @@ void TerminalSurfaceController::reconcile()
             m_sessions.presentationSession(binding->sessionId);
         if (!currentIncarnation || !presentation
             || !presentation->canRetainPresentation) {
+            cancelCheckpointTimeout(*binding);
             binding->view->detach();
+            binding->subscription = {};
+            binding->surfaceGeneration = 0;
             emit attachmentRejected(
+                binding->view.data(),
                 binding->sessionId,
                 QStringLiteral("The terminal session was replaced or removed."));
             disconnect(binding->notificationConnection);
+            disconnect(binding->readinessConnection);
             binding = m_bindings.erase(binding);
             continue;
         }
@@ -291,15 +357,21 @@ void TerminalSurfaceController::reconcile()
             presentation->canSendFocus,
             presentation->canResize);
         if (binding->runtimeIncarnationId != *currentIncarnation) {
+            cancelCheckpointTimeout(*binding);
             binding->view->detach();
             binding->runtimeIncarnationId = *currentIncarnation;
+            binding->subscription = {};
+            binding->surfaceGeneration = 0;
             binding->retryAttempts = 0;
             binding->retryPending = false;
             binding->retryExhausted = false;
             binding->attached = false;
         }
         if (!m_runtime.isRunning()) {
+            cancelCheckpointTimeout(*binding);
             binding->view->detach();
+            binding->subscription = {};
+            binding->surfaceGeneration = 0;
             binding->attached = false;
             ++binding;
             continue;
@@ -316,28 +388,61 @@ void TerminalSurfaceController::tryAttach(Binding& binding)
         || m_waitingForFreshCatalog || binding.runtimeIncarnationId.isEmpty()) {
         return;
     }
-    if (m_nextSubscriptionGeneration
-        == std::numeric_limits<std::uint64_t>::max()) {
+    if (m_nextSurfaceGeneration == std::numeric_limits<std::uint64_t>::max()) {
         emit attachmentRejected(
+            binding.view.data(),
             binding.sessionId,
-            QStringLiteral("The terminal subscription generation is exhausted."));
+            QStringLiteral("The terminal surface generation is exhausted."));
         return;
     }
-    const TerminalSubscription subscription {
-        .sessionId = binding.sessionId,
-        .subscriptionId =
-            QUuid::createUuidV7().toString(QUuid::WithoutBraces),
-        .generation = ++m_nextSubscriptionGeneration,
-    };
+    const auto shared = std::ranges::find_if(
+        m_bindings,
+        [&](const Binding& candidate) {
+            return &candidate != &binding && candidate.attached
+                && candidate.sessionId == binding.sessionId
+                && candidate.runtimeIncarnationId
+                    == binding.runtimeIncarnationId
+                && !candidate.subscription.subscriptionId.isEmpty();
+        });
+    TerminalSubscription subscription;
+    const auto sharedSubscription = shared != m_bindings.end();
+    if (sharedSubscription) {
+        subscription = shared->subscription;
+    } else {
+        if (m_nextSubscriptionGeneration
+            == std::numeric_limits<std::uint64_t>::max()) {
+            emit attachmentRejected(
+                binding.view.data(),
+                binding.sessionId,
+                QStringLiteral(
+                    "The terminal subscription generation is exhausted."));
+            return;
+        }
+        subscription = {
+            .sessionId = binding.sessionId,
+            .subscriptionId =
+                QUuid::createUuidV7().toString(QUuid::WithoutBraces),
+            .generation = ++m_nextSubscriptionGeneration,
+        };
+    }
+    const auto surfaceGeneration = ++m_nextSurfaceGeneration;
     binding.attached = binding.view->attach(
         m_registry,
         m_runtime,
         subscription,
-        binding.runtimeIncarnationId);
+        binding.runtimeIncarnationId,
+        surfaceGeneration);
+    binding.subscription = binding.attached
+        ? std::move(subscription)
+        : TerminalSubscription {};
+    binding.surfaceGeneration =
+        binding.attached ? surfaceGeneration : 0;
     if (!binding.attached) {
         scheduleRemoteRetry(
             binding,
             QStringLiteral("The runtime rejected the terminal attachment."));
+    } else if (sharedSubscription && !binding.view->terminalReady()) {
+        armCheckpointTimeout(binding);
     }
 }
 
@@ -349,7 +454,10 @@ void TerminalSurfaceController::scheduleRemoteRetry(
     const auto presentation =
         m_sessions.presentationSession(binding.sessionId);
     if (!presentation || !presentation->isRemoteConnectable) {
-        emit attachmentRejected(binding.sessionId, std::move(reason));
+        emit attachmentRejected(
+            binding.view.data(),
+            binding.sessionId,
+            std::move(reason));
         return;
     }
     ++binding.retryAttempts;
@@ -357,6 +465,7 @@ void TerminalSurfaceController::scheduleRemoteRetry(
         binding.retryPending = false;
         binding.retryExhausted = true;
         emit attachmentRejected(
+            binding.view.data(),
             binding.sessionId,
             QStringLiteral(
                 "The remote terminal did not become ready in time."));
@@ -377,6 +486,69 @@ void TerminalSurfaceController::retryPendingAttachments()
         binding.retryPending = false;
         tryAttach(binding);
     }
+}
+
+void TerminalSurfaceController::armCheckpointTimeout(Binding& binding)
+{
+    cancelCheckpointTimeout(binding);
+    if (!binding.attached || binding.view == nullptr
+        || binding.subscription.subscriptionId.isEmpty()
+        || binding.surfaceGeneration == 0) {
+        return;
+    }
+    auto* timer = new QTimer(this);
+    timer->setSingleShot(true);
+    timer->setInterval(static_cast<int>(std::clamp<qint64>(
+        m_checkpointAcquisitionTimeoutMs,
+        0,
+        std::numeric_limits<int>::max())));
+    binding.checkpointTimer = timer;
+    const QPointer<TerminalView> view = binding.view;
+    const auto subscription = binding.subscription;
+    const auto surfaceGeneration = binding.surfaceGeneration;
+    connect(timer, &QTimer::timeout, this, [this, view, subscription, surfaceGeneration, timer] {
+        timer->deleteLater();
+        const auto binding = std::ranges::find_if(
+            m_bindings,
+            [&](const Binding& candidate) {
+                return candidate.view == view
+                    && candidate.attached
+                    && candidate.surfaceGeneration == surfaceGeneration
+                    && candidate.subscription.sessionId
+                        == subscription.sessionId
+                    && candidate.subscription.subscriptionId
+                        == subscription.subscriptionId
+                    && candidate.subscription.generation
+                        == subscription.generation;
+            });
+        if (binding == m_bindings.end() || binding->view == nullptr
+            || binding->view->terminalReady()) {
+            return;
+        }
+        binding->checkpointTimer = nullptr;
+        binding->view->detach();
+        binding->subscription = {};
+        binding->surfaceGeneration = 0;
+        binding->retryPending = false;
+        binding->retryExhausted = false;
+        binding->attached = false;
+        emit attachmentRejected(
+            binding->view.data(),
+            binding->sessionId,
+            QStringLiteral(
+                "The terminal checkpoint did not arrive in time."));
+    });
+    timer->start();
+}
+
+void TerminalSurfaceController::cancelCheckpointTimeout(Binding& binding)
+{
+    if (binding.checkpointTimer == nullptr) {
+        return;
+    }
+    binding.checkpointTimer->stop();
+    binding.checkpointTimer->deleteLater();
+    binding.checkpointTimer = nullptr;
 }
 
 void TerminalSurfaceController::forwardNotification(

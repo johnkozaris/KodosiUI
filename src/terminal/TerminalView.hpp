@@ -115,7 +115,8 @@ public:
         TerminalSessionRegistry& registry,
         TerminalCommandDispatcher& runtime,
         TerminalSubscription subscription,
-        QString expectedRuntimeIncarnationId);
+        QString expectedRuntimeIncarnationId,
+        std::uint64_t surfaceGeneration = 1);
     Q_INVOKABLE void detach();
 
 signals:
@@ -201,7 +202,6 @@ private:
     QString m_preedit;
     QString m_renderedPreedit;
     std::uint64_t m_surfaceGeneration = 0;
-    std::uint64_t m_nextSurfaceGeneration = 0;
     bool m_resizeQueued = false;
     QByteArray m_lastResizeKey;
     std::optional<PendingResize> m_pendingResize;
@@ -238,6 +238,7 @@ private:
     void drainFrame(std::uint64_t epoch);
     void presentFrame(GhosttyTerminalKernel::Frame frame);
     void presentFailure(GhosttyTerminalKernel::Failure failure);
+    [[nodiscard]] TerminalSurfaceIdentity surfaceIdentity() const;
     void sendText(const QString& text);
     void pasteClipboard();
     [[nodiscard]] bool sendKey(QKeyEvent* event, TerminalKeyAction action);

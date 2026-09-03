@@ -174,10 +174,6 @@ QVariant MissionDirectoryModel::data(const QModelIndex& index, const int role) c
         return mission.name;
     case SlugRole:
         return mission.slug;
-    case OwnerUserIdRole:
-        return mission.ownerUserId;
-    case RosterGenerationRole:
-        return mission.rosterGeneration;
     default:
         return {};
     }
@@ -189,14 +185,35 @@ QHash<int, QByteArray> MissionDirectoryModel::roleNames() const
         {MissionIdRole, QByteArrayLiteral("missionId")},
         {NameRole, QByteArrayLiteral("name")},
         {SlugRole, QByteArrayLiteral("slug")},
-        {OwnerUserIdRole, QByteArrayLiteral("ownerUserId")},
-        {RosterGenerationRole, QByteArrayLiteral("rosterGeneration")},
     };
 }
 
 bool MissionDirectoryModel::loading() const noexcept
 {
     return m_loading;
+}
+
+MissionDirectoryModel::AuthorityState
+MissionDirectoryModel::authorityState() const noexcept
+{
+    return m_authorityState;
+}
+
+bool MissionDirectoryModel::staleDataVisible() const noexcept
+{
+    return m_hasAuthoritativeSnapshot
+        && m_authorityState != AuthorityState::Loaded;
+}
+
+bool MissionDirectoryModel::canRefresh() const noexcept
+{
+    return m_authenticated && !loading();
+}
+
+bool MissionDirectoryModel::canRetry() const noexcept
+{
+    return m_authenticated && !m_loading
+        && m_authorityState == AuthorityState::Failed;
 }
 
 bool MissionDirectoryModel::invitationsReady() const noexcept
@@ -214,15 +231,40 @@ MissionInvitationsModel* MissionDirectoryModel::invitations() noexcept
     return &m_invitations;
 }
 
+bool MissionDirectoryModel::hasAuthoritativeSnapshot() const noexcept
+{
+    return m_hasAuthoritativeSnapshot;
+}
+
 bool MissionDirectoryModel::refresh()
 {
     if (!m_authenticated) {
         return false;
     }
+    if (m_loading) {
+        if (m_authorityState == AuthorityState::Failed) {
+            return false;
+        }
+        m_refreshQueued = true;
+        return true;
+    }
+    if (m_refreshGeneration == std::numeric_limits<quint64>::max()) {
+        setAuthorityState(
+            AuthorityState::Failed,
+            QStringLiteral(
+                "The Mission refresh generation is exhausted."));
+        return false;
+    }
+    ++m_refreshGeneration;
     m_loading = true;
     m_invitationsReady = false;
-    m_lastError.clear();
-    emit stateChanged();
+    m_roomRefreshState = RefreshHalfState::Pending;
+    m_invitationRefreshState = RefreshHalfState::Pending;
+    setAuthorityState(
+        m_authorityState == AuthorityState::Failed
+            ? AuthorityState::Recovering
+            : m_hasAuthoritativeSnapshot ? AuthorityState::Stale
+                                         : AuthorityState::Loading);
     const auto rooms = QByteArrayLiteral("{\"type\":\"room.refresh\"}");
     const auto invitations =
         QByteArrayLiteral("{\"type\":\"room.refreshInvitations\"}");
@@ -232,10 +274,15 @@ bool MissionDirectoryModel::refresh()
     if (roomsAccepted && invitationsAccepted) {
         return true;
     }
-    m_loading = false;
-    m_lastError =
-        QStringLiteral("The runtime did not accept the Mission refresh.");
-    emit stateChanged();
+    if (!roomsAccepted) {
+        m_roomRefreshState = RefreshHalfState::Failed;
+    }
+    if (!invitationsAccepted) {
+        m_invitationRefreshState = RefreshHalfState::Failed;
+    }
+    failRefreshHalf(
+        !roomsAccepted ? m_roomRefreshState : m_invitationRefreshState,
+        QStringLiteral("The runtime did not accept the Mission refresh."));
     return false;
 }
 
@@ -393,6 +440,9 @@ void MissionDirectoryModel::applyRoomEvent(const QJsonObject& object)
         const auto values = object.value(QStringLiteral("rooms"));
         if (!values.isArray()) {
             emit decodeError(QStringLiteral("Mission directory is incomplete."));
+            failRefreshHalf(
+                m_roomRefreshState,
+                QStringLiteral("The Mission directory response was incomplete."));
             return;
         }
         QVector<Mission> missions;
@@ -400,20 +450,25 @@ void MissionDirectoryModel::applyRoomEvent(const QJsonObject& object)
         for (const auto& value : values.toArray()) {
             if (!value.isObject()) {
                 emit decodeError(QStringLiteral("Mission directory has an invalid row."));
+                failRefreshHalf(
+                    m_roomRefreshState,
+                    QStringLiteral("The Mission directory response was invalid."));
                 return;
             }
             auto mission = decodeMission(value.toObject());
             if (!mission || ids.contains(mission->id)) {
                 emit decodeError(QStringLiteral("Mission directory has an invalid row."));
+                failRefreshHalf(
+                    m_roomRefreshState,
+                    QStringLiteral("The Mission directory response was invalid."));
                 return;
             }
             ids.insert(mission->id);
             missions.push_back(std::move(*mission));
         }
         replaceMissions(std::move(missions));
-        m_loading = false;
-        m_lastError.clear();
-        emit stateChanged();
+        m_hasAuthoritativeSnapshot = true;
+        completeRefreshHalf(m_roomRefreshState);
         return;
     }
     if (*type == QStringLiteral("room.invitations")) {
@@ -421,6 +476,9 @@ void MissionDirectoryModel::applyRoomEvent(const QJsonObject& object)
         const auto outgoing = object.value(QStringLiteral("outgoing"));
         if (!incoming.isArray() || !outgoing.isArray()) {
             emit decodeError(QStringLiteral("Mission invitations are incomplete."));
+            failRefreshHalf(
+                m_invitationRefreshState,
+                QStringLiteral("The Mission invitation response was incomplete."));
             return;
         }
         QVector<MissionInvitationsModel::Invitation> invitations;
@@ -444,11 +502,14 @@ void MissionDirectoryModel::applyRoomEvent(const QJsonObject& object)
                 outgoing.toArray(),
                 MissionInvitationsModel::Direction::Outgoing)) {
             emit decodeError(QStringLiteral("Mission invitations have an invalid row."));
+            failRefreshHalf(
+                m_invitationRefreshState,
+                QStringLiteral("The Mission invitation response was invalid."));
             return;
         }
         m_invitations.replace(std::move(invitations));
         m_invitationsReady = true;
-        emit stateChanged();
+        completeRefreshHalf(m_invitationRefreshState);
         return;
     }
     if (*type == QStringLiteral("room.error")) {
@@ -458,10 +519,14 @@ void MissionDirectoryModel::applyRoomEvent(const QJsonObject& object)
             emit decodeError(QStringLiteral("Mission error event is invalid."));
             return;
         }
-        if (*operation == QStringLiteral("refresh")
-            || *operation == QStringLiteral("refreshInvitations")) {
-            m_loading = false;
+        if (*operation == QStringLiteral("refresh")) {
+            failRefreshHalf(m_roomRefreshState, *message);
+            return;
+        }
+        if (*operation == QStringLiteral("refreshInvitations")) {
             m_invitationsReady = false;
+            failRefreshHalf(m_invitationRefreshState, *message);
+            return;
         }
         m_lastError = *message;
         emit stateChanged();
@@ -473,9 +538,69 @@ void MissionDirectoryModel::clearAccountState()
     m_authenticated = false;
     m_loading = false;
     m_invitationsReady = false;
+    m_hasAuthoritativeSnapshot = false;
+    m_refreshQueued = false;
+    m_refreshGeneration = 0;
+    m_roomRefreshState = RefreshHalfState::Idle;
+    m_invitationRefreshState = RefreshHalfState::Idle;
     m_lastError.clear();
+    m_authorityState = AuthorityState::Loading;
     replaceMissions({});
     m_invitations.replace({});
+    emit stateChanged();
+}
+
+void MissionDirectoryModel::completeRefreshHalf(RefreshHalfState& half)
+{
+    if (half == RefreshHalfState::Pending) {
+        half = RefreshHalfState::Complete;
+    }
+    finishRefreshIfReady();
+}
+
+void MissionDirectoryModel::failRefreshHalf(
+    RefreshHalfState& half,
+    QString error)
+{
+    half = RefreshHalfState::Failed;
+    m_refreshQueued = false;
+    setAuthorityState(AuthorityState::Failed, std::move(error));
+    finishRefreshIfReady();
+}
+
+void MissionDirectoryModel::finishRefreshIfReady()
+{
+    if (m_roomRefreshState == RefreshHalfState::Failed
+        || m_invitationRefreshState == RefreshHalfState::Failed) {
+        if (m_roomRefreshState != RefreshHalfState::Pending
+            && m_invitationRefreshState != RefreshHalfState::Pending) {
+            m_loading = false;
+        }
+        emit stateChanged();
+        return;
+    }
+    if (m_roomRefreshState != RefreshHalfState::Complete
+        || m_invitationRefreshState != RefreshHalfState::Complete) {
+        emit stateChanged();
+        return;
+    }
+    m_loading = false;
+    const auto refreshQueued = std::exchange(m_refreshQueued, false);
+    setAuthorityState(AuthorityState::Loaded);
+    if (refreshQueued) {
+        (void)refresh();
+    }
+}
+
+void MissionDirectoryModel::setAuthorityState(
+    const AuthorityState state,
+    QString error)
+{
+    if (m_authorityState == state && m_lastError == error) {
+        return;
+    }
+    m_authorityState = state;
+    m_lastError = std::move(error);
     emit stateChanged();
 }
 
@@ -489,6 +614,19 @@ void MissionDirectoryModel::replaceMissions(QVector<Mission> missions)
     if (changed) {
         emit countChanged();
     }
+}
+
+bool MissionDirectoryModel::isCompleteRoomEntity(
+    const QJsonObject& object)
+{
+    return decodeMission(object).has_value();
+}
+
+bool MissionDirectoryModel::isCompleteInvitationEntity(
+    const QJsonObject& object,
+    const MissionInvitationsModel::Direction direction)
+{
+    return decodeInvitation(object, direction).has_value();
 }
 
 std::optional<MissionDirectoryModel::Mission>

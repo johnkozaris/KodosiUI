@@ -98,8 +98,6 @@ KPopover {
             anchors.fill: parent
             radius: KodosiTheme.radiusModal
             color: KodosiTheme.canvas
-            border.width: 1
-            border.color: KodosiTheme.seamStrong
         }
     }
 

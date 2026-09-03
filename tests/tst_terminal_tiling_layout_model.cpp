@@ -137,7 +137,7 @@ void TerminalTilingLayoutModelTest::choosesAdaptiveColumnsAndIncompleteRows()
                 kodosi::TerminalTilingLayoutModel::WidthRole)
         > 300);
 
-    model.setViewportWidth(568);
+    model.setViewportWidth(589);
     QCOMPARE(model.columnCount(), 1);
     QCOMPARE(model.layoutRowCount(), 5);
 }
@@ -145,7 +145,7 @@ void TerminalTilingLayoutModelTest::choosesAdaptiveColumnsAndIncompleteRows()
 void TerminalTilingLayoutModelTest::scrollsWhenRowsCannotMeetMinimumHeight()
 {
     kodosi::TerminalTilingLayoutModel model;
-    model.setViewportWidth(568);
+    model.setViewportWidth(589);
     model.setViewportHeight(508);
     model.setStagedSessionIds(sessionIds(4));
 

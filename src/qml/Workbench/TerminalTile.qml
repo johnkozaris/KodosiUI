@@ -161,13 +161,13 @@ Item {
     Connections {
         target: Models.TerminalSurfaces
 
-        function onAttachmentReady(readySessionId) {
-            if (readySessionId === root.sessionId)
+        function onAttachmentReady(surface, readySessionId) {
+            if (surface === terminal && readySessionId === root.sessionId)
                 root.terminalError = ""
         }
 
-        function onAttachmentRejected(rejectedSessionId, reason) {
-            if (rejectedSessionId === root.sessionId)
+        function onAttachmentRejected(surface, rejectedSessionId, reason) {
+            if (surface === terminal && rejectedSessionId === root.sessionId)
                 root.terminalError = reason
         }
     }
@@ -199,11 +199,7 @@ Item {
         width: Math.max(0, root.width - 8)
         height: root.height
         radius: KodosiTheme.radiusSmall
-        color: Qt.rgba(
-            KodosiTheme.accent.r,
-            KodosiTheme.accent.g,
-            KodosiTheme.accent.b,
-            0.04)
+        color: KodosiTheme.surfaceRaised
     }
 
     Rectangle {
@@ -213,21 +209,13 @@ Item {
         width: Math.max(0, root.width - 4)
         height: root.height
         radius: KodosiTheme.radiusSmall
-        color: Qt.rgba(
-            KodosiTheme.accent.r,
-            KodosiTheme.accent.g,
-            KodosiTheme.accent.b,
-            0.08)
+        color: KodosiTheme.surfaceRaised
     }
 
     Rectangle {
         anchors.fill: parent
         radius: KodosiTheme.radiusSmall
         color: KodosiTheme.surfaceElevated
-        border.width: 1
-        border.color: root.active
-            ? KodosiTheme.accentMuted
-            : KodosiTheme.seam
     }
 
     ColumnLayout {
@@ -294,75 +282,6 @@ Item {
                 }
 
                 KIconButton {
-                    objectName:
-                        "stage.tile." + root.sessionId + ".openProject"
-                    Accessible.id: objectName
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
-                    glyph: "folder"
-                    size: 26
-                    visible: root.chromeTier === 2
-                        && Models.DesktopFiles
-                            .canOpenSessionProject(root.sessionId)
-                    Accessible.name: qsTr("Open project for %1").arg(
-                        root.sessionName)
-                    onClicked: root.openProject()
-                }
-
-                KIconButton {
-                    objectName: "stage.tile." + root.sessionId + ".intel"
-                    Accessible.id: objectName
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
-                    glyph: "intel"
-                    size: 26
-                    visible: root.chromeTier === 2
-                    Accessible.name: qsTr("Open Agent Intelligence for %1").arg(
-                        root.sessionName)
-                    onClicked: root.inspectSessionRequested(
-                        root.sessionId,
-                        root.sessionName)
-                }
-
-                KButton {
-                    objectName: "stage.tile." + root.sessionId + ".mode"
-                    Accessible.id: objectName
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
-                    implicitWidth: 30
-                    visible: root.chromeTier === 2
-                    compact: true
-                    variant: "quiet"
-                    text: root.mode.length > 0
-                        ? root.mode.substring(0, 1).toUpperCase()
-                        : qsTr("N")
-                    enabled:
-                        Models.SessionActions.availabilityRevision >= 0
-                        && Models.SessionActions.canSetMode(root.sessionId)
-                    Accessible.name: qsTr("Change session mode from %1").arg(
-                        root.mode)
-                    onClicked: root.cycleMode()
-                }
-
-                KIconButton {
-                    objectName:
-                        "stage.tile." + root.sessionId + ".interrupt"
-                    Accessible.id: objectName
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
-                    glyph: "interrupt"
-                    size: 26
-                    visible: root.chromeTier === 2
-                    enabled:
-                        Models.SessionActions.availabilityRevision >= 0
-                        && Models.SessionActions.canInterrupt(root.sessionId)
-                    Accessible.name: qsTr("Interrupt %1").arg(
-                        root.sessionName)
-                    onClicked:
-                        Models.SessionActions.interrupt(root.sessionId)
-                }
-
-                KIconButton {
                     objectName: "stage.tile." + root.sessionId + ".focus"
                     Accessible.id: objectName
                     Accessible.ignored:
@@ -382,23 +301,6 @@ Item {
                     }
                 }
 
-                KIconButton {
-                    objectName: "stage.tile." + root.sessionId + ".share"
-                    Accessible.id: objectName
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
-                    glyph: "share"
-                    size: 26
-                    visible: root.chromeTier === 2
-                        && root.canShare
-                    enabled: root.canShare
-                    Accessible.name: qsTr("Share %1").arg(
-                        root.sessionName)
-                    onClicked: root.shareSessionRequested(
-                        root.sessionId,
-                        root.sessionName)
-                }
-
                 PlainLabel {
                     Accessible.ignored:
                         root.accessibilitySuppressed || !visible
@@ -411,30 +313,6 @@ Item {
                 }
 
                 KIconButton {
-                    objectName: "stage.tile." + root.sessionId + ".close"
-                    Accessible.id: objectName
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
-                    glyph: "close"
-                    size: 26
-                    visible: root.chromeTier === 2
-                    variant:
-                        Models.SessionActions.closeConfirmationSessionId
-                            === root.sessionId
-                        ? "danger"
-                        : "dangerQuiet"
-                    enabled:
-                        Models.SessionActions.availabilityRevision >= 0
-                        && Models.SessionActions.canClose(root.sessionId)
-                    Accessible.name:
-                        Models.SessionActions.closeConfirmationSessionId
-                            === root.sessionId
-                        ? qsTr("Confirm close %1").arg(root.sessionName)
-                        : qsTr("Close %1").arg(root.sessionName)
-                    onClicked: root.requestClose()
-                }
-
-                KIconButton {
                     objectName:
                         "stage.tile." + root.sessionId + ".overflow"
                     Accessible.id: objectName
@@ -442,7 +320,7 @@ Item {
                         root.accessibilitySuppressed || !visible
                     glyph: "more"
                     size: 26
-                    visible: root.chromeTier < 2
+                    visible: true
                     Accessible.name: qsTr("More actions for %1").arg(
                         root.sessionName)
                     onClicked: overflowMenu.open()
@@ -576,11 +454,7 @@ Item {
             visible: root.openProjectError.length > 0
             Layout.fillWidth: true
             implicitHeight: openProjectErrorRow.implicitHeight + 10
-            color: Qt.rgba(
-                KodosiTheme.danger.r,
-                KodosiTheme.danger.g,
-                KodosiTheme.danger.b,
-                0.08)
+            color: KodosiTheme.surfaceRaised
 
             RowLayout {
                 id: openProjectErrorRow
@@ -723,6 +597,11 @@ Item {
                                     root.sessionId)) {
                                 root.terminalError =
                                     Models.SessionActions.lastError
+                            } else if (!Models.TerminalSurfaces.retry(
+                                           terminal,
+                                           root.sessionId)) {
+                                root.terminalError = qsTr(
+                                    "This session is no longer available.")
                             }
                         } else if (!Models.TerminalSurfaces.retry(
                                        terminal,

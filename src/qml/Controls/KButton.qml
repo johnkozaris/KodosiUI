@@ -42,7 +42,6 @@ Button {
         id: contentRow
         spacing: root.iconName.length > 0
             || root.showLeadingDot
-            || root.secondaryText.length > 0
             ? 7
             : 0
 
@@ -94,19 +93,6 @@ Button {
             elide: Text.ElideRight
         }
 
-        PlainLabel {
-            visible: root.secondaryText.length > 0
-            Layout.maximumWidth: root.secondaryMaximumWidth
-            text: root.secondaryText
-            color: root.enabled
-                ? KodosiTheme.textSecondary
-                : KodosiTheme.disabled
-            font.pixelSize: 9
-            horizontalAlignment: Text.AlignLeft
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideMiddle
-        }
-
         KIcon {
             visible: root.iconName.length > 0 && root.iconTrailing
             Layout.preferredWidth: 14
@@ -141,24 +127,9 @@ Button {
             if (root.hovered)
                 return KodosiTheme.surfaceElevated
             return root.variant === "quiet" || root.variant === "dangerQuiet"
-                ? "transparent"
+                ? KodosiTheme.surface
                 : KodosiTheme.surfaceRaised
         }
-        border.width: root.activeFocus
-            || (root.selected && !root.tonalSelection)
-            || (!root.filled
-            && root.variant !== "quiet" && root.variant !== "dangerQuiet") ? 1 : 0
-        border.color: root.activeFocus
-            ? KodosiTheme.focusRing
-            : root.selected && !root.tonalSelection
-              ? KodosiTheme.accentMuted
-              : root.variant === "dangerQuiet"
-              ? Qt.rgba(
-                    KodosiTheme.danger.r,
-                    KodosiTheme.danger.g,
-                    KodosiTheme.danger.b,
-                    0.45)
-              : KodosiTheme.controlBorder
 
         Behavior on color {
             ColorAnimation { duration: KodosiTheme.motionFast }

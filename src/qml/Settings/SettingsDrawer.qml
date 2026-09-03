@@ -305,8 +305,6 @@ KPopover {
             anchors.fill: parent
             color: KodosiTheme.canvas
             radius: KodosiTheme.radiusModal
-            border.width: 1
-            border.color: KodosiTheme.seamStrong
         }
     }
 
@@ -318,7 +316,7 @@ KPopover {
         spacing: 0
 
         Rectangle {
-            Layout.preferredWidth: root.compact ? 220 : 250
+            Layout.preferredWidth: root.compact ? 160 : 190
             Layout.fillHeight: true
             color: KodosiTheme.surface
             topLeftRadius: KodosiTheme.radiusModal
@@ -330,46 +328,18 @@ KPopover {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    Layout.leftMargin: 18
-                    Layout.rightMargin: 14
-                    Layout.topMargin: 18
-                    Layout.bottomMargin: 16
+                    Layout.leftMargin: 14
+                    Layout.rightMargin: 10
+                    Layout.topMargin: 10
+                    Layout.bottomMargin: 10
                     spacing: KodosiTheme.spacing3
 
-                    Rectangle {
-                        Layout.preferredWidth: 36
-                        Layout.preferredHeight: 36
-                        radius: KodosiTheme.radiusMedium
-                        color: KodosiTheme.surfaceElevated
-                        border.width: 1
-                        border.color: KodosiTheme.seam
-
-                        KIcon {
-                            anchors.centerIn: parent
-                            width: 19
-                            height: 19
-                            name: "command"
-                            color: KodosiTheme.accent
-                            strokeWidth: 2
-                        }
-                    }
-
-                    ColumnLayout {
+                    PlainLabel {
                         Layout.fillWidth: true
-                        spacing: 1
-                        PlainLabel {
-                            text: qsTr("KODOSI")
-                            color: KodosiTheme.accent
-                            font.pixelSize: 9
-                            font.weight: Font.Bold
-                            font.letterSpacing: 1.2
-                        }
-                        PlainLabel {
-                            text: qsTr("Settings")
-                            color: KodosiTheme.textPrimary
-                            font.pixelSize: 19
-                            font.weight: Font.DemiBold
-                        }
+                        text: qsTr("Settings")
+                        color: KodosiTheme.textPrimary
+                        font.pixelSize: 14
+                        font.weight: Font.DemiBold
                     }
 
                     KIconButton {
@@ -397,7 +367,7 @@ KPopover {
                             required property int index
                             required property var modelData
                             Layout.fillWidth: true
-                            implicitHeight: root.compact ? 48 : 58
+                            implicitHeight: 40
                             objectName: "panel.settings.tab."
                                 + modelData.key
                             Accessible.id: objectName
@@ -433,34 +403,13 @@ KPopover {
                                         ? KodosiTheme.accent
                                         : KodosiTheme.textSecondary
                                 }
-                                ColumnLayout {
+                                PlainLabel {
                                     Layout.fillWidth: true
-                                    spacing: 1
-                                    PlainLabel {
-                                        Layout.fillWidth: true
-                                        text: categoryButton.modelData.title
-                                        color: KodosiTheme.textPrimary
-                                        font.pixelSize: 12
-                                        font.weight: Font.DemiBold
-                                        elide: Text.ElideRight
-                                    }
-                                    PlainLabel {
-                                        visible: !root.compact
-                                        Layout.fillWidth: true
-                                        text: categoryButton.modelData.detail
-                                        color: KodosiTheme.textSecondary
-                                        font.pixelSize: 9
-                                        elide: Text.ElideRight
-                                    }
-                                }
-                                KIcon {
-                                    Layout.preferredWidth: 12
-                                    Layout.preferredHeight: 12
-                                    name: "chevron-right"
-                                    color: root.selectedCategory
-                                        === categoryButton.modelData.key
-                                        ? KodosiTheme.accent
-                                        : KodosiTheme.textTertiary
+                                    text: categoryButton.modelData.title
+                                    color: KodosiTheme.textPrimary
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    elide: Text.ElideRight
                                 }
                             }
 
@@ -471,38 +420,13 @@ KPopover {
                                     ? KodosiTheme.surfaceSelected
                                     : categoryButton.hovered
                                       ? KodosiTheme.surfaceElevated
-                                      : "transparent"
-                                border.width: categoryButton.activeFocus
-                                    ? 1 : 0
-                                border.color: KodosiTheme.focusRing
+                                      : KodosiTheme.surface
                             }
                         }
                     }
                 }
 
                 Item { Layout.fillHeight: true }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.margins: 16
-                    spacing: 8
-                    Rectangle {
-                        Layout.preferredWidth: 7
-                        Layout.preferredHeight: 7
-                        radius: 4
-                        color: Models.AuthState.signedIn
-                            ? KodosiTheme.success
-                            : KodosiTheme.warning
-                    }
-                    PlainLabel {
-                        Layout.fillWidth: true
-                        text: Models.AuthState.signedIn
-                            ? qsTr("Account connected")
-                            : qsTr("Local workspace")
-                        color: KodosiTheme.textSecondary
-                        font.pixelSize: 10
-                    }
-                }
             }
 
             Rectangle {
@@ -538,23 +462,16 @@ KPopover {
                         Layout.fillWidth: true
                         Layout.leftMargin: root.compact ? 18 : 28
                         Layout.rightMargin: root.compact ? 18 : 28
-                        Layout.topMargin: root.compact ? 18 : 26
-                        spacing: 5
+                        Layout.topMargin: root.compact ? 14 : 20
+                        spacing: 0
 
                         PlainLabel {
                             text: root.categories.filter(function(item) {
                                 return item.key === root.selectedCategory
                             })[0].title
                             color: KodosiTheme.textPrimary
-                            font.pixelSize: 22
+                            font.pixelSize: 16
                             font.weight: Font.DemiBold
-                        }
-                        PlainLabel {
-                            text: root.categories.filter(function(item) {
-                                return item.key === root.selectedCategory
-                            })[0].detail
-                            color: KodosiTheme.textSecondary
-                            font.pixelSize: 12
                         }
                     }
 
@@ -788,8 +705,6 @@ KPopover {
                                 + 24
                             radius: KodosiTheme.radiusMedium
                             color: KodosiTheme.surfaceRaised
-                            border.width: 1
-                            border.color: KodosiTheme.seam
                             RowLayout {
                                 id: supervisionInfo
                                 anchors.fill: parent
@@ -910,8 +825,6 @@ KPopover {
                                 + 28
                             radius: KodosiTheme.radiusLarge
                             color: KodosiTheme.surfaceRaised
-                            border.width: 1
-                            border.color: KodosiTheme.seam
                             ColumnLayout {
                                 id: accountContent
                                 anchors.fill: parent
@@ -974,8 +887,6 @@ KPopover {
                             implicitHeight: dangerContent.implicitHeight + 28
                             radius: KodosiTheme.radiusLarge
                             color: KodosiTheme.surfaceRaised
-                            border.width: 1
-                            border.color: KodosiTheme.seam
 
                             ColumnLayout {
                                 id: dangerContent
@@ -1119,13 +1030,7 @@ KPopover {
                                     implicitHeight:
                                         resetErrorContent.implicitHeight + 16
                                     radius: KodosiTheme.radiusSmall
-                                    color: Qt.rgba(
-                                        KodosiTheme.danger.r,
-                                        KodosiTheme.danger.g,
-                                        KodosiTheme.danger.b,
-                                        0.08)
-                                    border.width: 1
-                                    border.color: KodosiTheme.danger
+                                    color: KodosiTheme.surfaceRaised
 
                                     ColumnLayout {
                                         id: resetErrorContent
@@ -1189,13 +1094,7 @@ KPopover {
                         Layout.rightMargin: root.compact ? 18 : 28
                         implicitHeight: settingsErrorLabel.implicitHeight
                             + 20
-                        color: Qt.rgba(
-                            KodosiTheme.danger.r,
-                            KodosiTheme.danger.g,
-                            KodosiTheme.danger.b,
-                            0.08)
-                        border.width: 1
-                        border.color: KodosiTheme.danger
+                        color: KodosiTheme.surfaceRaised
                         radius: KodosiTheme.radiusMedium
 
                         RowLayout {

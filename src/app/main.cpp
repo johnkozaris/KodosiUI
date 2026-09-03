@@ -64,6 +64,7 @@
 #include <QUrl>
 #include <QUuid>
 #include <QVariant>
+#include <QVector>
 #include <QWindow>
 
 #include <algorithm>
@@ -113,6 +114,47 @@ bool parseWindowSize(
     return true;
 }
 
+bool parseMissionPresentation(
+    const QStringList& arguments,
+    QString& presentation,
+    QString& error)
+{
+    static const QStringList allowed {
+        QStringLiteral("empty"),
+        QStringLiteral("populated"),
+        QStringLiteral("pending"),
+        QStringLiteral("unknown"),
+        QStringLiteral("focus"),
+        QStringLiteral("attention-overflow"),
+    };
+    const auto option = QStringLiteral("--mission-presentation");
+    const auto optionIndex = arguments.indexOf(option);
+    if (optionIndex >= 0) {
+        if (arguments.indexOf(option, optionIndex + 1) >= 0
+            || optionIndex + 1 >= arguments.size()
+            || !allowed.contains(arguments.at(optionIndex + 1))) {
+            error = QStringLiteral(
+                "--mission-presentation requires one of empty, populated, pending, unknown, focus, or attention-overflow");
+            return false;
+        }
+        presentation = arguments.at(optionIndex + 1);
+    }
+
+    for (const auto& state : allowed) {
+        const auto flag = QStringLiteral("--ui-probe-missions-") + state;
+        if (!arguments.contains(flag)) {
+            continue;
+        }
+        if (!presentation.isEmpty() && presentation != state) {
+            error = QStringLiteral(
+                "Only one synthetic Mission presentation may be selected");
+            return false;
+        }
+        presentation = state;
+    }
+    return true;
+}
+
 std::optional<kodosi::DeepLinkParseResult> commandLineDeepLink(
     const QStringList& arguments)
 {
@@ -120,6 +162,10 @@ std::optional<kodosi::DeepLinkParseResult> commandLineDeepLink(
     for (auto index = 1; index < arguments.size(); ++index) {
         const auto& argument = arguments.at(index);
         if (argument == QStringLiteral("--window-size")) {
+            ++index;
+            continue;
+        }
+        if (argument == QStringLiteral("--mission-presentation")) {
             ++index;
             continue;
         }
@@ -139,6 +185,89 @@ std::optional<kodosi::DeepLinkParseResult> commandLineDeepLink(
     }
     return kodosi::DeepLinkRouter::parse(positional.constFirst());
 }
+
+class SyntheticMissionDispatcher final : public kodosi::CommandDispatcher {
+public:
+    Result send(
+        const kodosi::CommandLane lane,
+        const QByteArrayView json) override
+    {
+        const auto document = QJsonDocument::fromJson(json.toByteArray());
+        if (lane != kodosi::CommandLane::Rooms || !document.isObject()) {
+            return std::unexpected(kodosi::RuntimeFailure {
+                .code = kodosi::RuntimeFailure::Code::FfiRejected,
+                .ffiResult = -1,
+                .message = QStringLiteral(
+                    "Synthetic Mission presentation rejected a non-Mission command."),
+            });
+        }
+        static const QSet<QString> readOnlyCommands {
+            QStringLiteral("room.refresh"),
+            QStringLiteral("room.refreshInvitations"),
+            QStringLiteral("room.refreshMembers"),
+            QStringLiteral("room.chat.list"),
+            QStringLiteral("room.tasks.list"),
+            QStringLiteral("room.mutations.recover"),
+        };
+        const auto type =
+            document.object().value(QStringLiteral("type")).toString();
+        if (!readOnlyCommands.contains(type)) {
+            m_mutationAttempted = true;
+            m_rejectedMutationType = type;
+            ++m_rejectedMutationCount;
+            return std::unexpected(kodosi::RuntimeFailure {
+                .code = kodosi::RuntimeFailure::Code::FfiRejected,
+                .ffiResult = -1,
+                .message = QStringLiteral(
+                    "Synthetic Mission presentation rejected a live mutation."),
+            });
+        }
+        commands.push_back(document.object());
+        return {};
+    }
+
+    [[nodiscard]] QJsonObject command(const QString& type) const
+    {
+        const auto found = std::ranges::find(
+            commands,
+            type,
+            [](const QJsonObject& command) {
+                return command.value(QStringLiteral("type")).toString();
+            });
+        return found == commands.end() ? QJsonObject {} : *found;
+    }
+
+    [[nodiscard]] qsizetype commandCount(const QString& type) const
+    {
+        return std::ranges::count(
+            commands,
+            type,
+            [](const QJsonObject& command) {
+                return command.value(QStringLiteral("type")).toString();
+            });
+    }
+
+    [[nodiscard]] bool mutationAttempted() const noexcept
+    {
+        return m_mutationAttempted;
+    }
+
+    [[nodiscard]] qsizetype rejectedMutationCount() const noexcept
+    {
+        return m_rejectedMutationCount;
+    }
+
+    [[nodiscard]] QString rejectedMutationType() const
+    {
+        return m_rejectedMutationType;
+    }
+
+private:
+    QVector<QJsonObject> commands;
+    QString m_rejectedMutationType;
+    qsizetype m_rejectedMutationCount = 0;
+    bool m_mutationAttempted = false;
+};
 
 std::unique_ptr<QSettings> desktopStateSettings(const bool persistent)
 {
@@ -237,6 +366,15 @@ int main(int argc, char* argv[])
         qCritical().noquote() << windowSizeError;
         return EXIT_FAILURE;
     }
+    QString missionPresentation;
+    QString missionPresentationError;
+    if (!parseMissionPresentation(
+            arguments,
+            missionPresentation,
+            missionPresentationError)) {
+        qCritical().noquote() << missionPresentationError;
+        return EXIT_FAILURE;
+    }
     const auto settingsSmokeTest =
         arguments.contains(QStringLiteral("--smoke-test"));
     const auto agentIntelSmokeTest =
@@ -248,9 +386,6 @@ int main(int argc, char* argv[])
     const auto agentSettingsSmokeTest =
         arguments.contains(
             QStringLiteral("--smoke-test-agent-settings"));
-    const auto attentionSmokeTest =
-        arguments.contains(
-            QStringLiteral("--smoke-test-attention"));
     const auto deepLinkApprovalSmokeTest =
         arguments.contains(
             QStringLiteral("--smoke-test-deep-link-approval"));
@@ -308,6 +443,14 @@ int main(int argc, char* argv[])
     const auto startupRecoverySmokeTest =
         arguments.contains(
             QStringLiteral("--smoke-test-startup-recovery"));
+    const auto missionSmokeTest =
+        arguments.contains(
+            QStringLiteral("--smoke-test-missions"));
+    if (missionSmokeTest && missionPresentation.isEmpty()) {
+        missionPresentation = QStringLiteral("populated");
+    }
+    const auto missionPresentationMode =
+        missionSmokeTest || !missionPresentation.isEmpty();
     const auto injectedStartupFailure =
         arguments.contains(
             QStringLiteral("--test-startup-failure-once"));
@@ -315,7 +458,6 @@ int main(int argc, char* argv[])
         || agentIntelSmokeTest
         || projectIntelSmokeTest
         || agentSettingsSmokeTest
-        || attentionSmokeTest
         || deepLinkApprovalSmokeTest
         || deepLinkMissingApprovalSmokeTest
         || deepLinkStatusSmokeTest
@@ -323,7 +465,8 @@ int main(int argc, char* argv[])
         || appearanceSmokeTest
         || shellParitySmokeTest
         || desktopStateSmokeTest
-        || tilingSmokeTest;
+        || tilingSmokeTest
+        || missionSmokeTest;
     const auto presentationProbeWithoutRuntime =
         smokeTest
         || tilingProbeSynthetic
@@ -332,7 +475,8 @@ int main(int argc, char* argv[])
         || projectIntelProbeArchive
         || agentSettingsProbePopulated
         || resumeAgentWorkProbe
-        || resumeAgentWorkSmokeTest;
+        || resumeAgentWorkSmokeTest
+        || missionPresentationMode;
     const auto syntheticMode = windowSize.has_value()
         || std::any_of(
             arguments.cbegin(),
@@ -647,19 +791,17 @@ int main(int argc, char* argv[])
     }
     kodosi::DevicesModel devices;
     kodosi::DeviceActions deviceActions(runtime, devices);
-    kodosi::MissionDirectoryModel missions(runtime);
+    SyntheticMissionDispatcher syntheticMissionDispatcher;
+    auto& missionDispatcher = missionPresentationMode
+        ? static_cast<kodosi::CommandDispatcher&>(
+            syntheticMissionDispatcher)
+        : static_cast<kodosi::CommandDispatcher&>(runtime);
+    kodosi::MissionDirectoryModel missions(missionDispatcher);
     kodosi::SessionShareScope sessionShareScope(
         runtime,
         sessionCatalog,
         missions);
     kodosi::SteeringModel steering(runtime, sessionCatalog);
-    kodosi::MissionDetailModel missionDetail(runtime, missions);
-    kodosi::MissionActions missionActions(
-        runtime,
-        missions,
-        missionDetail,
-        people,
-        sessionCatalog);
     kodosi::PeopleActions peopleActions(runtime, people);
     kodosi::PendingPermissionsModel pendingPermissions(runtime, sessionCatalog);
     kodosi::DeepLinkController deepLinks(
@@ -717,6 +859,502 @@ int main(int argc, char* argv[])
         agentSessionIntel,
         sessionCatalog,
         sessionActions);
+    kodosi::MissionDetailModel missionDetail(
+        missionDispatcher,
+        missions,
+        {
+            .people = &people,
+            .sessions = &sessionCatalog,
+            .attention = &attention,
+            .desktopState = &desktopState,
+            .steering = &steering,
+            .sessionActions = &sessionActions,
+        });
+    kodosi::MissionActions missionActions(
+        missionDispatcher,
+        missions,
+        missionDetail,
+        people,
+        sessionCatalog);
+    if (missionPresentationMode) {
+        constexpr auto missionEpoch = 96;
+        const auto missionUser = QStringLiteral("mission-user");
+        const auto missionId = QStringLiteral("mission-synthetic");
+        const auto auth = QJsonDocument(QJsonObject {
+            {QStringLiteral("type"), QStringLiteral("auth.ready")},
+            {QStringLiteral("userId"), missionUser},
+            {QStringLiteral("accountEpoch"), missionEpoch},
+        }).toJson(QJsonDocument::Compact);
+        const auto envelope =
+            [&](QJsonObject event) {
+                event.insert(
+                    QStringLiteral("authority"),
+                    QStringLiteral("accountContext"));
+                event.insert(
+                    QStringLiteral("accountUserId"),
+                    missionUser);
+                event.insert(
+                    QStringLiteral("accountEpoch"),
+                    missionEpoch);
+                return QJsonDocument(event).toJson(
+                    QJsonDocument::Compact);
+            };
+
+        authState.ingestAuthEvent(auth);
+        desktopState.ingestAuthEvent(auth);
+        sessionCatalog.ingestAuthEvent(auth);
+        sessionActions.ingestAuthEvent(auth);
+        people.ingestAuthEvent(auth);
+        missions.ingestAuthEvent(auth);
+        missionDetail.ingestAuthEvent(auth);
+        missionActions.ingestAuthEvent(auth);
+        pendingPermissions.ingestAuthEvent(auth);
+        desktopState.setActiveView(1);
+
+        people.ingestFriendsEvent(envelope({
+            {QStringLiteral("type"), QStringLiteral("friends.snapshot")},
+            {QStringLiteral("friends"),
+             QJsonArray {
+                 QJsonObject {
+                     {QStringLiteral("userId"),
+                      QStringLiteral("reviewer-user")},
+                     {QStringLiteral("handle"),
+                      QStringLiteral("reviewer")},
+                     {QStringLiteral("displayName"),
+                      QStringLiteral("Mara Reviewer")},
+                 },
+             }},
+            {QStringLiteral("incoming"), QJsonArray {}},
+            {QStringLiteral("outgoing"), QJsonArray {}},
+        }));
+
+        if (missionPresentation == QStringLiteral("empty")) {
+            missions.ingestRoomEvent(envelope({
+                {QStringLiteral("type"),
+                 QStringLiteral("room.snapshot")},
+                {QStringLiteral("rooms"), QJsonArray {}},
+            }));
+            missions.ingestRoomEvent(envelope({
+                {QStringLiteral("type"),
+                 QStringLiteral("room.invitations")},
+                {QStringLiteral("incoming"), QJsonArray {}},
+                {QStringLiteral("outgoing"), QJsonArray {}},
+            }));
+        } else {
+            QJsonArray syntheticSessions;
+            for (auto index = 0; index < 4; ++index) {
+                const auto suffix = QString::number(index + 1);
+                syntheticSessions.append(QJsonObject {
+                    {QStringLiteral("kind"), QStringLiteral("local")},
+                    {QStringLiteral("id"),
+                     QStringLiteral("mission-agent-") + suffix},
+                    {QStringLiteral("incarnationId"),
+                     QStringLiteral(
+                         "01900000-0000-7000-8000-00000000009")
+                         + suffix},
+                    {QStringLiteral("name"),
+                     index == 0
+                         ? QStringLiteral("Linux Builder")
+                         : index == 1
+                           ? QStringLiteral("Release Reviewer")
+                           : index == 2
+                             ? QStringLiteral("Probe Runner")
+                             : QStringLiteral("Docs Verifier")},
+                    {QStringLiteral("project"),
+                     QStringLiteral("/synthetic/mission")},
+                    {QStringLiteral("mode"),
+                     index == 1
+                         ? QStringLiteral("plan")
+                         : QStringLiteral("normal")},
+                    {QStringLiteral("status"),
+                     index == 2
+                         ? QStringLiteral("waiting")
+                         : QStringLiteral("active")},
+                    {QStringLiteral("recovery"),
+                     QStringLiteral("live")},
+                    {QStringLiteral("scope"), QStringLiteral("room")},
+                    {QStringLiteral("access"),
+                     QStringLiteral("approve")},
+                    {QStringLiteral("roomId"), missionId},
+                    {QStringLiteral("roomName"),
+                     QStringLiteral("Linux launch")},
+                    {QStringLiteral("backendSessionId"),
+                     QStringLiteral("mission-backend-") + suffix},
+                    {QStringLiteral("backendIncarnationId"),
+                     QStringLiteral(
+                         "01900000-0000-7000-9000-00000000009")
+                         + suffix},
+                    {QStringLiteral("semanticActions"),
+                     QJsonObject {
+                         {QStringLiteral("queue"), true},
+                         {QStringLiteral("steer"), true},
+                         {QStringLiteral("stopAndSend"), true},
+                     }},
+                });
+            }
+            sessionCatalog.ingestSessionEvent(envelope({
+                {QStringLiteral("type"),
+                 QStringLiteral("session.list")},
+                {QStringLiteral("sessions"), syntheticSessions},
+            }));
+            missions.ingestRoomEvent(envelope({
+                {QStringLiteral("type"),
+                 QStringLiteral("room.snapshot")},
+                {QStringLiteral("rooms"),
+                 QJsonArray {
+                     QJsonObject {
+                         {QStringLiteral("id"), missionId},
+                         {QStringLiteral("name"),
+                          QStringLiteral("Linux launch")},
+                         {QStringLiteral("slug"),
+                          QStringLiteral("linux-launch")},
+                         {QStringLiteral("ownerUserId"),
+                          missionUser},
+                         {QStringLiteral("rosterGeneration"), 7},
+                     },
+                     QJsonObject {
+                         {QStringLiteral("id"),
+                          QStringLiteral("mission-observability")},
+                         {QStringLiteral("name"),
+                          QStringLiteral("Runtime observability")},
+                         {QStringLiteral("slug"),
+                          QStringLiteral("runtime-observability")},
+                         {QStringLiteral("ownerUserId"),
+                          missionUser},
+                         {QStringLiteral("rosterGeneration"), 3},
+                     },
+                 }},
+            }));
+            missions.ingestRoomEvent(envelope({
+                {QStringLiteral("type"),
+                 QStringLiteral("room.invitations")},
+                {QStringLiteral("incoming"),
+                 QJsonArray {
+                     QJsonObject {
+                         {QStringLiteral("id"),
+                          QStringLiteral("invitation-synthetic")},
+                         {QStringLiteral("roomId"),
+                          QStringLiteral("mission-invited")},
+                         {QStringLiteral("roomName"),
+                          QStringLiteral("Packaging review")},
+                         {QStringLiteral("roomSlug"),
+                          QStringLiteral("packaging-review")},
+                         {QStringLiteral("inviteeUserId"),
+                          missionUser},
+                         {QStringLiteral("inviteeHandle"),
+                          QStringLiteral("mission-user")},
+                         {QStringLiteral("invitedByUserId"),
+                          QStringLiteral("reviewer-user")},
+                         {QStringLiteral("invitedByHandle"),
+                          QStringLiteral("reviewer")},
+                         {QStringLiteral("status"),
+                          QStringLiteral("Pending")},
+                         {QStringLiteral("baseRosterGeneration"), 1},
+                         {QStringLiteral("proposedRosterGeneration"), 2},
+                         {QStringLiteral("createdAt"),
+                          QStringLiteral("2026-09-03T09:00:00Z")},
+                     },
+                 }},
+                {QStringLiteral("outgoing"), QJsonArray {}},
+            }));
+
+            if (!missionDetail.openMission(missionId)) {
+                qCritical()
+                    << "Synthetic Mission detail could not be opened.";
+                return EXIT_FAILURE;
+            }
+            const auto membersCommand =
+                syntheticMissionDispatcher.command(
+                    QStringLiteral("room.refreshMembers"));
+            const auto chatCommand =
+                syntheticMissionDispatcher.command(
+                    QStringLiteral("room.chat.list"));
+            const auto taskCommand =
+                syntheticMissionDispatcher.command(
+                    QStringLiteral("room.tasks.list"));
+            if (membersCommand.isEmpty() || chatCommand.isEmpty()
+                || taskCommand.isEmpty()) {
+                qCritical()
+                    << "Synthetic Mission hydration commands were not captured.";
+                return EXIT_FAILURE;
+            }
+            missionDetail.ingestRoomEvent(envelope({
+                {QStringLiteral("type"),
+                 QStringLiteral("room.members")},
+                {QStringLiteral("room_id"), missionId},
+                {QStringLiteral("hydration_id"),
+                 membersCommand.value(
+                     QStringLiteral("hydration_id"))},
+                {QStringLiteral("members"),
+                 QJsonArray {
+                     QJsonObject {
+                         {QStringLiteral("roomId"), missionId},
+                         {QStringLiteral("userId"), missionUser},
+                         {QStringLiteral("role"),
+                          QStringLiteral("owner")},
+                         {QStringLiteral("displayName"),
+                          QStringLiteral("You")},
+                     },
+                     QJsonObject {
+                         {QStringLiteral("roomId"), missionId},
+                         {QStringLiteral("userId"),
+                          QStringLiteral("reviewer-user")},
+                         {QStringLiteral("role"),
+                          QStringLiteral("member")},
+                         {QStringLiteral("username"),
+                          QStringLiteral("reviewer")},
+                         {QStringLiteral("displayName"),
+                          QStringLiteral("Mara Reviewer")},
+                     },
+                 }},
+            }));
+            missionDetail.ingestRoomEvent(envelope({
+                {QStringLiteral("type"),
+                 QStringLiteral("room.chat.snapshot")},
+                {QStringLiteral("room_id"), missionId},
+                {QStringLiteral("hydration_id"),
+                 chatCommand.value(
+                     QStringLiteral("hydration_id"))},
+                {QStringLiteral("messages"),
+                 QJsonArray {
+                     QJsonObject {
+                         {QStringLiteral("id"),
+                          QStringLiteral("message-synthetic-1")},
+                         {QStringLiteral("roomId"), missionId},
+                         {QStringLiteral("authorUserId"),
+                          missionUser},
+                         {QStringLiteral("authorSessionId"),
+                          QStringLiteral("mission-agent-1")},
+                         {QStringLiteral("authorKind"),
+                          QStringLiteral("Agent")},
+                         {QStringLiteral("body"),
+                          QStringLiteral(
+                              "Linux packaging is green. I am checking the final desktop probe evidence.")},
+                         {QStringLiteral("seq"), 1},
+                         {QStringLiteral("postedAt"),
+                          QStringLiteral("2026-09-03T12:00:00Z")},
+                     },
+                     QJsonObject {
+                         {QStringLiteral("id"),
+                          QStringLiteral("message-synthetic-2")},
+                         {QStringLiteral("roomId"), missionId},
+                         {QStringLiteral("authorUserId"),
+                          QStringLiteral("reviewer-user")},
+                         {QStringLiteral("authorSessionId"),
+                          QJsonValue::Null},
+                         {QStringLiteral("authorKind"),
+                          QStringLiteral("Human")},
+                         {QStringLiteral("recipientSessionIds"),
+                          QJsonArray {
+                              QStringLiteral("mission-agent-1"),
+                              QStringLiteral("mission-agent-2"),
+                          }},
+                         {QStringLiteral("recipientUserIds"),
+                          QJsonArray {}},
+                         {QStringLiteral("body"),
+                          QStringLiteral(
+                              "Please verify the compact Mission layout before the final release note.")},
+                         {QStringLiteral("seq"), 2},
+                         {QStringLiteral("postedAt"),
+                          QStringLiteral("2026-09-03T12:05:00Z")},
+                     },
+                 }},
+            }));
+            missionDetail.ingestRoomEvent(envelope({
+                {QStringLiteral("type"),
+                 QStringLiteral("room.tasks.page")},
+                {QStringLiteral("room_id"), missionId},
+                {QStringLiteral("hydration_id"),
+                 taskCommand.value(
+                     QStringLiteral("hydration_id"))},
+                {QStringLiteral("request_offset"), 0},
+                {QStringLiteral("has_more"), false},
+                {QStringLiteral("tasks"),
+                 QJsonArray {
+                     QJsonObject {
+                         {QStringLiteral("id"),
+                          QStringLiteral("task-synthetic-active")},
+                         {QStringLiteral("roomId"), missionId},
+                         {QStringLiteral("createdByUserId"),
+                          missionUser},
+                         {QStringLiteral("title"),
+                          QStringLiteral("Verify compact Mission flow")},
+                         {QStringLiteral("description"),
+                          QStringLiteral(
+                              "Exercise crew, directed chat, and the task queue at 820 × 560.")},
+                         {QStringLiteral("status"),
+                          QStringLiteral("InProgress")},
+                         {QStringLiteral("assignedSessionId"),
+                          QStringLiteral("mission-backend-1")},
+                         {QStringLiteral(
+                              "assignedSessionIncarnationId"),
+                          QStringLiteral(
+                              "01900000-0000-7000-9000-000000000091")},
+                         {QStringLiteral("revision"), 4},
+                         {QStringLiteral("dueAt"),
+                          QStringLiteral("2026-09-02T16:00:00Z")},
+                         {QStringLiteral("createdAt"),
+                          QStringLiteral("2026-09-01T08:00:00Z")},
+                         {QStringLiteral("updatedAt"),
+                          QStringLiteral("2026-09-03T11:00:00Z")},
+                     },
+                     QJsonObject {
+                         {QStringLiteral("id"),
+                          QStringLiteral("task-synthetic-review")},
+                         {QStringLiteral("roomId"), missionId},
+                         {QStringLiteral("createdByUserId"),
+                          missionUser},
+                         {QStringLiteral("title"),
+                          QStringLiteral("Review probe evidence")},
+                         {QStringLiteral("description"),
+                          QStringLiteral(
+                              "Confirm the real and synthetic probes remain bounded.")},
+                         {QStringLiteral("status"),
+                          QStringLiteral("Review")},
+                         {QStringLiteral("revision"), 2},
+                         {QStringLiteral("result"),
+                          QStringLiteral(
+                              "Compact and wide presentations are both reachable through stable accessibility IDs.")},
+                         {QStringLiteral("resultAuthorUserId"),
+                          QStringLiteral("reviewer-user")},
+                         {QStringLiteral("createdAt"),
+                          QStringLiteral("2026-09-01T09:00:00Z")},
+                         {QStringLiteral("updatedAt"),
+                          QStringLiteral("2026-09-03T11:30:00Z")},
+                     },
+                     QJsonObject {
+                         {QStringLiteral("id"),
+                          QStringLiteral("task-synthetic-archived")},
+                         {QStringLiteral("roomId"), missionId},
+                         {QStringLiteral("createdByUserId"),
+                          missionUser},
+                         {QStringLiteral("title"),
+                          QStringLiteral("Retire the old Mission mock")},
+                         {QStringLiteral("status"),
+                          QStringLiteral("Archived")},
+                         {QStringLiteral("revision"), 5},
+                         {QStringLiteral("createdAt"),
+                          QStringLiteral("2026-08-28T09:00:00Z")},
+                         {QStringLiteral("updatedAt"),
+                          QStringLiteral("2026-09-02T11:30:00Z")},
+                     },
+                     QJsonObject {
+                         {QStringLiteral("id"),
+                          QStringLiteral("task-synthetic-unknown")},
+                         {QStringLiteral("roomId"), missionId},
+                         {QStringLiteral("createdByUserId"),
+                          missionUser},
+                         {QStringLiteral("title"),
+                          QStringLiteral("Runtime-owned future task")},
+                         {QStringLiteral("description"),
+                          QStringLiteral(
+                              "This row intentionally demonstrates fail-closed unknown status presentation.")},
+                         {QStringLiteral("status"),
+                          QStringLiteral("AwaitingRuntimeReview")},
+                         {QStringLiteral("revision"), 1},
+                         {QStringLiteral("createdAt"),
+                          QStringLiteral("2026-09-03T10:00:00Z")},
+                         {QStringLiteral("updatedAt"),
+                          QStringLiteral("2026-09-03T10:00:00Z")},
+                     },
+                 }},
+            }));
+            QJsonArray syntheticPermissionRequests;
+            const auto syntheticPermissionCount =
+                missionPresentation
+                    == QStringLiteral("attention-overflow")
+                ? 65
+                : missionSmokeTest
+                        && missionPresentation
+                            == QStringLiteral("populated")
+                    ? 8
+                    : 1;
+            for (auto index = 0;
+                 index < syntheticPermissionCount;
+                 ++index) {
+                syntheticPermissionRequests.append(QJsonObject {
+                    {QStringLiteral("sessionId"),
+                     QStringLiteral("mission-agent-1")},
+                    {QStringLiteral("sessionIncarnationId"),
+                     QStringLiteral(
+                         "01900000-0000-7000-8000-000000000091")},
+                    {QStringLiteral("requestGeneration"), index + 1},
+                    {QStringLiteral("toolUseId"),
+                     index == 0
+                         ? QStringLiteral("mission-tool")
+                         : QStringLiteral("mission-tool-%1")
+                               .arg(index + 1)},
+                    {QStringLiteral("toolName"),
+                     missionPresentation
+                             == QStringLiteral("attention-overflow")
+                         ? QStringLiteral("Tool %1").arg(index + 1)
+                         : QStringLiteral("Bash")},
+                    {QStringLiteral("toolInput"), QJsonObject {}},
+                    {QStringLiteral("createdAtMs"),
+                     1'780'000'000'000.0 + index},
+                    {QStringLiteral("deadlineAtMs"),
+                     1'900'000'000'000.0},
+                    {QStringLiteral("risk"),
+                     QStringLiteral("destructive")},
+                    {QStringLiteral("decisionPhase"),
+                     QStringLiteral("actionable")},
+                });
+            }
+            pendingPermissions.ingestAgentIntelEvent(
+                QJsonDocument(QJsonObject {
+                    {QStringLiteral("authority"),
+                     QStringLiteral("accountContext")},
+                    {QStringLiteral("accountUserId"), missionUser},
+                    {QStringLiteral("accountEpoch"), missionEpoch},
+                    {QStringLiteral("type"),
+                     QStringLiteral(
+                         "agent.intel.pendingPermissionsSnapshot")},
+                    {QStringLiteral("generation"), 1},
+                    {QStringLiteral("requests"),
+                     syntheticPermissionRequests},
+                }).toJson(QJsonDocument::Compact));
+
+            if (missionPresentation == QStringLiteral("focus")) {
+                for (auto row = 0;
+                     row < missionDetail.crew()->rowCount();
+                     ++row) {
+                    const auto index = missionDetail.crew()->index(row);
+                    if (missionDetail.crew()
+                            ->data(
+                                index,
+                                kodosi::MissionCrewModel::KindRole)
+                            .toInt()
+                        != static_cast<int>(
+                            kodosi::MissionCrewModel::Kind::Agent)) {
+                        continue;
+                    }
+                    (void)missionDetail.selectCrew(
+                        missionDetail.crew()
+                            ->data(
+                                index,
+                                kodosi::MissionCrewModel::
+                                    PresentationIdRole)
+                            .toString());
+                    break;
+                }
+            } else if (missionPresentation
+                == QStringLiteral("pending")) {
+                missionActions.installSyntheticPresentation(
+                    kodosi::MissionActions::SyntheticPresentation::
+                        Pending);
+            } else if (missionPresentation
+                == QStringLiteral("unknown")) {
+                missionActions.installSyntheticPresentation(
+                    kodosi::MissionActions::SyntheticPresentation::
+                        Unknown);
+            } else if (
+                missionSmokeTest
+                && missionPresentation == QStringLiteral("populated")) {
+                missionActions.setChatDraftBody(
+                    QStringLiteral("Confirm the Mission broadcast path."));
+            }
+        }
+    }
     if (shellParitySmokeTest) {
         constexpr auto shellEpoch = 93;
         const auto auth = QJsonDocument(QJsonObject {
@@ -792,8 +1430,7 @@ int main(int argc, char* argv[])
             "\"userCode\":\"MNPQ-2345\","
             "\"expiresAt\":\"2099-09-03T12:30:00Z\"}"));
     }
-    if (attentionSmokeTest || deepLinkApprovalSmokeTest
-        || deepLinkMissingApprovalSmokeTest
+    if (deepLinkApprovalSmokeTest || deepLinkMissingApprovalSmokeTest
         || attentionProbePopulated || agentIntelProbeOpen) {
         constexpr auto smokeEpoch = 77;
         sessionCatalog.ingestAuthEvent(
@@ -1121,6 +1758,9 @@ int main(int argc, char* argv[])
         : std::nullopt;
     desktopState.attachWindow(mainWindow, attachSize);
     activateMainWindow(launchActivation.activationToken);
+    if (missionPresentationMode && windowSize) {
+        mainWindow->resize(*windowSize);
+    }
     launchActivation.activationToken.clear();
     if (initialDeepLink) {
         if (initialDeepLink->destination) {
@@ -1136,6 +1776,192 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
     applicationLifecycle.scheduleInitialStart();
+    if (missionSmokeTest) {
+        QTimer::singleShot(
+            350,
+            &application,
+            [&application,
+             rootObject,
+             mainWindow,
+             windowSize,
+             missionPresentation,
+             &missionDetail,
+             &missionActions,
+             &syntheticMissionDispatcher] {
+                auto* rootItem = qobject_cast<QQuickItem*>(
+                    rootObject->property("contentItem")
+                        .value<QObject*>());
+                {
+                    const auto populated =
+                        missionPresentation != QStringLiteral("empty");
+                    const auto requiredObject = populated
+                        ? QStringLiteral("missions.chat")
+                        : QStringLiteral("missions.directory");
+                    auto* surface = findQuickItem(
+                        rootItem,
+                        QStringLiteral("surface.missions"));
+                    auto* required = findQuickItem(
+                        rootItem,
+                        requiredObject);
+                    auto* tasksTab = populated
+                        ? findQuickItem(
+                              rootItem,
+                              QStringLiteral("missions.detail.tasks"))
+                        : nullptr;
+                    auto* peopleTab = populated
+                        ? findQuickItem(
+                              rootItem,
+                              QStringLiteral("missions.detail.people"))
+                        : nullptr;
+                    const auto expectedSize = windowSize.value_or(
+                        mainWindow == nullptr
+                            ? QSize {}
+                            : mainWindow->size());
+                    if (rootItem == nullptr || mainWindow == nullptr
+                        || surface == nullptr || required == nullptr
+                        || !required->isVisible()
+                        || (populated
+                            && (tasksTab == nullptr
+                                || peopleTab == nullptr
+                                || required->property("count").toInt() < 2
+                                || missionDetail.messages()->rowCount() < 2
+                                || missionDetail.tasks()->rowCount() < 4
+                                || missionDetail.crew()->rowCount() < 6))
+                        || syntheticMissionDispatcher.mutationAttempted()
+                        || mainWindow->size() != expectedSize) {
+                        qCritical()
+                            << "Distilled Mission presentation is incomplete:"
+                            << missionPresentation
+                            << requiredObject
+                            << (surface != nullptr)
+                            << (required != nullptr)
+                            << "modelCounts"
+                            << missionDetail.messages()->rowCount()
+                            << missionDetail.tasks()->rowCount()
+                            << missionDetail.crew()->rowCount()
+                            << "mutationAttempted"
+                            << syntheticMissionDispatcher
+                                   .mutationAttempted()
+                            << mainWindow->size()
+                            << expectedSize;
+                        application.exit(EXIT_FAILURE);
+                        return;
+                    }
+
+                    if (missionPresentation
+                        == QStringLiteral("unknown")) {
+                        auto* check = findQuickItem(
+                            rootItem,
+                            QStringLiteral("missions.chat.check"));
+                        auto* discard = findQuickItem(
+                            rootItem,
+                            QStringLiteral("missions.chat.discard"));
+                        const auto refreshesBefore =
+                            syntheticMissionDispatcher.commandCount(
+                                QStringLiteral("room.chat.list"));
+                        if (check == nullptr || discard == nullptr
+                            || !check->isVisible()
+                            || !discard->isVisible()
+                            || !QMetaObject::invokeMethod(
+                                check,
+                                "clicked",
+                                Qt::DirectConnection)) {
+                            qCritical()
+                                << "Unknown Mission chat has no compact recovery path.";
+                            application.exit(EXIT_FAILURE);
+                            return;
+                        }
+                        QCoreApplication::processEvents();
+                        if (missionActions.chatOutcome()
+                                != kodosi::MissionActions::Outcome::
+                                    Reconciling
+                            || syntheticMissionDispatcher.commandCount(
+                                   QStringLiteral("room.chat.list"))
+                                != refreshesBefore + 1
+                            || syntheticMissionDispatcher
+                                   .mutationAttempted()) {
+                            qCritical()
+                                << "Mission chat recovery dispatched unsafe or incomplete work.";
+                            application.exit(EXIT_FAILURE);
+                            return;
+                        }
+                    } else if (
+                        missionPresentation == QStringLiteral("pending")) {
+                        auto* send = findQuickItem(
+                            rootItem,
+                            QStringLiteral("missions.chat.send"));
+                        if (send == nullptr || send->isEnabled()) {
+                            qCritical()
+                                << "Pending Mission chat remained submittable.";
+                            application.exit(EXIT_FAILURE);
+                            return;
+                        }
+                    } else if (
+                        missionPresentation == QStringLiteral("focus")) {
+                        if (!QMetaObject::invokeMethod(
+                                peopleTab,
+                                "clicked",
+                                Qt::DirectConnection)) {
+                            qCritical()
+                                << "Mission People disclosure could not open.";
+                            application.exit(EXIT_FAILURE);
+                            return;
+                        }
+                        QCoreApplication::processEvents();
+                        auto* people = findQuickItem(
+                            rootItem,
+                            QStringLiteral("missions.people"));
+                        auto* actions = findQuickItem(
+                            rootItem,
+                            QStringLiteral("missions.focus.actions"));
+                        if (people == nullptr || !people->isVisible()
+                            || actions == nullptr || !actions->isVisible()
+                            || required->isVisible()) {
+                            qCritical()
+                                << "Mission focus actions did not disclose exclusively.";
+                            application.exit(EXIT_FAILURE);
+                            return;
+                        }
+                    } else if (
+                        missionPresentation == QStringLiteral("populated")) {
+                        if (!QMetaObject::invokeMethod(
+                                tasksTab,
+                                "clicked",
+                                Qt::DirectConnection)) {
+                            qCritical()
+                                << "Mission Tasks disclosure could not open.";
+                            application.exit(EXIT_FAILURE);
+                            return;
+                        }
+                        QCoreApplication::processEvents();
+                        auto* tasks = findQuickItem(
+                            rootItem,
+                            QStringLiteral("missions.tasks"));
+                        if (tasks == nullptr || !tasks->isVisible()
+                            || required->isVisible()) {
+                            qCritical()
+                                << "Mission Tasks did not disclose exclusively.";
+                            application.exit(EXIT_FAILURE);
+                            return;
+                        }
+                    } else if (
+                        missionPresentation
+                        == QStringLiteral("attention-overflow")) {
+                        if (missionDetail.attention()->totalCount() <= 64
+                            || rootObject->findChild<QObject*>(
+                                   QStringLiteral("panel.attention"))
+                                != nullptr) {
+                            qCritical()
+                                << "Mission attention was not kept native and quiet.";
+                            application.exit(EXIT_FAILURE);
+                            return;
+                        }
+                    }
+                    application.exit(EXIT_SUCCESS);
+                    return;
+                }
+            });
+    }
     if (startupRecoverySmokeTest) {
         QTimer::singleShot(
             50,
@@ -1949,7 +2775,17 @@ int main(int argc, char* argv[])
                                                        .viewportHeight()
                                             || stageScroll == nullptr) {
                                             qCritical()
-                                                << "The minimum window did not switch to a scrolling one-column Stage.";
+                                                << "The minimum window did not switch to a scrolling one-column Stage."
+                                                << "columns"
+                                                << terminalTiling.columnCount()
+                                                << "viewportWidth"
+                                                << terminalTiling.viewportWidth()
+                                                << "contentHeight"
+                                                << terminalTiling.contentHeight()
+                                                << "viewportHeight"
+                                                << terminalTiling.viewportHeight()
+                                                << "scroll"
+                                                << (stageScroll != nullptr);
                                             application.exit(
                                                 EXIT_FAILURE);
                                             return;
@@ -2469,6 +3305,27 @@ int main(int argc, char* argv[])
                                                                 desktopState
                                                                     .setActiveView(
                                                                         1);
+                                                                auto* utility =
+                                                                    rootObject
+                                                                        ->findChild<
+                                                                            QObject*>(
+                                                                            QStringLiteral(
+                                                                                "header.utility.menu"));
+                                                                if (utility
+                                                                        == nullptr
+                                                                    || !QMetaObject::
+                                                                        invokeMethod(
+                                                                            utility,
+                                                                            "click",
+                                                                            Qt::
+                                                                                DirectConnection)) {
+                                                                    qCritical()
+                                                                        << "The utility menu could not expose signed-out navigation.";
+                                                                    application
+                                                                        .exit(
+                                                                            EXIT_FAILURE);
+                                                                    return;
+                                                                }
                                                                 QTimer::
                                                                     singleShot(
                                                                         0,
@@ -2478,7 +3335,7 @@ int main(int argc, char* argv[])
                                                                          rootObject] {
                                                                             const QStringList signedOutObjects {
                                                                                 QStringLiteral(
-                                                                                    "header.auth.signIn"),
+                                                                                    "panel.utility.signIn"),
                                                                                 QStringLiteral(
                                                                                     "auth.gate.missions"),
                                                                             };
@@ -2517,9 +3374,30 @@ int main(int argc, char* argv[])
                                                                                         EXIT_FAILURE);
                                                                                 return;
                                                                             }
+                                                                            auto* utilityMenu =
+                                                                                rootObject
+                                                                                ->findChild<
+                                                                                    QObject*>(
+                                                                                    QStringLiteral(
+                                                                                        "panel.utility"));
+                                                                            if (utilityMenu
+                                                                                == nullptr
+                                                                                || !QMetaObject::
+                                                                                invokeMethod(
+                                                                                    utilityMenu,
+                                                                                    "close",
+                                                                                    Qt::
+                                                                                        DirectConnection)) {
+                                                                                qCritical()
+                                                                                << "The signed-out utility menu could not close.";
+                                                                                application
+                                                                                .exit(
+                                                                                    EXIT_FAILURE);
+                                                                                return;
+                                                                            }
                                                                             desktopState
                                                                                 .setActiveView(
-                                                                                    0);
+                                                                                0);
                                                                             auto* newSession =
                                                                                 rootObject
                                                                                     ->findChild<
@@ -2562,8 +3440,6 @@ int main(int argc, char* argv[])
                     QStringLiteral("header.utility.menu"));
                 auto* menu = rootObject->findChild<QObject*>(
                     QStringLiteral("panel.utility"));
-                auto* close = rootObject->findChild<QObject*>(
-                    QStringLiteral("panel.utility.close"));
                 auto* settings = rootObject->findChild<QObject*>(
                     QStringLiteral("panel.utility.settings"));
                 auto* light = rootObject->findChild<QObject*>(
@@ -2578,7 +3454,7 @@ int main(int argc, char* argv[])
                 auto* signOut = rootObject->findChild<QObject*>(
                     QStringLiteral("panel.utility.signOut"));
                 if (utilityButton == nullptr || menu == nullptr
-                    || close == nullptr || settings == nullptr
+                    || settings == nullptr
                     || light == nullptr || dark == nullptr
                     || system == nullptr || signOut == nullptr
                     || appearance.preference()
@@ -2787,7 +3663,7 @@ int main(int argc, char* argv[])
                 }
                 application.exit(EXIT_SUCCESS);
             });
-    } else if (smokeTest) {
+    } else if (smokeTest && !missionSmokeTest) {
         QVariant staleSession;
         if (!QMetaObject::invokeMethod(
                 rootObject,
@@ -2823,8 +3699,6 @@ int main(int argc, char* argv[])
             ? QStringLiteral("panel.projectIntel")
             : agentIntelSmokeTest
             ? QStringLiteral("panel.agentIntel")
-            : attentionSmokeTest
-            ? QStringLiteral("panel.attention")
             : QStringLiteral("panel.diagnostics");
         auto* panel = rootObject->findChild<QObject*>(panelName);
         if (panel == nullptr
@@ -3265,73 +4139,6 @@ int main(int argc, char* argv[])
                                 Qt::DirectConnection);
                             QCoreApplication::quit();
                         });
-                });
-        } else if (attentionSmokeTest) {
-            rootObject->setProperty("width", 820);
-            rootObject->setProperty("height", 560);
-            QTimer::singleShot(
-                100,
-                &application,
-                [panel, rootObject, &attention] {
-                    const QStringList requiredObjects {
-                        QStringLiteral("header.attention"),
-                        QStringLiteral("panel.attention"),
-                        QStringLiteral("panel.attention.close"),
-                        QStringLiteral("panel.attention.loading"),
-                        QStringLiteral("panel.attention.error"),
-                        QStringLiteral("panel.attention.empty"),
-                        QStringLiteral("panel.attention.list"),
-                        QStringLiteral("sidebar.attention.rail"),
-                        QStringLiteral("sidebar.attention.list"),
-                    };
-                    for (const auto& objectName : requiredObjects) {
-                        if (rootObject->findChild<QObject*>(objectName)
-                            == nullptr) {
-                            qCritical()
-                                << "The Attention smoke contract is incomplete:"
-                                << objectName;
-                            QCoreApplication::exit(EXIT_FAILURE);
-                            return;
-                        }
-                    }
-                    if (attention.rowCount() != 1
-                        || panel->property("width").toReal() > 440
-                        || panel->property("height").toReal() > 528) {
-                        qCritical()
-                            << "Attention did not lay out its populated state"
-                            << "at the minimum supported window size.";
-                        QCoreApplication::exit(EXIT_FAILURE);
-                        return;
-                    }
-                    const auto* list = rootObject->findChild<QObject*>(
-                        QStringLiteral("panel.attention.list"));
-                    const auto* loading = rootObject->findChild<QObject*>(
-                        QStringLiteral("panel.attention.loading"));
-                    const auto* rail = qobject_cast<QQuickItem*>(
-                        rootObject->findChild<QObject*>(
-                            QStringLiteral("sidebar.attention.rail")));
-                    if (list == nullptr
-                        || list->property("count").toInt() != 1
-                        || list->property("contentHeight").toReal() <= 0
-                        || loading == nullptr
-                        || loading->property("visible").toBool()
-                        || rail == nullptr || !rail->isVisible()
-                        || rail->height() <= 0 || rail->y() < 48) {
-                        qCritical()
-                            << "Attention cards or sidebar rail are not visible.";
-                        QCoreApplication::exit(EXIT_FAILURE);
-                        return;
-                    }
-                    auto* close = panel->findChild<QObject*>(
-                        QStringLiteral("panel.attention.close"));
-                    if (close == nullptr
-                        || !close->property("activeFocus").toBool()) {
-                        qCritical()
-                            << "Attention did not establish keyboard focus.";
-                        QCoreApplication::exit(EXIT_FAILURE);
-                        return;
-                    }
-                    QCoreApplication::quit();
                 });
         } else if (diagnosticsSmokeTest) {
             rootObject->setProperty("width", 820);

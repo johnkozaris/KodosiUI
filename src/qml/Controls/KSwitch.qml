@@ -18,12 +18,6 @@ Switch {
             : root.checked
               ? KodosiTheme.accent
               : KodosiTheme.input
-        border.width: 1
-        border.color: root.activeFocus
-            ? KodosiTheme.focusRing
-            : root.checked
-              ? KodosiTheme.accent
-              : KodosiTheme.controlBorder
 
         Rectangle {
             x: root.checked ? parent.width - width - 3 : 3

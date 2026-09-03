@@ -22,8 +22,8 @@ KPopover {
         Models.ProjectIntelligence.selectedSourceKind === "active"
 
     parent: Overlay.overlay
-    width: Math.min(1240, parent ? parent.width - 24 : 1240)
-    height: Math.min(800, parent ? parent.height - 24 : 800)
+    width: Math.min(1080, parent ? parent.width - 32 : 1080)
+    height: Math.min(680, parent ? parent.height - 32 : 680)
     x: parent ? Math.round((parent.width - width) / 2) : 0
     y: parent ? Math.round((parent.height - height) / 2) : 0
     padding: 0
@@ -250,8 +250,6 @@ KPopover {
             anchors.fill: parent
             radius: KodosiTheme.radiusModal
             color: KodosiTheme.canvas
-            border.width: 1
-            border.color: KodosiTheme.seamStrong
         }
     }
 
@@ -671,16 +669,8 @@ KPopover {
                     implicitHeight: actionMessageRow.implicitHeight + 16
                     visible: root.actionStatus.length > 0
                     color: root.actionStatusIsError
-                        ? Qt.rgba(
-                              KodosiTheme.danger.r,
-                              KodosiTheme.danger.g,
-                              KodosiTheme.danger.b,
-                              0.10)
-                        : Qt.rgba(
-                              KodosiTheme.success.r,
-                              KodosiTheme.success.g,
-                              KodosiTheme.success.b,
-                              0.08)
+                        ? KodosiTheme.surfaceRaised
+                        : KodosiTheme.surfaceRaised
 
                     RowLayout {
                         id: actionMessageRow
@@ -1066,7 +1056,7 @@ KPopover {
                     width: ListView.view.width
                     implicitHeight:
                         transcriptColumn.implicitHeight + 20
-                    color: "transparent"
+                    color: KodosiTheme.surface
                     Accessible.role: Accessible.ListItem
                     Accessible.name: toolName.length > 0
                         ? role + ", " + toolName
@@ -1414,7 +1404,7 @@ KPopover {
                 }).join(". ")
                 width: ListView.view.width
                 implicitHeight: serverRow.implicitHeight + 18
-                color: "transparent"
+                color: KodosiTheme.surface
 
                 RowLayout {
                     id: serverRow

@@ -24,7 +24,5 @@ Popup {
     background: Rectangle {
         color: KodosiTheme.surfaceRaised
         radius: KodosiTheme.radiusLarge
-        border.width: 1
-        border.color: KodosiTheme.seamStrong
     }
 }

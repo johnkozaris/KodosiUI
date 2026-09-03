@@ -86,10 +86,6 @@ KPopover {
                     anchors.fill: parent
                     radius: KodosiTheme.radiusLarge
                     color: KodosiTheme.surfaceElevated
-                    border.width: 1
-                    border.color: root.failed
-                        ? KodosiTheme.danger
-                        : KodosiTheme.seamStrong
                 }
 
                 KBusyIndicator {

@@ -130,8 +130,6 @@ KPopover {
     background: Rectangle {
         color: KodosiTheme.surface
         radius: KodosiTheme.radiusLarge
-        border.width: 1
-        border.color: KodosiTheme.seamStrong
     }
 
     contentItem: ColumnLayout {
@@ -316,8 +314,6 @@ KPopover {
                             + KodosiTheme.spacing4
                         radius: KodosiTheme.radiusSmall
                         color: KodosiTheme.surfaceRaised
-                        border.width: 1
-                        border.color: KodosiTheme.seam
                         Accessible.name: qsTr("Open Log Folder error")
                         Accessible.description: root.logOpenError
 
@@ -403,8 +399,6 @@ KPopover {
                         implicitHeight: 68
                         radius: KodosiTheme.radiusMedium
                         color: KodosiTheme.surfaceRaised
-                        border.width: 1
-                        border.color: KodosiTheme.seam
 
                         ColumnLayout {
                             anchors.fill: parent

@@ -34,6 +34,6 @@ ScrollBar {
     background: Rectangle {
         color: root.prominent
             ? KodosiTheme.surface
-            : "transparent"
+            : KodosiTheme.surface
     }
 }

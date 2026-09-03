@@ -887,6 +887,37 @@ set_tests_properties(kodosi-qt-qml-smoke PROPERTIES
     TIMEOUT 10
 )
 
+foreach(_mission_state IN ITEMS
+    empty
+    populated
+    pending
+    unknown
+    focus
+    attention-overflow
+)
+    foreach(_mission_size IN ITEMS 820x560 1240x800)
+        string(REPLACE "x" "-" _mission_size_name "${_mission_size}")
+        set(_mission_test_name
+            "kodosi-qt-missions-${_mission_state}-${_mission_size_name}"
+        )
+        add_test(
+            NAME "${_mission_test_name}"
+            COMMAND
+                kodosi-qt
+                --smoke-test-missions
+                --mission-presentation
+                "${_mission_state}"
+                --window-size
+                "${_mission_size}"
+        )
+        set_tests_properties("${_mission_test_name}" PROPERTIES
+            ENVIRONMENT
+                "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
+            TIMEOUT 15
+        )
+    endforeach()
+endforeach()
+
 add_test(
     NAME kodosi-qt-appearance-qml-smoke
     COMMAND kodosi-qt --smoke-test-appearance --window-size 820x560
@@ -932,16 +963,6 @@ add_test(
     COMMAND kodosi-qt --smoke-test-agent-settings --window-size 820x560
 )
 set_tests_properties(kodosi-qt-agent-settings-qml-smoke PROPERTIES
-    ENVIRONMENT
-        "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
-    TIMEOUT 10
-)
-
-add_test(
-    NAME kodosi-qt-attention-qml-smoke
-    COMMAND kodosi-qt --smoke-test-attention
-)
-set_tests_properties(kodosi-qt-attention-qml-smoke PROPERTIES
     ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
     TIMEOUT 10

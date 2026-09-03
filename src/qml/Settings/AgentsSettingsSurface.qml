@@ -527,7 +527,7 @@ ColumnLayout {
                     }).join(". ")
                     width: ListView.view.width
                     height: 38
-                    color: "transparent"
+                    color: KodosiTheme.surface
 
                     RowLayout {
                         anchors.fill: parent
@@ -634,7 +634,7 @@ ColumnLayout {
                 height: 38
                 color: settingRow.index % 2 === 0
                     ? KodosiTheme.surface
-                    : "transparent"
+                    : KodosiTheme.surface
 
                 RowLayout {
                     anchors.fill: parent
@@ -976,16 +976,8 @@ ColumnLayout {
             || Models.ExternalDiscovery.error.length > 0
         color: root.discoveryActionError
                 || Models.ExternalDiscovery.error.length > 0
-            ? Qt.rgba(
-                  KodosiTheme.danger.r,
-                  KodosiTheme.danger.g,
-                  KodosiTheme.danger.b,
-                  0.10)
-            : Qt.rgba(
-                  KodosiTheme.success.r,
-                  KodosiTheme.success.g,
-                  KodosiTheme.success.b,
-                  0.08)
+            ? KodosiTheme.surfaceRaised
+            : KodosiTheme.surfaceRaised
 
         RowLayout {
             id: discoveryStatusRow
@@ -1162,7 +1154,7 @@ ColumnLayout {
                     width: ListView.view.width
                     implicitHeight:
                         externalContent.implicitHeight + 16
-                    color: "transparent"
+                    color: KodosiTheme.surface
 
                     ColumnLayout {
                         id: externalContent
@@ -1325,7 +1317,7 @@ ColumnLayout {
 
             footer: Rectangle {
                 implicitHeight: 58
-                color: "transparent"
+                color: KodosiTheme.surface
 
                 RowLayout {
                     anchors.fill: parent

@@ -156,6 +156,7 @@ private:
     static constexpr qreal dividerSize = 6;
     static constexpr qreal targetAspect = 1.3;
     static constexpr qreal stageInset = 4;
+    static constexpr qreal singleColumnBreakpoint = 620;
 
     QVector<Entry> m_entries;
     QStringList m_stagedSessionIds;

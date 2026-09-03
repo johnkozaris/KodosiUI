@@ -5,6 +5,7 @@
 #include <QUuid>
 
 #include <algorithm>
+#include <limits>
 #include <ranges>
 #include <utility>
 
@@ -169,6 +170,14 @@ QString AttentionModel::operationError() const
     return m_operationError;
 }
 
+bool AttentionModel::sessionNeedsAttention(const QString& sessionId) const
+{
+    if (sessionId.isEmpty()) {
+        return false;
+    }
+    return scopedItemPage({sessionId}, 0, 1).totalCount > 0;
+}
+
 bool AttentionModel::refresh()
 {
     return requestAuthorityRefresh(true);
@@ -280,6 +289,178 @@ bool AttentionModel::approveAll(const QString& attentionToken)
 void AttentionModel::clearOperationError()
 {
     setOperationError({});
+}
+
+QVector<AttentionModel::ScopedItem> AttentionModel::scopedItems(
+    const QSet<QString>& sessionIds) const
+{
+    return scopedItemPage(
+               sessionIds,
+               0,
+               std::numeric_limits<int>::max())
+        .items;
+}
+
+AttentionModel::ScopedPage AttentionModel::scopedItemPage(
+    const QSet<QString>& sessionIds,
+    const int offset,
+    const int limit) const
+{
+    ScopedPage page;
+    const auto boundedOffset = std::max(0, offset);
+    const auto boundedLimit = std::max(0, limit);
+    const auto append =
+        [&](ScopedItem item) {
+            for (auto count = item.sessionCounts.cbegin();
+                 count != item.sessionCounts.cend();
+                 ++count) {
+                page.sessionCounts[count.key()] += count.value();
+            }
+            if (page.totalCount >= boundedOffset
+                && page.items.size() < boundedLimit) {
+                page.items.push_back(std::move(item));
+            }
+            ++page.totalCount;
+        };
+    for (const auto& item : m_items) {
+        if (item.category != Category::BulkSafe) {
+            if (!sessionIds.contains(item.sessionId)) {
+                continue;
+            }
+            append({
+                .category = item.category,
+                .sessionId = item.sessionId,
+                .sessionIds = {item.sessionId},
+                .sessionName = item.sessionName,
+                .title = item.title,
+                .summary = item.summary,
+                .risk = item.risk,
+                .tone = item.tone,
+                .actionKind = item.actionKind,
+                .canApprove = item.canApprove,
+                .canDeny = item.canDeny,
+                .canJump = item.canJump,
+                .sourceToken = item.attentionToken,
+                .sessionCounts = {{item.sessionId, 1}},
+            });
+            continue;
+        }
+
+        QStringList matchingSessions;
+        QHash<QString, int> sessionCounts;
+        int matchingCount = 0;
+        for (const auto& identity : item.approvalIdentityTokens) {
+            const auto request =
+                m_pendingPermissions.notificationRequest(identity);
+            if (!request || !sessionIds.contains(request->sessionId)
+                || request->risk != QStringLiteral("safe")
+                || !request->actionable
+                || !eligibleSession(request->sessionId)) {
+                continue;
+            }
+            ++matchingCount;
+            ++sessionCounts[request->sessionId];
+            if (!matchingSessions.contains(request->sessionId)) {
+                matchingSessions.push_back(request->sessionId);
+            }
+        }
+        if (matchingCount == 0) {
+            continue;
+        }
+        std::ranges::sort(matchingSessions);
+        append({
+            .category = item.category,
+            .sessionId = {},
+            .sessionIds = matchingSessions,
+            .sessionName = matchingSessions.size() == 1
+                ? item.sessionName
+                : tr("%1 Mission agents").arg(matchingSessions.size()),
+            .title = matchingCount == 1
+                ? tr("1 safe read waiting")
+                : tr("%1 safe reads waiting").arg(matchingCount),
+            .summary = matchingSessions.size() == 1
+                ? item.summary
+                : tr("Safe reads scoped to this Mission"),
+            .risk = item.risk,
+            .tone = item.tone,
+            .actionKind = item.actionKind,
+            .canApprove = true,
+            .sourceToken = item.attentionToken,
+            .itemCount = matchingCount,
+            .sessionCounts = sessionCounts,
+        });
+    }
+    return page;
+}
+
+bool AttentionModel::actOnScopedItem(
+    const QString& sourceToken,
+    const QSet<QString>& sessionIds,
+    const ActionKind action)
+{
+    const auto* item = itemForToken(sourceToken);
+    if (item == nullptr) {
+        return failStale();
+    }
+    if (item->category != Category::BulkSafe) {
+        if (!sessionIds.contains(item->sessionId)
+            || action != item->actionKind) {
+            return failStale();
+        }
+        switch (action) {
+        case ActionKind::Jump: return jump(sourceToken);
+        case ActionKind::Review: return review(sourceToken);
+        case ActionKind::Approve: return approve(sourceToken);
+        case ActionKind::None:
+        case ActionKind::BulkApprove:
+            return failStale();
+        }
+    }
+    if (action != ActionKind::BulkApprove || !item->canApprove) {
+        return failStale();
+    }
+
+    const auto identities = item->approvalIdentityTokens;
+    clearOperationError();
+    qsizetype acceptedCount = 0;
+    qsizetype failedCount = 0;
+    for (const auto& identity : identities) {
+        const auto request =
+            m_pendingPermissions.notificationRequest(identity);
+        if (!request || !sessionIds.contains(request->sessionId)) {
+            continue;
+        }
+        if (request->risk != QStringLiteral("safe")
+            || !request->actionable
+            || !eligibleSession(request->sessionId)
+            || !m_pendingPermissions.approve(identity)) {
+            ++failedCount;
+            continue;
+        }
+        ++acceptedCount;
+    }
+    if (acceptedCount == 0 && failedCount == 0) {
+        return failStale();
+    }
+    if (failedCount > 0) {
+        setOperationError(
+            tr("Some Mission-scoped safe reads could not be approved. Remaining requests stay visible."));
+    }
+    rebuild();
+    return acceptedCount > 0 && failedCount == 0;
+}
+
+bool AttentionModel::denyScopedItem(
+    const QString& sourceToken,
+    const QSet<QString>& sessionIds)
+{
+    const auto* item = itemForToken(sourceToken);
+    if (item == nullptr || item->category != Category::Approval
+        || !item->canDeny || !sessionIds.contains(item->sessionId)
+        || !sourceIsCurrent(*item)) {
+        return failStale();
+    }
+    return deny(sourceToken);
 }
 
 void AttentionModel::rebuild()
@@ -541,6 +722,7 @@ void AttentionModel::rebuild()
         if (countChangedValue) {
             emit countChanged();
         }
+        emit stateChanged();
     }
     if (m_runningCount != runningCount
         || m_authorityState != authorityState

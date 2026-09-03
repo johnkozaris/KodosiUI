@@ -17,6 +17,7 @@ private slots:
     void dependencyBaselineIsCurrent();
     void desktopStateQmlContractIsNativeOwned();
     void shellAccountDeviceParityContract();
+    void missionPresentationRecoveryContract();
     void desktopFileIntegrationContractIsNativeOwned();
     void applicationLogUrlRedactionUsesTypedQStringSetters();
     void projectIntelligenceQmlContractIsProductSafe();
@@ -175,7 +176,6 @@ void ContractTest::desktopStateQmlContractIsNativeOwned()
     QVERIFY(tileSource.contains("width < 340 ? 0"));
     QVERIFY(tileSource.contains("width < 640 ? 1 : 2"));
     QVERIFY(tileSource.contains("visible: root.chromeTier >= 1"));
-    QVERIFY(tileSource.contains("visible: root.chromeTier < 2"));
     QVERIFY(tileSource.contains(
         "Accessible.description: terminalAccessibilityStatus"));
     QVERIFY(tileSource.contains(
@@ -186,6 +186,14 @@ void ContractTest::desktopStateQmlContractIsNativeOwned()
         "? KodosiTheme.accentMuted"));
     QVERIFY(!tileSource.contains("height: 2"));
     QVERIFY(tileSource.contains("text: qsTr(\"Read only\")"));
+    const auto remoteRetry = tileSource.indexOf(
+        "root.kind === \"remote\"");
+    QVERIFY(remoteRetry >= 0);
+    const auto remoteRetryBlock = tileSource.mid(remoteRetry, 800);
+    QVERIFY(remoteRetryBlock.contains(
+        "Models.SessionActions.restoreRemote("));
+    QVERIFY(remoteRetryBlock.contains(
+        "Models.TerminalSurfaces.retry("));
     QVERIFY(tileSource.contains(
         "focusedSizeAuthority: root.focusedSizeAuthority"));
     QVERIFY(tileSource.contains("function forceTerminalFocus()"));
@@ -320,7 +328,7 @@ void ContractTest::shellAccountDeviceParityContract()
         "Models.SessionActions.requestCloseConfirmation("));
     QVERIFY(mainSource.contains("Models.SessionActions.createDefault()"));
     QVERIFY(mainSource.contains("KeyboardShortcutsOverlay"));
-    QVERIFY(mainSource.contains("header.auth.signIn"));
+    QVERIFY(mainSource.contains("header.utility.menu"));
     QVERIFY(!mainSource.contains("sequence: \"Ctrl+Shift+A\""));
     QVERIFY(!mainSource.contains("sequence: \"Ctrl+Shift+X\""));
     QVERIFY(!mainSource.contains("shortcut.approval.approve"));
@@ -479,6 +487,77 @@ void ContractTest::shellAccountDeviceParityContract()
     }
 }
 
+void ContractTest::missionPresentationRecoveryContract()
+{
+    QFile peopleView(QStringLiteral(
+        KODOSI_SOURCE_DIR "/src/qml/People/PeopleView.qml"));
+    QVERIFY2(
+        peopleView.open(QIODevice::ReadOnly),
+        qPrintable(peopleView.errorString()));
+    const auto peopleSource = peopleView.readAll();
+    QVERIFY(peopleSource.contains(
+        "Models.MissionActions.hasCreateMissionDraft"));
+    QVERIFY(peopleSource.contains(
+        "discardCreateMission()"));
+    QVERIFY(peopleSource.contains(
+        "Models.MissionActions.createMission()"));
+    QVERIFY(!peopleSource.contains("MissionCreateComposer"));
+
+    QFile detailView(QStringLiteral(
+        KODOSI_SOURCE_DIR "/src/qml/People/MissionDetailView.qml"));
+    QVERIFY2(
+        detailView.open(QIODevice::ReadOnly),
+        qPrintable(detailView.errorString()));
+    const auto detailSource = detailView.readAll();
+    for (const auto contract : {
+             QByteArrayLiteral("visible: root.page === 0"),
+             QByteArrayLiteral("visible: root.page === 1"),
+             QByteArrayLiteral("visible: root.page === 2"),
+             QByteArrayLiteral("objectName: \"missions.chat\""),
+             QByteArrayLiteral("objectName: \"missions.tasks\""),
+             QByteArrayLiteral("objectName: \"missions.people\""),
+             QByteArrayLiteral("Models.MissionActions.sendChat()"),
+             QByteArrayLiteral("Models.MissionActions.submitTaskCreate()"),
+             QByteArrayLiteral("Models.MissionActions.chatCanCheck"),
+             QByteArrayLiteral("Models.MissionActions.checkChat()"),
+             QByteArrayLiteral("Models.MissionActions.retryChat()"),
+             QByteArrayLiteral("Models.MissionActions.discardChat()"),
+             QByteArrayLiteral("Models.MissionActions.taskCreateCanCheck"),
+             QByteArrayLiteral("Models.MissionActions.checkTaskCreate()"),
+             QByteArrayLiteral("Models.MissionActions.retryTaskCreate()"),
+             QByteArrayLiteral("Models.MissionActions.discardTaskCreate()"),
+             QByteArrayLiteral("objectName: \"missions.focus.actions\""),
+             QByteArrayLiteral("openFocusedFullTerminal()"),
+             QByteArrayLiteral("toggleFocusedDispatch()"),
+             QByteArrayLiteral("steerFocused("),
+             QByteArrayLiteral("interruptFocused()"),
+         }) {
+        QVERIFY2(detailSource.contains(contract), contract.constData());
+    }
+    for (const auto removed : {
+             QByteArrayLiteral("MissionAttentionStrip"),
+             QByteArrayLiteral("MissionChatPane"),
+             QByteArrayLiteral("MissionCrewRail"),
+             QByteArrayLiteral("MissionFocusLens"),
+             QByteArrayLiteral("MissionTaskQueue"),
+         }) {
+        QVERIFY2(!detailSource.contains(removed), removed.constData());
+    }
+
+    QFile composition(QStringLiteral(
+        KODOSI_SOURCE_DIR "/src/app/main.cpp"));
+    QVERIFY2(
+        composition.open(QIODevice::ReadOnly),
+        qPrintable(composition.errorString()));
+    const auto compositionSource = composition.readAll();
+    QVERIFY(compositionSource.contains(
+        "Unknown Mission chat has no compact recovery path."));
+    QVERIFY(compositionSource.contains(
+        "Mission focus actions did not disclose exclusively."));
+    QVERIFY(compositionSource.contains(
+        "Mission Tasks did not disclose exclusively."));
+}
+
 void ContractTest::desktopFileIntegrationContractIsNativeOwned()
 {
     QFile header(QStringLiteral(
@@ -594,8 +673,6 @@ void ContractTest::desktopFileIntegrationContractIsNativeOwned()
     QVERIFY2(tile.open(QIODevice::ReadOnly), qPrintable(tile.errorString()));
     const auto tileSource = tile.readAll();
     QVERIFY(tileSource.contains(".overflow.openProject"));
-    QVERIFY(tileSource.contains(
-        "\"stage.tile.\" + root.sessionId + \".openProject\""));
     QVERIFY(tileSource.contains("canOpenSessionProject(root.sessionId)"));
     QVERIFY(tileSource.contains("Models.DesktopFiles.TerminalProject"));
     QVERIFY(tileSource.contains(

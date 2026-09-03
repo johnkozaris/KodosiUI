@@ -64,7 +64,7 @@ KPopover {
     }
 
     background: Rectangle {
-        color: "transparent"
+        color: KodosiTheme.surface
     }
 
     contentItem: FocusScope {
@@ -81,8 +81,6 @@ KPopover {
             height: content.implicitHeight + 48
             radius: KodosiTheme.radiusMedium
             color: KodosiTheme.surface
-            border.width: 1
-            border.color: root.failed ? KodosiTheme.danger : KodosiTheme.seam
 
             ColumnLayout {
                 id: content
@@ -98,8 +96,6 @@ KPopover {
                     Layout.preferredHeight: 42
                     radius: KodosiTheme.radiusSmall
                     color: KodosiTheme.canvas
-                    border.width: 1
-                    border.color: KodosiTheme.seam
 
                     KIcon {
                         anchors.centerIn: parent
@@ -146,8 +142,6 @@ KPopover {
                     Layout.preferredHeight: 44
                     radius: KodosiTheme.radiusSmall
                     color: KodosiTheme.canvas
-                    border.width: 1
-                    border.color: KodosiTheme.seam
 
                     PlainLabel {
                         id: codeLabel

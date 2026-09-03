@@ -34,9 +34,5 @@ Slider {
         color: root.pressed
             ? KodosiTheme.accentPressed
             : KodosiTheme.accent
-        border.width: root.activeFocus ? 2 : 1
-        border.color: root.activeFocus
-            ? KodosiTheme.focusRing
-            : KodosiTheme.accentForeground
     }
 }

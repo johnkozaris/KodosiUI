@@ -72,6 +72,22 @@ color is reserved for state and intent.
 - Stable rails and stages that preserve spatial context during live work.
 - Terminal content remains the visual center of gravity.
 
+## Binding simplification
+
+- Swift remains the compositional authority; Qt does not surface backend state
+  merely because it exists.
+- The top bar contains navigation and one utility entry only.
+- The sidebar contains simple session rows only. Attention is a quiet state on
+  the related row, never a separate rail.
+- Mission content is progressively disclosed; directory, chat, tasks, people,
+  and focus are never presented as a simultaneous dashboard.
+- UI surfaces are opaque. Elements have no full outlines. Permanent structural
+  separators may use a line.
+- Rare raised surfaces may use a subtle top-left highlight and small
+  bottom-right shadow, never glass or full neumorphism.
+- Low-resolution layouts remove secondary information before consuming the
+  whole window.
+
 ## Colors
 
 The palette uses warm neutrals rather than blue-black defaults. Copper marks

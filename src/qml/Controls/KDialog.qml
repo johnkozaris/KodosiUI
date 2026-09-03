@@ -22,14 +22,12 @@ Dialog {
     background: Rectangle {
         color: KodosiTheme.surfaceRaised
         radius: KodosiTheme.radiusModal
-        border.width: 1
-        border.color: KodosiTheme.seamStrong
     }
 
     header: Rectangle {
         visible: root.title.length > 0
         implicitHeight: visible ? 54 : 0
-        color: "transparent"
+        color: KodosiTheme.surface
 
         PlainLabel {
             anchors.left: parent.left

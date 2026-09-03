@@ -8,7 +8,6 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QFile>
-#include <QRegularExpression>
 #include <QSet>
 #include <QSignalSpy>
 #include <QtTest/QTest>
@@ -62,12 +61,13 @@ private slots:
     void ordersApprovalsAndOtherAttention();
     void deduplicatesPermissionsAndExcludesRemoteSessions();
     void bulkApprovesOnlySafeReadsAndPreservesPartialFailures();
+    void scopesBulkSafeActionsBeforeMutation();
     void rejectsStaleTokensAndIncarnationReplacement();
     void fencesAgentTokensByExactRevision();
     void followsSourceResetsAndDataChanges();
     void exposesOnlyPresentationRoles();
     void enforcesOneTapApprovalPolicy();
-    void usesAttentionThemeControls();
+    void usesQuietSessionRowAttention();
     void sessionListFailureSurfacesInAttention();
     void combinesAgentIntelAuthority();
     void deduplicatesRefreshAndClearsResetErrors();
@@ -767,6 +767,73 @@ void AttentionModelTest::bulkApprovesOnlySafeReadsAndPreservesPartialFailures()
         >= 0);
 }
 
+void AttentionModelTest::scopesBulkSafeActionsBeforeMutation()
+{
+    Fixture fixture;
+    activate(
+        fixture,
+        QJsonArray {
+            session(QStringLiteral("s1"), incarnation1),
+            session(QStringLiteral("s2"), incarnation2),
+        });
+    QJsonArray pendingRequests;
+    QSet<QString> expectedTools;
+    for (auto index = 0; index < 16; ++index) {
+        const auto toolUseId =
+            QStringLiteral("safe-s1-%1").arg(index, 2, 10, QLatin1Char('0'));
+        expectedTools.insert(toolUseId);
+        pendingRequests.append(request(
+            QStringLiteral("s1"),
+            incarnation1,
+            toolUseId,
+            QStringLiteral("safe"),
+            1'700'000'000'000 + index));
+    }
+    pendingRequests.append(request(
+        QStringLiteral("s2"),
+        incarnation2,
+        QStringLiteral("safe-s2"),
+        QStringLiteral("safe"),
+        1'700'000'000'100));
+    fixture.permissions.ingestAgentIntelEvent(
+        permissionsSnapshot(1, pendingRequests));
+
+    const auto scoped = fixture.attention.scopedItems(
+        QSet<QString> {QStringLiteral("s1")});
+    QCOMPARE(scoped.size(), 1);
+    QCOMPARE(
+        scoped.constFirst().category,
+        kodosi::AttentionModel::Category::BulkSafe);
+    QCOMPARE(scoped.constFirst().itemCount, expectedTools.size());
+    QCOMPARE(
+        scoped.constFirst().sessionIds,
+        QStringList {QStringLiteral("s1")});
+
+    fixture.dispatcher.commands.clear();
+    QSignalSpy resets(
+        &fixture.attention,
+        &QAbstractItemModel::modelReset);
+    QVERIFY(fixture.attention.actOnScopedItem(
+        scoped.constFirst().sourceToken,
+        QSet<QString> {QStringLiteral("s1")},
+        kodosi::AttentionModel::ActionKind::BulkApprove));
+    const auto decisions = commandsOfType(
+        fixture.dispatcher,
+        QStringLiteral("agent.intel.allowPendingPermissionRequest"));
+    QVERIFY(resets.count() >= 1);
+    QCOMPARE(decisions.size(), expectedTools.size());
+    QSet<QString> decidedTools;
+    for (const auto& decision : decisions) {
+        decidedTools.insert(
+            decision.value(QStringLiteral("toolUseId")).toString());
+    }
+    QCOMPARE(decidedTools, expectedTools);
+    QVERIFY(!fixture.attention.actOnScopedItem(
+        scoped.constFirst().sourceToken,
+        QSet<QString> {QStringLiteral("s1")},
+        kodosi::AttentionModel::ActionKind::BulkApprove));
+}
+
 void AttentionModelTest::rejectsStaleTokensAndIncarnationReplacement()
 {
     Fixture fixture;
@@ -1051,91 +1118,26 @@ void AttentionModelTest::enforcesOneTapApprovalPolicy()
         navigation.clear();
     }
 
-    QFile qml(
-        QStringLiteral(KODOSI_SOURCE_DIR)
-        + QStringLiteral("/src/qml/Attention/AttentionCard.qml"));
-    QVERIFY(qml.open(QIODevice::ReadOnly));
-    const auto source = qml.readAll();
-    QVERIFY(source.contains(
-        "visible: root.actionKind === Models.Attention.Review"));
-    QVERIFY(source.contains(
-        "visible: root.actionKind === Models.Attention.Approve"));
-
-    QFile panel(
-        QStringLiteral(KODOSI_SOURCE_DIR)
-        + QStringLiteral("/src/qml/Attention/AttentionPanel.qml"));
-    QVERIFY(panel.open(QIODevice::ReadOnly));
-    const auto panelSource = panel.readAll();
-    QVERIFY(panelSource.contains(
-        "objectName: \"panel.attention.authorityError\""));
-    QVERIFY(panelSource.contains(
-        "visible: Models.Attention.count > 0"));
 }
 
-void AttentionModelTest::usesAttentionThemeControls()
+void AttentionModelTest::usesQuietSessionRowAttention()
 {
-    const QStringList files {
-        QStringLiteral("AttentionButton.qml"),
-        QStringLiteral("AttentionCard.qml"),
-        QStringLiteral("AttentionPanel.qml"),
-        QStringLiteral("AttentionRail.qml"),
-        QStringLiteral("AttentionSpinner.qml"),
-    };
-    const QRegularExpression rawColor(
-        QStringLiteral(R"(["']#[0-9a-fA-F]{3,8}["'])"));
-    const QRegularExpression defaultButton(
-        QStringLiteral(R"((^|\n)\s*Button\s*\{)"));
-    const QRegularExpression numericRadius(
-        QStringLiteral(R"(\bradius\s*:\s*([0-9]+(?:\.[0-9]+)?))"));
-
-    for (const auto& fileName : files) {
-        QFile file(
-            QStringLiteral(KODOSI_SOURCE_DIR)
-            + QStringLiteral("/src/qml/Attention/") + fileName);
-        QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(fileName));
-        const auto source = QString::fromUtf8(file.readAll());
-        QVERIFY2(
-            !rawColor.match(source).hasMatch(),
-            qPrintable(fileName));
-        QVERIFY2(
-            !source.contains(QStringLiteral("\"transparent\"")),
-            qPrintable(fileName));
-        if (fileName != QStringLiteral("AttentionButton.qml")) {
-            QVERIFY2(
-                !defaultButton.match(source).hasMatch(),
-                qPrintable(fileName));
-        }
-        auto radii = numericRadius.globalMatch(source);
-        while (radii.hasNext()) {
-            const auto radius = radii.next().captured(1).toDouble();
-            QVERIFY2(radius <= 7.0, qPrintable(fileName));
-        }
-        if (fileName == QStringLiteral("AttentionCard.qml")) {
-            QVERIFY(source.contains(QStringLiteral("approval.deny.")));
-            QVERIFY(source.contains(QStringLiteral("approval.allow.")));
-        } else if (fileName == QStringLiteral("AttentionRail.qml")) {
-            QVERIFY(source.contains(QStringLiteral(
-                "objectName: \"stage.approvals\"")));
-        }
-    }
+    QFile sidebar(
+        QStringLiteral(KODOSI_SOURCE_DIR)
+        + QStringLiteral("/src/qml/Workbench/SessionSidebar.qml"));
+    QVERIFY(sidebar.open(QIODevice::ReadOnly));
+    const auto source = sidebar.readAll();
+    QVERIFY(source.contains(
+        "Models.Attention.sessionNeedsAttention(sessionId)"));
+    QVERIFY(source.contains(
+        "color: sessionRow.needsAttention"));
+    QVERIFY(!source.contains("AttentionRail"));
 
     QFile mainQml(
         QStringLiteral(KODOSI_SOURCE_DIR)
         + QStringLiteral("/src/qml/Main.qml"));
     QVERIFY(mainQml.open(QIODevice::ReadOnly));
-    const auto mainSource = QString::fromUtf8(mainQml.readAll());
-    const auto attentionStart =
-        mainSource.indexOf(QStringLiteral("id: attentionButton"));
-    const auto attentionEnd =
-        mainSource.indexOf(QStringLiteral("id: settingsButton"));
-    QVERIFY(attentionStart >= 0);
-    QVERIFY(attentionEnd > attentionStart);
-    const auto attentionHeader =
-        mainSource.mid(attentionStart, attentionEnd - attentionStart);
-    QVERIFY(!rawColor.match(attentionHeader).hasMatch());
-    QVERIFY(!attentionHeader.contains(QStringLiteral("\"transparent\"")));
-    QVERIFY(attentionHeader.contains(QStringLiteral("KIconButton")));
-    QVERIFY(attentionHeader.contains(QStringLiteral("glyph: \"bell\"")));
+    QVERIFY(!mainQml.readAll().contains("header.attention"));
 }
 
 void AttentionModelTest::sessionListFailureSurfacesInAttention()

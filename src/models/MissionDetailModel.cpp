@@ -1,5 +1,13 @@
 #include "models/MissionDetailModel.hpp"
 
+#include "models/AttentionModel.hpp"
+#include "models/DesktopStateModel.hpp"
+#include "models/MissionActions.hpp"
+#include "models/PeopleModel.hpp"
+#include "models/SessionActions.hpp"
+#include "models/SessionCatalogModel.hpp"
+#include "models/SteeringModel.hpp"
+
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRegularExpression>
@@ -61,11 +69,35 @@ std::optional<QDateTime> rfc3339(const QString& value)
         : std::nullopt;
 }
 
-std::optional<QStringList> stringArray(const QJsonObject& object, const QString& key)
+bool nullableString(
+    const QJsonObject& object,
+    const QString& key,
+    QString& result,
+    const bool nonempty = false)
 {
     const auto value = object.value(key);
     if (value.isUndefined() || value.isNull()) {
-        return QStringList {};
+        result.clear();
+        return true;
+    }
+    if (!value.isString()
+        || (nonempty && value.toString().isEmpty())) {
+        return false;
+    }
+    result = value.toString();
+    return true;
+}
+
+std::optional<QStringList> stringArray(
+    const QJsonObject& object,
+    const QString& key,
+    const bool required = false)
+{
+    const auto value = object.value(key);
+    if (value.isUndefined() || value.isNull()) {
+        return required
+            ? std::nullopt
+            : std::optional<QStringList> {QStringList {}};
     }
     if (!value.isArray()) {
         return std::nullopt;
@@ -86,6 +118,33 @@ std::optional<QStringList> stringArray(const QJsonObject& object, const QString&
 QByteArray commandJson(QJsonObject command)
 {
     return QJsonDocument(std::move(command)).toJson(QJsonDocument::Compact);
+}
+
+bool liveMissionSession(const QString& status)
+{
+    return status == QStringLiteral("active")
+        || status == QStringLiteral("waiting")
+        || status == QStringLiteral("blocked")
+        || status == QStringLiteral("reconnecting");
+}
+
+bool knownTaskStatus(const QString& status)
+{
+    return status == QStringLiteral("Open")
+        || status == QStringLiteral("InProgress")
+        || status == QStringLiteral("Review")
+        || status == QStringLiteral("Done")
+        || status == QStringLiteral("Archived");
+}
+
+bool knownDeliveryState(const QString& state)
+{
+    return state == QStringLiteral("waitingForAdapter")
+        || state == QStringLiteral("ready")
+        || state == QStringLiteral("offered")
+        || state == QStringLiteral("acceptedByTransport")
+        || state == QStringLiteral("actedOn")
+        || state == QStringLiteral("failed");
 }
 
 } // namespace
@@ -195,6 +254,15 @@ QVariant MissionMessagesModel::data(const QModelIndex& index, const int role) co
     case BroadcastRole:
         return message.recipientSessionIds.isEmpty()
             && message.recipientUserIds.isEmpty();
+    case AuthorDisplayRole:
+        return message.authorDisplay;
+    case AudienceSummaryRole:
+        return message.audienceSummary;
+    case RecipientPresentationIdsRole:
+        return message.recipientPresentationIds;
+    case RecipientCountRole:
+        return message.recipientSessionIds.size()
+            + message.recipientUserIds.size();
     default:
         return {};
     }
@@ -211,14 +279,20 @@ QHash<int, QByteArray> MissionMessagesModel::roleNames() const
         {SequenceRole, QByteArrayLiteral("sequence")},
         {PostedAtRole, QByteArrayLiteral("postedAt")},
         {BroadcastRole, QByteArrayLiteral("broadcast")},
+        {AuthorDisplayRole, QByteArrayLiteral("authorDisplay")},
+        {AudienceSummaryRole, QByteArrayLiteral("audienceSummary")},
+        {RecipientPresentationIdsRole,
+         QByteArrayLiteral("recipientPresentationIds")},
+        {RecipientCountRole, QByteArrayLiteral("recipientCount")},
     };
 }
 
 void MissionMessagesModel::replace(QVector<Message> messages)
 {
     std::ranges::sort(messages, {}, &Message::sequence);
-    if (messages.size() > 500) {
-        messages = messages.sliced(messages.size() - 500);
+    constexpr qsizetype maximumMessages = 1'000;
+    if (messages.size() > maximumMessages) {
+        messages = messages.sliced(messages.size() - maximumMessages);
     }
     beginResetModel();
     const auto changed = m_messages.size() != messages.size();
@@ -274,6 +348,28 @@ QVariant MissionTasksModel::data(const QModelIndex& index, const int role) const
         return task.updatedAt;
     case ResultRole:
         return task.result;
+    case KnownStatusRole:
+        return task.knownStatus;
+    case StatusLabelRole:
+        return task.statusLabel;
+    case AssignmentDisplayRole:
+        return task.assignmentDisplay;
+    case CreatedAtRole:
+        return task.createdAt;
+    case CompletedAtRole:
+        return task.completedAt;
+    case ResultEvidenceRole:
+        return task.result;
+    case ResultAuthorDisplayRole:
+        return task.resultAuthorDisplay;
+    case UnknownStatusTitleRole:
+        return task.knownStatus
+            ? QString {}
+            : tr("Unknown task state");
+    case UnknownStatusMessageRole:
+        return task.knownStatus
+            ? QString {}
+            : tr("This task uses a status this client does not recognize. It remains visible and cannot be changed here.");
     default:
         return {};
     }
@@ -290,6 +386,15 @@ QHash<int, QByteArray> MissionTasksModel::roleNames() const
         {DueAtRole, QByteArrayLiteral("dueAt")},
         {UpdatedAtRole, QByteArrayLiteral("updatedAt")},
         {ResultRole, QByteArrayLiteral("result")},
+        {KnownStatusRole, QByteArrayLiteral("knownStatus")},
+        {StatusLabelRole, QByteArrayLiteral("statusLabel")},
+        {AssignmentDisplayRole, QByteArrayLiteral("assignmentDisplay")},
+        {CreatedAtRole, QByteArrayLiteral("createdAt")},
+        {CompletedAtRole, QByteArrayLiteral("completedAt")},
+        {ResultEvidenceRole, QByteArrayLiteral("resultEvidence")},
+        {ResultAuthorDisplayRole, QByteArrayLiteral("resultAuthorDisplay")},
+        {UnknownStatusTitleRole, QByteArrayLiteral("unknownStatusTitle")},
+        {UnknownStatusMessageRole, QByteArrayLiteral("unknownStatusMessage")},
     };
 }
 
@@ -339,20 +444,377 @@ void MissionTasksModel::upsert(Task task)
     replace(std::move(tasks));
 }
 
+MissionCrewModel::MissionCrewModel(QObject* parent)
+    : QAbstractListModel(parent)
+{
+}
+
+int MissionCrewModel::rowCount(const QModelIndex& parent) const
+{
+    return parent.isValid() ? 0 : m_entries.size();
+}
+
+QVariant MissionCrewModel::data(const QModelIndex& index, const int role) const
+{
+    if (!index.isValid() || index.row() < 0 || index.row() >= m_entries.size()) {
+        return {};
+    }
+    const auto& entry = m_entries.at(index.row());
+    switch (role) {
+    case PresentationIdRole: return entry.presentationId;
+    case KindRole: return QVariant::fromValue(entry.kind);
+    case DisplayNameRole: return entry.displayName;
+    case SecondaryLabelRole: return entry.secondaryLabel;
+    case StatusRole: return entry.status;
+    case CanOpenFullTerminalRole: return entry.canOpenFullTerminal;
+    case CanDispatchRole: return entry.canDispatch;
+    case CanAssignTaskRole: return entry.canAssignTask;
+    case CanSteerRole: return entry.canSteer;
+    case CanInterruptRole: return entry.canInterrupt;
+    case DispatchSelectedRole: return entry.dispatchSelected;
+    case AttentionCountRole: return entry.attentionCount;
+    case DeliveryStateRole: return entry.deliveryState;
+    case DeliveryDetailRole: return entry.deliveryDetail;
+    default: return {};
+    }
+}
+
+QHash<int, QByteArray> MissionCrewModel::roleNames() const
+{
+    return {
+        {PresentationIdRole, QByteArrayLiteral("presentationId")},
+        {KindRole, QByteArrayLiteral("kind")},
+        {DisplayNameRole, QByteArrayLiteral("displayName")},
+        {SecondaryLabelRole, QByteArrayLiteral("secondaryLabel")},
+        {StatusRole, QByteArrayLiteral("status")},
+        {CanOpenFullTerminalRole, QByteArrayLiteral("canOpenFullTerminal")},
+        {CanDispatchRole, QByteArrayLiteral("canDispatch")},
+        {CanAssignTaskRole, QByteArrayLiteral("canAssignTask")},
+        {CanSteerRole, QByteArrayLiteral("canSteer")},
+        {CanInterruptRole, QByteArrayLiteral("canInterrupt")},
+        {DispatchSelectedRole, QByteArrayLiteral("dispatchSelected")},
+        {AttentionCountRole, QByteArrayLiteral("attentionCount")},
+        {DeliveryStateRole, QByteArrayLiteral("deliveryState")},
+        {DeliveryDetailRole, QByteArrayLiteral("deliveryDetail")},
+    };
+}
+
+int MissionCrewModel::dispatchableAgentCount() const noexcept
+{
+    return static_cast<int>(std::ranges::count_if(
+        m_entries,
+        [](const Entry& entry) {
+            return entry.kind == Kind::Agent && entry.canDispatch;
+        }));
+}
+
+bool MissionCrewModel::containsPresentationId(
+    const QString& presentationId) const
+{
+    return std::ranges::find(
+        m_entries,
+        presentationId,
+        &Entry::presentationId) != m_entries.end();
+}
+
+void MissionCrewModel::replace(QVector<Entry> entries)
+{
+    std::ranges::sort(entries, [](const Entry& left, const Entry& right) {
+        if (left.kind != right.kind) {
+            return left.kind < right.kind;
+        }
+        const auto compared = left.displayName.localeAwareCompare(
+            right.displayName);
+        return compared == 0 ? left.presentationId < right.presentationId
+                             : compared < 0;
+    });
+    const auto countChangedValue = m_entries.size() != entries.size();
+    const auto dispatchableAgentCountValue =
+        static_cast<int>(std::ranges::count_if(
+            entries,
+            [](const Entry& entry) {
+                return entry.kind == Kind::Agent && entry.canDispatch;
+            }));
+    const auto dispatchableAgentCountChangedValue =
+        dispatchableAgentCount() != dispatchableAgentCountValue;
+    beginResetModel();
+    m_entries = std::move(entries);
+    endResetModel();
+    if (countChangedValue) {
+        emit countChanged();
+    }
+    if (dispatchableAgentCountChangedValue) {
+        emit dispatchableAgentCountChanged();
+    }
+}
+
+std::optional<MissionCrewModel::RecipientContext>
+MissionCrewModel::recipientContext(const QString& presentationId) const
+{
+    const auto found = std::ranges::find(
+        m_entries,
+        presentationId,
+        &Entry::presentationId);
+    if (found == m_entries.end()) {
+        return std::nullopt;
+    }
+    return RecipientContext {
+        .kind = found->kind,
+        .rawId = found->rawRecipientId,
+        .localSessionId = found->localSessionId,
+        .sessionIncarnationId = found->sessionIncarnationId,
+        .assignmentSessionId = found->assignmentSessionId,
+        .assignmentIncarnationId = found->assignmentIncarnationId,
+        .displayName = found->displayName,
+        .canDispatch = found->canDispatch,
+        .canAssignTask = found->canAssignTask,
+    };
+}
+
+QString MissionCrewModel::presentationForSession(
+    const QString& sessionId,
+    const QString& incarnationId) const
+{
+    const auto found = std::ranges::find_if(
+        m_entries,
+        [&](const Entry& entry) {
+            return entry.kind == Kind::Agent
+                && entry.localSessionId == sessionId
+                && (incarnationId.isEmpty()
+                    || entry.sessionIncarnationId == incarnationId);
+        });
+    return found == m_entries.end() ? QString {} : found->presentationId;
+}
+
+QString MissionCrewModel::presentationForUser(const QString& userId) const
+{
+    const auto found = std::ranges::find_if(
+        m_entries,
+        [&](const Entry& entry) {
+            return entry.kind == Kind::Member
+                && entry.rawRecipientId == userId;
+        });
+    return found == m_entries.end() ? QString {} : found->presentationId;
+}
+
+MissionScopedAttentionModel::MissionScopedAttentionModel(QObject* parent)
+    : QAbstractListModel(parent)
+{
+}
+
+int MissionScopedAttentionModel::rowCount(const QModelIndex& parent) const
+{
+    return parent.isValid() ? 0 : m_entries.size();
+}
+
+QVariant MissionScopedAttentionModel::data(
+    const QModelIndex& index,
+    const int role) const
+{
+    if (!index.isValid() || index.row() < 0 || index.row() >= m_entries.size()) {
+        return {};
+    }
+    const auto& entry = m_entries.at(index.row());
+    switch (role) {
+    case ActionPresentationIdRole: return entry.actionPresentationId;
+    case CategoryRole: return QVariant::fromValue(entry.category);
+    case SessionPresentationIdRole: return entry.sessionPresentationId;
+    case TitleRole: return entry.title;
+    case SummaryRole: return entry.summary;
+    case RiskRole: return QVariant::fromValue(entry.risk);
+    case ToneRole: return QVariant::fromValue(entry.tone);
+    case ActionKindRole: return QVariant::fromValue(entry.actionKind);
+    case CanApproveRole: return entry.canApprove;
+    case CanDenyRole: return entry.canDeny;
+    case CanJumpRole: return entry.canJump;
+    case ItemCountRole: return entry.itemCount;
+    default: return {};
+    }
+}
+
+QHash<int, QByteArray> MissionScopedAttentionModel::roleNames() const
+{
+    return {
+        {ActionPresentationIdRole, QByteArrayLiteral("actionPresentationId")},
+        {CategoryRole, QByteArrayLiteral("category")},
+        {SessionPresentationIdRole,
+         QByteArrayLiteral("sessionPresentationId")},
+        {TitleRole, QByteArrayLiteral("title")},
+        {SummaryRole, QByteArrayLiteral("summary")},
+        {RiskRole, QByteArrayLiteral("risk")},
+        {ToneRole, QByteArrayLiteral("tone")},
+        {ActionKindRole, QByteArrayLiteral("actionKind")},
+        {CanApproveRole, QByteArrayLiteral("canApprove")},
+        {CanDenyRole, QByteArrayLiteral("canDeny")},
+        {CanJumpRole, QByteArrayLiteral("canJump")},
+        {ItemCountRole, QByteArrayLiteral("itemCount")},
+    };
+}
+
+int MissionScopedAttentionModel::totalCount() const noexcept
+{
+    return m_totalCount;
+}
+
+bool MissionScopedAttentionModel::truncated() const noexcept
+{
+    return m_totalCount > m_entries.size();
+}
+
+int MissionScopedAttentionModel::pageOffset() const noexcept
+{
+    return m_pageOffset;
+}
+
+bool MissionScopedAttentionModel::canLoadMore() const noexcept
+{
+    return m_pageOffset + m_entries.size() < m_totalCount;
+}
+
+bool MissionScopedAttentionModel::canLoadPrevious() const noexcept
+{
+    return m_pageOffset > 0;
+}
+
+bool MissionScopedAttentionModel::loadMore()
+{
+    return canLoadMore() && m_owner != nullptr
+        && m_owner->setAttentionPageOffset(
+            m_pageOffset + maximumVisibleItems);
+}
+
+bool MissionScopedAttentionModel::loadPrevious()
+{
+    return canLoadPrevious() && m_owner != nullptr
+        && m_owner->setAttentionPageOffset(
+            std::max(0, m_pageOffset - maximumVisibleItems));
+}
+
+bool MissionScopedAttentionModel::review(const QString& presentationId)
+{
+    return perform(
+        presentationId,
+        ActionKind::Review);
+}
+
+bool MissionScopedAttentionModel::jump(const QString& presentationId)
+{
+    return perform(
+        presentationId,
+        ActionKind::Jump);
+}
+
+bool MissionScopedAttentionModel::approve(const QString& presentationId)
+{
+    return perform(
+        presentationId,
+        ActionKind::Approve);
+}
+
+bool MissionScopedAttentionModel::deny(const QString& presentationId)
+{
+    const auto found = std::ranges::find(
+        m_entries,
+        presentationId,
+        &Entry::actionPresentationId);
+    if (found == m_entries.end() || m_owner == nullptr || !found->canDeny) {
+        return false;
+    }
+    return m_owner->performAttentionAction(
+        *found,
+        ActionKind::Approve,
+        true);
+}
+
+bool MissionScopedAttentionModel::approveAll(const QString& presentationId)
+{
+    return perform(
+        presentationId,
+        ActionKind::BulkApprove);
+}
+
+void MissionScopedAttentionModel::replace(
+    QVector<Entry> entries,
+    QHash<QString, int> sessionCounts,
+    const int totalCount,
+    const int pageOffset)
+{
+    QSet<QString> liveKeys;
+    for (const auto& entry : entries) {
+        liveKeys.insert(entry.authorityKey);
+    }
+    for (auto token = m_tokensByKey.begin(); token != m_tokensByKey.end();) {
+        if (liveKeys.contains(token.key())) {
+            ++token;
+        } else {
+            token = m_tokensByKey.erase(token);
+        }
+    }
+    const auto countChangedValue =
+        m_entries.size() != entries.size() || m_totalCount != totalCount
+        || m_pageOffset != pageOffset;
+    beginResetModel();
+    m_entries = std::move(entries);
+    m_sessionCounts = std::move(sessionCounts);
+    m_totalCount = totalCount;
+    m_pageOffset = pageOffset;
+    endResetModel();
+    if (countChangedValue) {
+        emit countChanged();
+    }
+}
+
+bool MissionScopedAttentionModel::perform(
+    const QString& presentationId,
+    const ActionKind actionKind)
+{
+    const auto found = std::ranges::find(
+        m_entries,
+        presentationId,
+        &Entry::actionPresentationId);
+    return found != m_entries.end() && m_owner != nullptr
+        && found->actionKind == actionKind
+        && m_owner->performAttentionAction(*found, actionKind);
+}
+
+int MissionScopedAttentionModel::countForSession(const QString& sessionId) const
+{
+    return m_sessionCounts.value(sessionId);
+}
+
 MissionDetailModel::MissionDetailModel(
     CommandDispatcher& dispatcher,
     MissionDirectoryModel& directory,
     const qint64 hydrationTimeoutMs,
     QObject* parent)
+    : MissionDetailModel(
+        dispatcher,
+        directory,
+        Dependencies {},
+        hydrationTimeoutMs,
+        parent)
+{
+}
+
+MissionDetailModel::MissionDetailModel(
+    CommandDispatcher& dispatcher,
+    MissionDirectoryModel& directory,
+    Dependencies dependencies,
+    const qint64 hydrationTimeoutMs,
+    QObject* parent)
     : QObject(parent)
     , m_dispatcher(dispatcher)
     , m_directory(directory)
+    , m_dependencies(dependencies)
     , m_members(this)
     , m_messages(this)
     , m_tasks(this)
+    , m_crew(this)
+    , m_attention(this)
     , m_hydrationTimeoutMs(hydrationTimeoutMs)
 {
     Q_ASSERT(hydrationTimeoutMs >= 0);
+    m_attention.m_owner = this;
     m_hydrationTimer.setSingleShot(true);
     connect(&m_hydrationTimer, &QTimer::timeout, this, [this] {
         hydrationTimedOut();
@@ -362,6 +824,45 @@ MissionDetailModel::MissionDetailModel(
             closeMission();
         }
     });
+    const auto rebuild = [this] {
+        if (!m_missionId.isEmpty()) {
+            rebuildProjections();
+        }
+    };
+    for (auto* model : {
+             static_cast<QAbstractItemModel*>(m_dependencies.people),
+             static_cast<QAbstractItemModel*>(m_dependencies.sessions),
+             static_cast<QAbstractItemModel*>(m_dependencies.attention),
+         }) {
+        if (model == nullptr) {
+            continue;
+        }
+        connect(model, &QAbstractItemModel::modelReset, this, rebuild);
+        connect(model, &QAbstractItemModel::rowsInserted, this, rebuild);
+        connect(model, &QAbstractItemModel::rowsRemoved, this, rebuild);
+        connect(model, &QAbstractItemModel::dataChanged, this, rebuild);
+    }
+    if (m_dependencies.attention != nullptr) {
+        connect(
+            m_dependencies.attention,
+            &AttentionModel::stateChanged,
+            this,
+            rebuild);
+    }
+    if (m_dependencies.sessions != nullptr) {
+        connect(
+            m_dependencies.sessions,
+            &SessionCatalogModel::authorityStateChanged,
+            this,
+            rebuild);
+    }
+    if (m_dependencies.sessionActions != nullptr) {
+        connect(
+            m_dependencies.sessionActions,
+            &SessionActions::availabilityChanged,
+            this,
+            rebuild);
+    }
 }
 
 QString MissionDetailModel::missionId() const
@@ -404,6 +905,69 @@ MissionTasksModel* MissionDetailModel::tasks() noexcept
     return &m_tasks;
 }
 
+MissionCrewModel* MissionDetailModel::crew() noexcept
+{
+    return &m_crew;
+}
+
+MissionScopedAttentionModel* MissionDetailModel::attention() noexcept
+{
+    return &m_attention;
+}
+
+QString MissionDetailModel::selectedCrewPresentationId() const
+{
+    return m_selectedCrewPresentationId;
+}
+
+QString MissionDetailModel::selectedSessionDisplayName() const
+{
+    const auto entry = selectedCrewEntry();
+    return entry ? entry->displayName : QString {};
+}
+
+QString MissionDetailModel::selectedSessionStatus() const
+{
+    const auto entry = selectedCrewEntry();
+    return entry ? entry->status : QString {};
+}
+
+QString MissionDetailModel::selectedTerminalSessionId() const
+{
+    const auto entry = selectedCrewEntry();
+    return entry && entry->kind == MissionCrewModel::Kind::Agent
+        ? entry->localSessionId
+        : QString {};
+}
+
+bool MissionDetailModel::selectedCanOpenFullTerminal() const
+{
+    const auto entry = selectedCrewEntry();
+    return entry && entry->kind == MissionCrewModel::Kind::Agent
+        && entry->canOpenFullTerminal;
+}
+
+bool MissionDetailModel::selectedCanToggleDispatch() const
+{
+    const auto entry = selectedCrewEntry();
+    return entry && entry->kind == MissionCrewModel::Kind::Agent
+        && entry->canDispatch;
+}
+
+bool MissionDetailModel::selectedCanSteer() const
+{
+    const auto entry = selectedCrewEntry();
+    return entry && entry->kind == MissionCrewModel::Kind::Agent
+        && entry->canSteer;
+}
+
+bool MissionDetailModel::selectedCanInterrupt() const
+{
+    const auto entry = selectedCrewEntry();
+    return entry && entry->kind == MissionCrewModel::Kind::Agent
+        && entry->canInterrupt;
+}
+
 bool MissionDetailModel::openMission(const QString& missionId)
 {
     if (!m_authenticated || !m_directory.containsMission(missionId)) {
@@ -411,6 +975,31 @@ bool MissionDetailModel::openMission(const QString& missionId)
     }
     clearDetail();
     m_missionId = missionId;
+    rebuildProjections();
+    (void)beginFullHydration();
+    return true;
+}
+
+bool MissionDetailModel::retry()
+{
+    if (!m_authenticated || m_missionId.isEmpty()
+        || !m_directory.containsMission(m_missionId)) {
+        return false;
+    }
+    return beginFullHydration();
+}
+
+bool MissionDetailModel::beginFullHydration()
+{
+    m_hydrationTimer.stop();
+    m_staleMessageIds.clear();
+    for (const auto& message : std::as_const(m_messages.m_messages)) {
+        m_staleMessageIds.insert(message.id);
+    }
+    m_staleTaskIds.clear();
+    for (const auto& task : std::as_const(m_tasks.m_tasks)) {
+        m_staleTaskIds.insert(task.id);
+    }
     m_memberHydrationId = QUuid::createUuidV7().toString(QUuid::WithoutBraces);
     m_chatHydrationId = QUuid::createUuidV7().toString(QUuid::WithoutBraces);
     m_taskLoad = TaskLoad {
@@ -420,36 +1009,54 @@ bool MissionDetailModel::openMission(const QString& missionId)
         .tasks = {},
     };
     m_membersLoading = true;
+    m_membersAuthoritative = false;
     m_chatLoading = true;
+    m_chatAuthoritative = false;
     m_tasksLoading = true;
+    m_tasksAuthoritative = false;
+    rebuildProjections();
     emit stateChanged();
 
     const auto membersAccepted = m_dispatcher.send(
         CommandLane::Rooms,
         commandJson({
             {QStringLiteral("type"), QStringLiteral("room.refreshMembers")},
-            {QStringLiteral("room_id"), missionId},
+            {QStringLiteral("room_id"), m_missionId},
             {QStringLiteral("hydration_id"), m_memberHydrationId},
         }));
     const auto chatAccepted = m_dispatcher.send(
         CommandLane::Rooms,
         commandJson({
             {QStringLiteral("type"), QStringLiteral("room.chat.list")},
-            {QStringLiteral("room_id"), missionId},
-            {QStringLiteral("limit"), 500},
+            {QStringLiteral("room_id"), m_missionId},
+            {QStringLiteral("limit"), static_cast<qint64>(maximumMessages)},
             {QStringLiteral("tail"), true},
             {QStringLiteral("hydration_id"), m_chatHydrationId},
         }));
     const auto tasksAccepted = requestTaskPage();
-    if (membersAccepted && chatAccepted && tasksAccepted) {
-        m_hydrationTimer.start(static_cast<int>(m_hydrationTimeoutMs));
-        return true;
+    if (!membersAccepted) {
+        m_memberHydrationId.clear();
+        m_membersLoading = false;
     }
-    clearDetail();
-    m_lastError =
-        QStringLiteral("The runtime did not accept Mission detail hydration.");
-    emit stateChanged();
-    return false;
+    if (!chatAccepted) {
+        m_chatHydrationId.clear();
+        m_chatLoading = false;
+    }
+    if (!tasksAccepted) {
+        m_taskLoad.reset();
+        m_tasksLoading = false;
+    }
+    if (membersAccepted || chatAccepted || tasksAccepted) {
+        m_hydrationTimer.start(static_cast<int>(m_hydrationTimeoutMs));
+    }
+    const auto accepted =
+        membersAccepted && chatAccepted && tasksAccepted;
+    if (!accepted) {
+        m_lastError = QStringLiteral(
+            "The runtime did not accept all Mission detail hydration requests.");
+    }
+    updateLoading();
+    return accepted;
 }
 
 bool MissionDetailModel::refreshTasks()
@@ -464,6 +1071,10 @@ bool MissionDetailModel::refreshTasks()
         .pageCount = 0,
         .tasks = {},
     };
+    m_staleTaskIds.clear();
+    for (const auto& task : std::as_const(m_tasks.m_tasks)) {
+        m_staleTaskIds.insert(task.id);
+    }
     m_tasksLoading = true;
     m_tasksAuthoritative = false;
     emit stateChanged();
@@ -483,6 +1094,84 @@ void MissionDetailModel::closeMission()
 {
     clearDetail();
     emit stateChanged();
+}
+
+bool MissionDetailModel::selectCrew(const QString& presentationId)
+{
+    const auto context = m_crew.recipientContext(presentationId);
+    if (!context || context->kind != MissionCrewModel::Kind::Agent
+        || context->localSessionId.isEmpty()
+        || context->sessionIncarnationId.isEmpty()) {
+        return false;
+    }
+    m_selectedCrewPresentationId = presentationId;
+    m_selectedSessionId = context->localSessionId;
+    m_selectedSessionIncarnationId = context->sessionIncarnationId;
+    if (m_dependencies.steering != nullptr) {
+        (void)m_dependencies.steering->inspect(context->localSessionId);
+    }
+    emit focusChanged();
+    return true;
+}
+
+void MissionDetailModel::clearFocus()
+{
+    if (m_selectedCrewPresentationId.isEmpty()) {
+        return;
+    }
+    m_selectedCrewPresentationId.clear();
+    m_selectedSessionId.clear();
+    m_selectedSessionIncarnationId.clear();
+    if (m_dependencies.steering != nullptr) {
+        m_dependencies.steering->clearInspection();
+    }
+    emit focusChanged();
+}
+
+bool MissionDetailModel::openFocusedFullTerminal()
+{
+    const auto entry = selectedCrewEntry();
+    if (!entry || !entry->canOpenFullTerminal
+        || m_dependencies.desktopState == nullptr
+        || !m_dependencies.desktopState->selectSession(
+            entry->localSessionId)) {
+        return false;
+    }
+    m_dependencies.desktopState->setActiveView(0);
+    return true;
+}
+
+bool MissionDetailModel::toggleFocusedDispatch()
+{
+    const auto entry = selectedCrewEntry();
+    return entry && entry->canDispatch && m_actions != nullptr
+        && m_actions->toggleChatRecipient(entry->presentationId);
+}
+
+bool MissionDetailModel::steerFocused(const QString& text)
+{
+    const auto entry = selectedCrewEntry();
+    if (!entry || !entry->canSteer || m_dependencies.steering == nullptr
+        || text.trimmed().isEmpty()) {
+        return false;
+    }
+    auto* steering = m_dependencies.steering;
+    if (!steering->inspect(entry->localSessionId)
+        || !steering->saveDraft(
+            entry->localSessionId,
+            text,
+            QStringLiteral("steer"))) {
+        return false;
+    }
+    return steering->send(entry->localSessionId);
+}
+
+bool MissionDetailModel::interruptFocused()
+{
+    const auto entry = selectedCrewEntry();
+    return entry && entry->canInterrupt
+        && m_dependencies.sessionActions != nullptr
+        && m_dependencies.sessionActions->interrupt(entry->localSessionId);
 }
 
 void MissionDetailModel::ingestAuthEvent(QByteArray json)
@@ -552,6 +1241,11 @@ void MissionDetailModel::resetRuntimeAuthority()
 {
     m_accountFence.reset();
     m_authenticated = false;
+    m_accountUserId.clear();
+    m_deliveries.clear();
+    m_deliveryOrder.clear();
+    m_crew.m_tokensByKey.clear();
+    m_crew.m_tokenOrder.clear();
     closeMission();
 }
 
@@ -561,7 +1255,7 @@ void MissionDetailModel::activateAccount(
     const bool authenticated)
 {
     auto activation = m_accountFence.activate({
-        .userId = std::move(userId),
+        .userId = userId,
         .epoch = epoch,
     });
     if (!activation.accepted) {
@@ -569,8 +1263,13 @@ void MissionDetailModel::activateAccount(
     }
     if (activation.changed || m_authenticated != authenticated) {
         clearDetail();
+        m_deliveries.clear();
+        m_deliveryOrder.clear();
+        m_crew.m_tokensByKey.clear();
+        m_crew.m_tokenOrder.clear();
     }
     m_authenticated = authenticated;
+    m_accountUserId = authenticated ? std::move(userId) : QString {};
     for (auto& pending : activation.pendingEvents) {
         ingestRoomEvent(std::move(pending));
     }
@@ -582,6 +1281,51 @@ void MissionDetailModel::applyRoomEvent(const QJsonObject& object)
     const auto type = requiredString(object, QStringLiteral("type"));
     if (!type) {
         emit decodeError(QStringLiteral("Mission event has no type."));
+        return;
+    }
+    if (*type == QStringLiteral("room.agent.delivery")) {
+        const auto sessionId =
+            requiredString(object, QStringLiteral("session_id"));
+        const auto incarnationId =
+            requiredString(object, QStringLiteral("session_incarnation_id"));
+        const auto state = requiredString(object, QStringLiteral("state"));
+        if (!sessionId || !incarnationId || !state
+            || !knownDeliveryState(*state)
+            || m_dependencies.sessions == nullptr) {
+            emit decodeError(QStringLiteral("Mission delivery event is invalid."));
+            return;
+        }
+        const auto context =
+            m_dependencies.sessions->actionContext(*sessionId);
+        if (!context || context->incarnationId != *incarnationId
+            || context->scope != QStringLiteral("room")
+            || context->roomId != m_missionId
+            || !liveMissionSession(context->status)) {
+            return;
+        }
+        for (auto delivery = m_deliveries.begin();
+             delivery != m_deliveries.end();) {
+            if (delivery->sessionId == *sessionId) {
+                m_deliveryOrder.removeAll(delivery.key());
+                delivery = m_deliveries.erase(delivery);
+            } else {
+                ++delivery;
+            }
+        }
+        const auto key = *sessionId + QChar::Null + *incarnationId;
+        m_deliveries.insert(key, {
+            .sessionId = *sessionId,
+            .incarnationId = *incarnationId,
+            .state = *state,
+            .detail = optionalString(object, QStringLiteral("detail")),
+        });
+        m_deliveryOrder.removeAll(key);
+        m_deliveryOrder.push_back(key);
+        while (m_deliveryOrder.size() > maximumDeliveries) {
+            m_deliveries.remove(m_deliveryOrder.takeFirst());
+        }
+        rebuildCrew();
+        reconcileFocus();
         return;
     }
     const auto roomId = optionalString(object, QStringLiteral("room_id"));
@@ -627,6 +1371,7 @@ void MissionDetailModel::applyRoomEvent(const QJsonObject& object)
             m_memberHydrationId.clear();
             m_membersLoading = false;
         }
+        rebuildProjections();
         updateLoading();
         return;
     }
@@ -658,6 +1403,9 @@ void MissionDetailModel::applyRoomEvent(const QJsonObject& object)
             messages.push_back(std::move(*message));
         }
         for (const auto& live : m_messages.m_messages) {
+            if (m_staleMessageIds.contains(live.id)) {
+                continue;
+            }
             const auto found =
                 std::ranges::find(messages, live.id, &MissionMessagesModel::Message::id);
             if (found == messages.end()) {
@@ -667,10 +1415,13 @@ void MissionDetailModel::applyRoomEvent(const QJsonObject& object)
             }
         }
         m_messages.replace(std::move(messages));
+        m_chatAuthoritative = true;
+        m_staleMessageIds.clear();
         if (!hydration.isEmpty()) {
             m_chatHydrationId.clear();
             m_chatLoading = false;
         }
+        rebuildMessagePresentation();
         updateLoading();
         return;
     }
@@ -685,7 +1436,9 @@ void MissionDetailModel::applyRoomEvent(const QJsonObject& object)
             emit decodeError(QStringLiteral("Mission chat update is invalid."));
             return;
         }
+        m_staleMessageIds.remove(message->id);
         m_messages.upsert(std::move(*message));
+        rebuildMessagePresentation();
         return;
     }
     if (*type == QStringLiteral("room.tasks.page")) {
@@ -782,6 +1535,9 @@ void MissionDetailModel::applyRoomEvent(const QJsonObject& object)
         }
         auto tasks = std::move(m_taskLoad->tasks);
         for (const auto& live : m_tasks.m_tasks) {
+            if (m_staleTaskIds.contains(live.id)) {
+                continue;
+            }
             const auto found =
                 std::ranges::find(tasks, live.id, &MissionTasksModel::Task::id);
             if (found == tasks.end()) {
@@ -791,9 +1547,11 @@ void MissionDetailModel::applyRoomEvent(const QJsonObject& object)
             }
         }
         m_tasks.replace(std::move(tasks));
+        m_staleTaskIds.clear();
         m_taskLoad.reset();
         m_tasksLoading = false;
         m_tasksAuthoritative = true;
+        rebuildTaskPresentation();
         updateLoading();
         return;
     }
@@ -829,8 +1587,10 @@ void MissionDetailModel::applyRoomEvent(const QJsonObject& object)
             }
         }
         m_tasks.replace(std::move(tasks));
+        m_staleTaskIds.clear();
         m_tasksAuthoritative = true;
-        emit stateChanged();
+        rebuildTaskPresentation();
+        updateLoading();
         return;
     }
     if (*type == QStringLiteral("room.tasks.upserted")) {
@@ -844,7 +1604,9 @@ void MissionDetailModel::applyRoomEvent(const QJsonObject& object)
             emit decodeError(QStringLiteral("Mission task update is invalid."));
             return;
         }
+        m_staleTaskIds.remove(task->id);
         m_tasks.upsert(std::move(*task));
+        rebuildTaskPresentation();
         return;
     }
     if (*type == QStringLiteral("room.error")) {
@@ -875,17 +1637,28 @@ void MissionDetailModel::clearDetail()
     m_membersLoading = false;
     m_membersAuthoritative = false;
     m_chatLoading = false;
+    m_chatAuthoritative = false;
     m_tasksLoading = false;
     m_tasksAuthoritative = false;
+    m_dispatchSelection.clear();
+    m_staleMessageIds.clear();
+    m_staleTaskIds.clear();
     m_members.replace({});
     m_messages.replace({});
     m_tasks.replace({});
+    m_crew.replace({});
+    m_attention.replace({}, {}, 0, 0);
+    clearFocus();
 }
 
 void MissionDetailModel::updateLoading()
 {
     if (!loading()) {
         m_hydrationTimer.stop();
+        if (m_membersAuthoritative && m_chatAuthoritative
+            && m_tasksAuthoritative) {
+            m_lastError.clear();
+        }
     }
     emit stateChanged();
 }
@@ -901,7 +1674,8 @@ void MissionDetailModel::hydrationTimedOut()
     m_membersLoading = false;
     m_chatLoading = false;
     m_tasksLoading = false;
-    m_tasksAuthoritative = false;
+    m_staleMessageIds.clear();
+    m_staleTaskIds.clear();
     m_lastError =
         QStringLiteral("Mission detail synchronization timed out. Retry the Mission.");
     emit stateChanged();
@@ -924,6 +1698,525 @@ bool MissionDetailModel::requestTaskPage()
         })).has_value();
 }
 
+void MissionDetailModel::rebuildProjections()
+{
+    if (m_missionId.isEmpty()) {
+        return;
+    }
+    rebuildCrew();
+    rebuildAttention();
+    rebuildCrew();
+    rebuildMessagePresentation();
+    rebuildTaskPresentation();
+    reconcileFocus();
+}
+
+void MissionDetailModel::rebuildAttention()
+{
+    if (m_dependencies.attention == nullptr || m_missionId.isEmpty()) {
+        m_attention.replace({}, {}, 0, 0);
+        return;
+    }
+    const auto sessionIds = currentMissionSessionIds();
+    auto scoped = m_dependencies.attention->scopedItemPage(
+        sessionIds,
+        m_attention.m_pageOffset,
+        MissionScopedAttentionModel::maximumVisibleItems);
+    if (scoped.totalCount > 0
+        && scoped.items.isEmpty()
+        && m_attention.m_pageOffset >= scoped.totalCount) {
+        m_attention.m_pageOffset =
+            ((scoped.totalCount - 1)
+                / MissionScopedAttentionModel::maximumVisibleItems)
+            * MissionScopedAttentionModel::maximumVisibleItems;
+        scoped = m_dependencies.attention->scopedItemPage(
+            sessionIds,
+            m_attention.m_pageOffset,
+            MissionScopedAttentionModel::maximumVisibleItems);
+    }
+    QVector<MissionScopedAttentionModel::Entry> entries;
+    entries.reserve(std::min(
+        scoped.items.size(),
+        static_cast<qsizetype>(
+            MissionScopedAttentionModel::maximumVisibleItems)));
+    for (const auto& item : scoped.items) {
+        if (entries.size()
+            >= MissionScopedAttentionModel::maximumVisibleItems) {
+            break;
+        }
+        const auto key = item.sourceToken + QChar::Null
+            + item.sessionIds.join(QChar::Null);
+        auto& token = m_attention.m_tokensByKey[key];
+        if (token.isEmpty()) {
+            token = QStringLiteral("mission-attention-")
+                + QUuid::createUuidV7().toString(QUuid::WithoutBraces);
+        }
+        entries.push_back({
+            .authorityKey = key,
+            .actionPresentationId = token,
+            .sourceToken = item.sourceToken,
+            .sessionPresentationId = item.sessionId.isEmpty()
+                ? QString {}
+                : m_crew.presentationForSession(item.sessionId),
+            .sourceSessionIds = item.sessionIds,
+            .sourceSessionCounts = item.sessionCounts,
+            .category =
+                static_cast<MissionScopedAttentionModel::Category>(
+                    item.category),
+            .risk = static_cast<MissionScopedAttentionModel::Risk>(
+                item.risk),
+            .tone = static_cast<MissionScopedAttentionModel::Tone>(
+                item.tone),
+            .actionKind =
+                static_cast<MissionScopedAttentionModel::ActionKind>(
+                    item.actionKind),
+            .title = item.title,
+            .summary = item.summary,
+            .canApprove = item.canApprove,
+            .canDeny = item.canDeny,
+            .canJump = item.canJump,
+            .itemCount = item.itemCount,
+        });
+    }
+    m_attention.replace(
+        std::move(entries),
+        std::move(scoped.sessionCounts),
+        scoped.totalCount,
+        m_attention.m_pageOffset);
+}
+
+bool MissionDetailModel::setAttentionPageOffset(const int offset)
+{
+    if (offset < 0 || m_dependencies.attention == nullptr
+        || m_missionId.isEmpty()
+        || offset == m_attention.m_pageOffset) {
+        return false;
+    }
+    m_attention.m_pageOffset = offset;
+    rebuildAttention();
+    rebuildCrew();
+    return true;
+}
+
+void MissionDetailModel::rebuildCrew()
+{
+    if (m_missionId.isEmpty()) {
+        m_crew.replace({});
+        return;
+    }
+    QVector<MissionCrewModel::Entry> entries;
+    if (m_dependencies.sessions != nullptr) {
+        for (auto row = 0; row < m_dependencies.sessions->rowCount(); ++row) {
+            const auto index = m_dependencies.sessions->index(row);
+            const auto sessionId = m_dependencies.sessions
+                                       ->data(
+                                           index,
+                                           SessionCatalogModel::SessionIdRole)
+                                       .toString();
+            const auto context =
+                m_dependencies.sessions->actionContext(sessionId);
+            if (!context || context->scope != QStringLiteral("room")
+                || context->roomId != m_missionId
+                || context->incarnationId.isEmpty()
+                || !liveMissionSession(context->status)) {
+                continue;
+            }
+            const auto key = m_missionId + QChar::Null
+                + QStringLiteral("agent") + QChar::Null + sessionId
+                + QChar::Null + context->incarnationId;
+            auto& presentationId = m_crew.m_tokensByKey[key];
+            if (presentationId.isEmpty()) {
+                presentationId = QStringLiteral("crew-")
+                    + QUuid::createUuidV7().toString(QUuid::WithoutBraces);
+            }
+            m_crew.m_tokenOrder.removeAll(key);
+            m_crew.m_tokenOrder.push_back(key);
+            const auto delivery = m_deliveries.constFind(
+                sessionId + QChar::Null + context->incarnationId);
+            const auto presentation =
+                m_dependencies.sessions->presentationSession(sessionId);
+            entries.push_back({
+                .authorityKey = key,
+                .presentationId = presentationId,
+                .kind = MissionCrewModel::Kind::Agent,
+                .displayName = m_dependencies.sessions
+                                   ->data(
+                                       index,
+                                       SessionCatalogModel::NameRole)
+                                   .toString(),
+                .secondaryLabel = m_dependencies.sessions
+                                      ->data(
+                                          index,
+                                          SessionCatalogModel::ModeRole)
+                                      .toString(),
+                .status = context->status,
+                .localSessionId = sessionId,
+                .sessionIncarnationId = context->incarnationId,
+                .rawRecipientId = sessionId,
+                .assignmentSessionId = context->assignmentSessionId,
+                .assignmentIncarnationId =
+                    context->assignmentIncarnationId,
+                .deliveryState = delivery == m_deliveries.cend()
+                    ? QString {}
+                    : delivery->state,
+                .deliveryDetail = delivery == m_deliveries.cend()
+                    ? QString {}
+                    : delivery->detail,
+                .canOpenFullTerminal =
+                    presentation && presentation->canRetainPresentation,
+                .canDispatch = context->commandable,
+                .canAssignTask = context->commandable
+                    && !context->assignmentSessionId.isEmpty()
+                    && !context->assignmentIncarnationId.isEmpty(),
+                .canSteer = context->commandable && context->canSteer,
+                .canInterrupt = m_dependencies.sessionActions != nullptr
+                    && m_dependencies.sessionActions->canInterrupt(sessionId),
+                .dispatchSelected =
+                    m_dispatchSelection.contains(presentationId),
+                .attentionCount = m_attention.countForSession(sessionId),
+            });
+        }
+    }
+    if (m_membersAuthoritative) {
+        for (const auto& member : std::as_const(m_members.m_members)) {
+            const auto key = m_missionId + QChar::Null
+                + QStringLiteral("member") + QChar::Null + member.userId;
+            auto& presentationId = m_crew.m_tokensByKey[key];
+            if (presentationId.isEmpty()) {
+                presentationId = QStringLiteral("crew-")
+                    + QUuid::createUuidV7().toString(QUuid::WithoutBraces);
+            }
+            m_crew.m_tokenOrder.removeAll(key);
+            m_crew.m_tokenOrder.push_back(key);
+            entries.push_back({
+                .authorityKey = key,
+                .presentationId = presentationId,
+                .kind = MissionCrewModel::Kind::Member,
+                .displayName = displayForUser(member.userId),
+                .secondaryLabel = member.role,
+                .status = QStringLiteral("member"),
+                .localSessionId = {},
+                .sessionIncarnationId = {},
+                .rawRecipientId = member.userId,
+                .assignmentSessionId = {},
+                .assignmentIncarnationId = {},
+                .deliveryState = {},
+                .deliveryDetail = {},
+                .canOpenFullTerminal = false,
+                .canDispatch = member.userId != m_accountUserId,
+                .canAssignTask = false,
+                .canSteer = false,
+                .canInterrupt = false,
+                .dispatchSelected =
+                    m_dispatchSelection.contains(presentationId),
+                .attentionCount = 0,
+            });
+        }
+    }
+    constexpr qsizetype maximumCrewPresentationTokens = 8'192;
+    while (m_crew.m_tokenOrder.size() > maximumCrewPresentationTokens) {
+        m_crew.m_tokensByKey.remove(m_crew.m_tokenOrder.takeFirst());
+    }
+    m_crew.replace(std::move(entries));
+}
+
+void MissionDetailModel::rebuildMessagePresentation()
+{
+    auto messages = m_messages.m_messages;
+    for (auto& message : messages) {
+        message.authorDisplay = !message.authorSessionId.isEmpty()
+            ? displayForSession(message.authorSessionId)
+            : displayForUser(message.authorUserId);
+        if (message.authorDisplay.isEmpty()) {
+            message.authorDisplay =
+                message.authorKind == QStringLiteral("Agent")
+                ? tr("Mission agent")
+                : tr("Mission member");
+        }
+        message.recipientPresentationIds.clear();
+        QStringList recipientNames;
+        int unavailable = 0;
+        const auto addRecipient =
+            [&](const QString& presentationId, const QString& displayName) {
+                if (presentationId.isEmpty()) {
+                    ++unavailable;
+                    return;
+                }
+                if (!message.recipientPresentationIds.contains(
+                        presentationId)) {
+                    message.recipientPresentationIds.push_back(
+                        presentationId);
+                }
+                if (!displayName.isEmpty()
+                    && !recipientNames.contains(displayName)) {
+                    recipientNames.push_back(displayName);
+                }
+            };
+        for (const auto& sessionId : message.recipientSessionIds) {
+            auto found = std::ranges::find_if(
+                m_crew.m_entries,
+                [&](const MissionCrewModel::Entry& entry) {
+                    return entry.kind == MissionCrewModel::Kind::Agent
+                        && (entry.rawRecipientId == sessionId
+                            || entry.assignmentSessionId == sessionId);
+                });
+            addRecipient(
+                found == m_crew.m_entries.end()
+                    ? QString {}
+                    : found->presentationId,
+                found == m_crew.m_entries.end()
+                    ? QString {}
+                    : found->displayName);
+        }
+        for (const auto& userId : message.recipientUserIds) {
+            const auto presentationId =
+                m_crew.presentationForUser(userId);
+            addRecipient(presentationId, displayForUser(userId));
+        }
+        if (message.recipientSessionIds.isEmpty()
+            && message.recipientUserIds.isEmpty()) {
+            message.audienceSummary = tr("Everyone in this Mission");
+        } else {
+            std::ranges::sort(recipientNames);
+            const auto shown = recipientNames.sliced(
+                0,
+                std::min<qsizetype>(recipientNames.size(), 3));
+            message.audienceSummary = shown.join(QStringLiteral(", "));
+            const auto remaining =
+                recipientNames.size() - shown.size() + unavailable;
+            if (remaining > 0) {
+                if (!message.audienceSummary.isEmpty()) {
+                    message.audienceSummary += QStringLiteral(" + ");
+                }
+                message.audienceSummary += tr("%1 unavailable or additional")
+                                               .arg(remaining);
+            }
+        }
+    }
+    m_messages.replace(std::move(messages));
+}
+
+void MissionDetailModel::rebuildTaskPresentation()
+{
+    auto tasks = m_tasks.m_tasks;
+    for (auto& task : tasks) {
+        task.knownStatus = knownTaskStatus(task.status);
+        task.statusLabel = statusLabel(task.status);
+        task.assignmentDisplay.clear();
+        if (!task.assignedSessionId.isEmpty()
+            && !task.assignedSessionIncarnationId.isEmpty()) {
+            const auto found = std::ranges::find_if(
+                m_crew.m_entries,
+                [&](const MissionCrewModel::Entry& entry) {
+                    return entry.kind == MissionCrewModel::Kind::Agent
+                        && entry.assignmentSessionId
+                            == task.assignedSessionId
+                        && entry.assignmentIncarnationId
+                            == task.assignedSessionIncarnationId;
+                });
+            task.assignmentDisplay =
+                found == m_crew.m_entries.end()
+                ? tr("Unavailable Mission agent")
+                : found->displayName;
+        } else {
+            task.assignmentDisplay = tr("Unassigned");
+        }
+        task.resultAuthorDisplay =
+            displayForUser(task.resultAuthorUserId);
+    }
+    m_tasks.replace(std::move(tasks));
+}
+
+void MissionDetailModel::reconcileFocus()
+{
+    if (m_selectedCrewPresentationId.isEmpty()) {
+        return;
+    }
+    const auto context =
+        m_crew.recipientContext(m_selectedCrewPresentationId);
+    if (!context || context->kind != MissionCrewModel::Kind::Agent
+        || context->localSessionId != m_selectedSessionId
+        || context->sessionIncarnationId != m_selectedSessionIncarnationId) {
+        clearFocus();
+        return;
+    }
+    emit focusChanged();
+}
+
+void MissionDetailModel::setDispatchSelection(
+    QSet<QString> presentationIds)
+{
+    for (auto id = presentationIds.begin(); id != presentationIds.end();) {
+        const auto context = m_crew.recipientContext(*id);
+        if (!context || !context->canDispatch) {
+            id = presentationIds.erase(id);
+        } else {
+            ++id;
+        }
+    }
+    if (m_dispatchSelection == presentationIds) {
+        return;
+    }
+    m_dispatchSelection = std::move(presentationIds);
+    rebuildCrew();
+}
+
+QSet<QString> MissionDetailModel::currentMissionSessionIds() const
+{
+    QSet<QString> result;
+    if (m_dependencies.sessions == nullptr || m_missionId.isEmpty()) {
+        return result;
+    }
+    for (auto row = 0; row < m_dependencies.sessions->rowCount(); ++row) {
+        const auto index = m_dependencies.sessions->index(row);
+        const auto sessionId = m_dependencies.sessions
+                                   ->data(
+                                       index,
+                                       SessionCatalogModel::SessionIdRole)
+                                   .toString();
+        const auto context =
+            m_dependencies.sessions->actionContext(sessionId);
+        if (context && context->scope == QStringLiteral("room")
+            && context->roomId == m_missionId
+            && !context->incarnationId.isEmpty()
+            && liveMissionSession(context->status)) {
+            result.insert(sessionId);
+        }
+    }
+    return result;
+}
+
+QString MissionDetailModel::displayForUser(const QString& userId) const
+{
+    if (userId.isEmpty()) {
+        return {};
+    }
+    if (userId == m_accountUserId) {
+        return tr("You");
+    }
+    const auto member =
+        std::ranges::find(m_members.m_members, userId, &MissionMembersModel::Member::userId);
+    if (member != m_members.m_members.end()) {
+        return !member->displayName.isEmpty()
+            ? member->displayName
+            : !member->username.isEmpty() ? member->username : tr("Mission member");
+    }
+    if (m_dependencies.people != nullptr) {
+        for (auto row = 0; row < m_dependencies.people->rowCount(); ++row) {
+            const auto index = m_dependencies.people->index(row);
+            if (m_dependencies.people
+                    ->data(index, PeopleModel::UserIdRole)
+                    .toString()
+                != userId) {
+                continue;
+            }
+            const auto display = m_dependencies.people
+                                     ->data(index, PeopleModel::DisplayNameRole)
+                                     .toString();
+            return !display.isEmpty()
+                ? display
+                : m_dependencies.people
+                      ->data(index, PeopleModel::HandleRole)
+                      .toString();
+        }
+    }
+    return {};
+}
+
+QString MissionDetailModel::displayForSession(
+    const QString& sessionId,
+    const QString& incarnationId) const
+{
+    if (m_dependencies.sessions == nullptr || sessionId.isEmpty()) {
+        return {};
+    }
+    for (auto row = 0; row < m_dependencies.sessions->rowCount(); ++row) {
+        const auto index = m_dependencies.sessions->index(row);
+        const auto candidate = m_dependencies.sessions
+                                   ->data(
+                                       index,
+                                       SessionCatalogModel::SessionIdRole)
+                                   .toString();
+        const auto context =
+            m_dependencies.sessions->actionContext(candidate);
+        if (!context || context->roomId != m_missionId
+            || (candidate != sessionId
+                && context->assignmentSessionId != sessionId)
+            || (!incarnationId.isEmpty()
+                && context->incarnationId != incarnationId
+                && context->assignmentIncarnationId != incarnationId)) {
+            continue;
+        }
+        return m_dependencies.sessions
+            ->data(index, SessionCatalogModel::NameRole)
+            .toString();
+    }
+    return {};
+}
+
+QString MissionDetailModel::statusLabel(const QString& status) const
+{
+    if (status == QStringLiteral("InProgress")) {
+        return tr("In progress");
+    }
+    if (knownTaskStatus(status)) {
+        return status;
+    }
+    return tr("Unknown: %1").arg(status);
+}
+
+std::optional<MissionCrewModel::Entry>
+MissionDetailModel::selectedCrewEntry() const
+{
+    const auto found = std::ranges::find(
+        m_crew.m_entries,
+        m_selectedCrewPresentationId,
+        &MissionCrewModel::Entry::presentationId);
+    if (found == m_crew.m_entries.end()
+        || found->kind != MissionCrewModel::Kind::Agent
+        || found->localSessionId != m_selectedSessionId
+        || found->sessionIncarnationId != m_selectedSessionIncarnationId) {
+        return std::nullopt;
+    }
+    return *found;
+}
+
+bool MissionDetailModel::performAttentionAction(
+    const MissionScopedAttentionModel::Entry& entry,
+    const MissionScopedAttentionModel::ActionKind actionKind,
+    const bool deny)
+{
+    if (m_dependencies.attention == nullptr) {
+        return false;
+    }
+    const auto sessionIds = currentMissionSessionIds();
+    for (const auto& sessionId : entry.sourceSessionIds) {
+        if (!sessionIds.contains(sessionId)) {
+            rebuildProjections();
+            return false;
+        }
+    }
+    const auto accepted = deny
+        ? m_dependencies.attention->denyScopedItem(
+              entry.sourceToken,
+              sessionIds)
+        : m_dependencies.attention->actOnScopedItem(
+              entry.sourceToken,
+              sessionIds,
+              static_cast<AttentionModel::ActionKind>(actionKind));
+    if (accepted
+        && actionKind == MissionScopedAttentionModel::ActionKind::Jump
+        && entry.sourceSessionIds.size() == 1) {
+        const auto presentationId =
+            m_crew.presentationForSession(entry.sourceSessionIds.constFirst());
+        if (!presentationId.isEmpty()) {
+            (void)selectCrew(presentationId);
+        }
+    }
+    rebuildProjections();
+    return accepted;
+}
+
 std::optional<MissionMembersModel::Member> MissionDetailModel::decodeMember(
     const QJsonObject& object,
     const QString& missionId)
@@ -944,7 +2237,8 @@ std::optional<MissionMembersModel::Member> MissionDetailModel::decodeMember(
 
 std::optional<MissionMessagesModel::Message> MissionDetailModel::decodeMessage(
     const QJsonObject& object,
-    const QString& missionId)
+    const QString& missionId,
+    const bool requireRecipientArrays)
 {
     const auto id = requiredString(object, QStringLiteral("id"));
     const auto roomId = requiredString(object, QStringLiteral("roomId"));
@@ -955,29 +2249,40 @@ std::optional<MissionMessagesModel::Message> MissionDetailModel::decodeMessage(
     const auto posted = requiredString(object, QStringLiteral("postedAt"));
     const auto postedAt = posted ? rfc3339(*posted) : std::nullopt;
     const auto recipientSessions =
-        stringArray(object, QStringLiteral("recipientSessionIds"));
+        stringArray(
+            object,
+            QStringLiteral("recipientSessionIds"),
+            requireRecipientArrays);
     const auto recipientUsers =
-        stringArray(object, QStringLiteral("recipientUserIds"));
+        stringArray(
+            object,
+            QStringLiteral("recipientUserIds"),
+            requireRecipientArrays);
     if (!id || !roomId || *roomId != missionId || !author || !kind || !body
         || !sequence || !postedAt || !recipientSessions || !recipientUsers
         || (*kind != QStringLiteral("Human")
             && *kind != QStringLiteral("Agent"))) {
         return std::nullopt;
     }
-    const auto authorSession = object.value(QStringLiteral("authorSessionId"));
-    if (!authorSession.isUndefined() && !authorSession.isNull()
-        && (!authorSession.isString() || authorSession.toString().isEmpty())) {
+    QString authorSessionId;
+    if (!nullableString(
+            object,
+            QStringLiteral("authorSessionId"),
+            authorSessionId,
+            true)) {
         return std::nullopt;
     }
     return MissionMessagesModel::Message {
         .id = *id,
         .authorUserId = *author,
-        .authorSessionId =
-            authorSession.isString() ? authorSession.toString() : QString {},
+        .authorSessionId = authorSessionId,
         .authorKind = *kind,
         .body = *body,
         .recipientSessionIds = *recipientSessions,
         .recipientUserIds = *recipientUsers,
+        .authorDisplay = {},
+        .audienceSummary = {},
+        .recipientPresentationIds = {},
         .sequence = *sequence,
         .postedAt = *postedAt,
     };
@@ -1001,8 +2306,49 @@ std::optional<MissionTasksModel::Task> MissionDetailModel::decodeTask(
         || !revision || !createdAt || !updatedAt) {
         return std::nullopt;
     }
+    QString description;
+    QString assignedSessionId;
+    QString assignedSessionIncarnationId;
+    QString due;
+    QString completed;
+    QString result;
+    QString resultAuthorUserId;
+    if (!nullableString(
+            object,
+            QStringLiteral("description"),
+            description)
+        || !nullableString(
+            object,
+            QStringLiteral("assignedSessionId"),
+            assignedSessionId,
+            true)
+        || !nullableString(
+            object,
+            QStringLiteral("assignedSessionIncarnationId"),
+            assignedSessionIncarnationId,
+            true)
+        || !nullableString(
+            object,
+            QStringLiteral("dueAt"),
+            due,
+            true)
+        || !nullableString(
+            object,
+            QStringLiteral("completedAt"),
+            completed,
+            true)
+        || !nullableString(
+            object,
+            QStringLiteral("result"),
+            result)
+        || !nullableString(
+            object,
+            QStringLiteral("resultAuthorUserId"),
+            resultAuthorUserId,
+            true)) {
+        return std::nullopt;
+    }
     QDateTime dueAt;
-    const auto due = optionalString(object, QStringLiteral("dueAt"));
     if (!due.isEmpty()) {
         const auto parsed = rfc3339(due);
         if (!parsed) {
@@ -1010,12 +2356,14 @@ std::optional<MissionTasksModel::Task> MissionDetailModel::decodeTask(
         }
         dueAt = *parsed;
     }
-    const auto assignedSessionId =
-        optionalString(object, QStringLiteral("assignedSessionId"));
-    const auto assignedSessionIncarnationId =
-        optionalString(
-            object,
-            QStringLiteral("assignedSessionIncarnationId"));
+    QDateTime completedAt;
+    if (!completed.isEmpty()) {
+        const auto parsed = rfc3339(completed);
+        if (!parsed) {
+            return std::nullopt;
+        }
+        completedAt = *parsed;
+    }
     if (assignedSessionId.isEmpty()
         != assignedSessionIncarnationId.isEmpty()) {
         return std::nullopt;
@@ -1023,15 +2371,43 @@ std::optional<MissionTasksModel::Task> MissionDetailModel::decodeTask(
     return MissionTasksModel::Task {
         .id = *id,
         .title = *title,
-        .description = optionalString(object, QStringLiteral("description")),
+        .description = description,
         .status = *status,
+        .statusLabel = *status,
         .assignedSessionId = assignedSessionId,
         .assignedSessionIncarnationId = assignedSessionIncarnationId,
-        .result = optionalString(object, QStringLiteral("result")),
+        .assignmentDisplay = {},
+        .result = result,
+        .resultAuthorUserId = resultAuthorUserId,
+        .resultAuthorDisplay = {},
         .revision = *revision,
+        .knownStatus = knownTaskStatus(*status),
+        .createdAt = *createdAt,
         .dueAt = dueAt,
+        .completedAt = completedAt,
         .updatedAt = *updatedAt,
     };
+}
+
+bool MissionDetailModel::isCompleteMessageEntity(
+    const QJsonObject& object,
+    const QString& missionId)
+{
+    return decodeMessage(object, missionId, true).has_value();
+}
+
+bool MissionDetailModel::isCompleteMemberEntity(
+    const QJsonObject& object,
+    const QString& missionId)
+{
+    return decodeMember(object, missionId).has_value();
+}
+
+bool MissionDetailModel::isCompleteTaskEntity(
+    const QJsonObject& object,
+    const QString& missionId)
+{
+    return decodeTask(object, missionId).has_value();
 }
 
 } // namespace kodosi

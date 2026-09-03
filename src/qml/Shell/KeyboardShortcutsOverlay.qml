@@ -88,8 +88,6 @@ KPopover {
             anchors.fill: parent
             radius: KodosiTheme.radiusModal
             color: KodosiTheme.canvas
-            border.width: 1
-            border.color: KodosiTheme.seamStrong
         }
     }
 
@@ -208,8 +206,6 @@ KPopover {
                                     Layout.preferredHeight: 24
                                     radius: KodosiTheme.radiusSmall
                                     color: KodosiTheme.surfaceRaised
-                                    border.width: 1
-                                    border.color: KodosiTheme.seam
 
                                     PlainLabel {
                                         id: keyLabel

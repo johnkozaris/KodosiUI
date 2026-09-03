@@ -74,6 +74,16 @@ class MissionDirectoryModel final : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY stateChanged)
+    Q_PROPERTY(
+        AuthorityState authorityState
+        READ authorityState
+        NOTIFY stateChanged)
+    Q_PROPERTY(
+        bool staleDataVisible
+        READ staleDataVisible
+        NOTIFY stateChanged)
+    Q_PROPERTY(bool canRefresh READ canRefresh NOTIFY stateChanged)
+    Q_PROPERTY(bool canRetry READ canRetry NOTIFY stateChanged)
     Q_PROPERTY(bool invitationsReady READ invitationsReady NOTIFY stateChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY stateChanged)
     Q_PROPERTY(
@@ -82,6 +92,15 @@ class MissionDirectoryModel final : public QAbstractListModel {
         CONSTANT)
 
 public:
+    enum class AuthorityState {
+        Loading,
+        Loaded,
+        Stale,
+        Failed,
+        Recovering,
+    };
+    Q_ENUM(AuthorityState)
+
     struct MissionActionContext {
         QString ownerUserId;
         qint64 rosterGeneration;
@@ -98,8 +117,6 @@ public:
         MissionIdRole = Qt::UserRole + 1,
         NameRole,
         SlugRole,
-        OwnerUserIdRole,
-        RosterGenerationRole,
     };
     Q_ENUM(Role)
 
@@ -111,9 +128,14 @@ public:
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
     [[nodiscard]] bool loading() const noexcept;
+    [[nodiscard]] AuthorityState authorityState() const noexcept;
+    [[nodiscard]] bool staleDataVisible() const noexcept;
+    [[nodiscard]] bool canRefresh() const noexcept;
+    [[nodiscard]] bool canRetry() const noexcept;
     [[nodiscard]] bool invitationsReady() const noexcept;
     [[nodiscard]] QString lastError() const;
     [[nodiscard]] MissionInvitationsModel* invitations() noexcept;
+    [[nodiscard]] bool hasAuthoritativeSnapshot() const noexcept;
 
     Q_INVOKABLE [[nodiscard]] bool refresh();
     Q_INVOKABLE [[nodiscard]] bool containsMission(const QString& missionId) const;
@@ -124,6 +146,11 @@ public:
     [[nodiscard]] bool hasOutgoingInvitation(
         const QString& missionId,
         const QString& inviteeUserId) const;
+    [[nodiscard]] static bool isCompleteRoomEntity(
+        const QJsonObject& object);
+    [[nodiscard]] static bool isCompleteInvitationEntity(
+        const QJsonObject& object,
+        MissionInvitationsModel::Direction direction);
 
 public slots:
     void ingestAuthEvent(QByteArray json);
@@ -136,6 +163,13 @@ signals:
     void decodeError(QString message);
 
 private:
+    enum class RefreshHalfState {
+        Idle,
+        Pending,
+        Complete,
+        Failed,
+    };
+
     struct Mission {
         QString id;
         QString name;
@@ -152,11 +186,21 @@ private:
     bool m_loading = false;
     bool m_authenticated = false;
     bool m_invitationsReady = false;
+    bool m_hasAuthoritativeSnapshot = false;
+    bool m_refreshQueued = false;
+    quint64 m_refreshGeneration = 0;
+    RefreshHalfState m_roomRefreshState = RefreshHalfState::Idle;
+    RefreshHalfState m_invitationRefreshState = RefreshHalfState::Idle;
+    AuthorityState m_authorityState = AuthorityState::Loading;
 
     void activateAccount(QString userId, quint64 epoch, bool authenticated);
     void applyRoomEvent(const QJsonObject& object);
     void clearAccountState();
+    void completeRefreshHalf(RefreshHalfState& half);
+    void failRefreshHalf(RefreshHalfState& half, QString error);
+    void finishRefreshIfReady();
     void replaceMissions(QVector<Mission> missions);
+    void setAuthorityState(AuthorityState state, QString error = {});
 
     [[nodiscard]] static std::optional<Mission> decodeMission(
         const QJsonObject& object);

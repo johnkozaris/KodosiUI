@@ -119,17 +119,17 @@ QJsonObject help()
              QStringLiteral("kodosi-ui-probe apps"),
              QStringLiteral(
                  "kodosi-ui-probe find --app Kodosi "
-                 "--id header.settings"),
+                 "--id header.utility.menu"),
              QStringLiteral(
                  "kodosi-ui-probe find --pid 12345 --app Kodosi "
-                 "--id header.settings"),
+                 "--id header.utility.menu"),
              QStringLiteral(
                  "kodosi-ui-probe click "
                  "\"$(kodosi-ui-probe find --app Kodosi "
-                 "--id header.settings | jq -r '.matches[0].handle')\""),
+                 "--id header.utility.menu | jq -r '.matches[0].handle')\""),
              QStringLiteral(
                  "kodosi-ui-probe wait --app Kodosi "
-                 "id=panel.settings --state showing --timeout-ms 5000"),
+                 "id=panel.utility.content --state showing --timeout-ms 5000"),
              QStringLiteral(
                  "kodosi-ui-probe set-text <handle> "
                  "--text 'JetBrains Mono'"),

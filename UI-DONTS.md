@@ -24,6 +24,16 @@ product look generic, template-driven, or "vibecoded" instead of authored.
 18. Decorative serif italic accents
 19. The Space Grotesk and Instrument Serif pairing
 20. Grain overlays on gradients
+21. Thin outlines around controls, cards, rows, dialogs, or panels
+22. Transparent or alpha-tinted UI surfaces
+23. Counts or badges inside navigation tabs
+24. Connection or Local status furniture in the top bar
+25. A separate Attention section in the session sidebar
+26. Helper labels, captions, and explanatory copy beside obvious controls
+27. Multiple Mission panes visible at the same time
+28. Controls added only to expose internal backend state
+29. Session rows with mode initials, counts, or repeated project metadata
+30. New UI patterns that do not exist in the shipping Swift client
 
 Use Kodosi's authored control family, warm charcoal and copper visual system,
 spacing tokens, accessible contrast, and product-specific language instead.
