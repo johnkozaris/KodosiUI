@@ -30,6 +30,8 @@ ACCESSIBLE_ID_UNSUPPORTED_TYPES = {
     "KDialog",
     "KPopover",
     "Popup",
+    "Repeater",
+    "Shortcut",
 }
 
 BLOCK_START = re.compile(

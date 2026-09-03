@@ -5,6 +5,11 @@ import Kodosi.Models 1.0 as Models
 Rectangle {
     id: root
 
+    signal openAccountRequested()
+
+    readonly property bool identityResetError:
+        Models.AuthActions.failedOperation === "identity.reset"
+
     objectName: "auth.error.banner"
     Accessible.id: objectName
     visible: Models.AuthState.signedIn
@@ -39,9 +44,17 @@ Rectangle {
         KButton {
             objectName: "auth.error.retry"
             Accessible.id: objectName
-            text: qsTr("Retry")
+            text: root.identityResetError
+                ? qsTr("Review")
+                : qsTr("Retry")
             Accessible.name: text
-            onClicked: Models.AuthActions.retry()
+            onClicked: {
+                if (root.identityResetError) {
+                    root.openAccountRequested()
+                } else {
+                    Models.AuthActions.retry()
+                }
+            }
         }
 
         KButton {

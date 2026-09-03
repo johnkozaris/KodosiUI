@@ -12,6 +12,8 @@ namespace kodosi {
 class DeviceActions final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString lastError READ lastError NOTIFY stateChanged)
+    Q_PROPERTY(QString lastOperation READ lastOperation NOTIFY stateChanged)
+    Q_PROPERTY(QString lastUserCode READ lastUserCode NOTIFY stateChanged)
 
 public:
     DeviceActions(
@@ -20,6 +22,8 @@ public:
         QObject* parent = nullptr);
 
     [[nodiscard]] QString lastError() const;
+    [[nodiscard]] QString lastOperation() const;
+    [[nodiscard]] QString lastUserCode() const;
 
     Q_INVOKABLE [[nodiscard]] bool refresh();
     Q_INVOKABLE [[nodiscard]] bool revoke(const QString& deviceId);
@@ -35,6 +39,8 @@ private:
     CommandDispatcher& m_dispatcher;
     DevicesModel& m_devices;
     QString m_lastError;
+    QString m_lastOperation;
+    QString m_lastUserCode;
 
     [[nodiscard]] bool send(QJsonObject command);
 };

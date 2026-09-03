@@ -186,6 +186,20 @@ add_test(
         --window-size
         900x600
 )
+
+add_test(
+    NAME kodosi-shell-account-device-parity
+    COMMAND
+        kodosi-qt
+        --smoke-test-shell-parity
+        --window-size
+        820x560
+)
+set_tests_properties(kodosi-shell-account-device-parity PROPERTIES
+    ENVIRONMENT
+        "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"
+    TIMEOUT 20
+)
 set_tests_properties(kodosi-desktop-state-composition PROPERTIES
     ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;QSG_RHI_BACKEND=software"

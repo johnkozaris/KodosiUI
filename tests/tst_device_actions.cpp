@@ -30,6 +30,7 @@ class DeviceActionsTest final : public QObject {
 private slots:
     void dispatchesOnlyCurrentDeviceIdentities();
     void normalizesLinkCodesAndStartsSelfLink();
+    void clearsRetryStateAcrossAuthorityChanges();
 };
 
 namespace {
@@ -74,8 +75,23 @@ void DeviceActionsTest::dispatchesOnlyCurrentDeviceIdentities()
         "{\"authority\":\"accountContext\",\"accountUserId\":\"me\","
         "\"accountEpoch\":1,\"type\":\"devices.error\","
         "\"operation\":\"refresh\",\"message\":\"offline\"}"));
+    QCOMPARE(actions.lastOperation(), QStringLiteral("refresh"));
+    QVERIFY(actions.lastUserCode().isEmpty());
+    QCOMPARE(actions.lastError(), QStringLiteral("offline"));
     QVERIFY(!actions.revoke(QStringLiteral("other")));
     QVERIFY(!actions.approveLink(QStringLiteral("BCDF-GHJK")));
+
+    devices.ingestDevicesEvent(QByteArrayLiteral(
+        "{\"authority\":\"accountContext\",\"accountUserId\":\"me\","
+        "\"accountEpoch\":1,\"type\":\"devices.error\","
+        "\"operation\":\"link.approve\",\"userCode\":\"bcdf-ghjk\","
+        "\"message\":\"approval expired\"}"));
+    QCOMPARE(actions.lastOperation(), QStringLiteral("link.approve"));
+    QCOMPARE(actions.lastUserCode(), QStringLiteral("BCDF-GHJK"));
+    QCOMPARE(actions.lastError(), QStringLiteral("approval expired"));
+    actions.clearError();
+    QVERIFY(actions.lastOperation().isEmpty());
+    QVERIFY(actions.lastUserCode().isEmpty());
 }
 
 void DeviceActionsTest::normalizesLinkCodesAndStartsSelfLink()
@@ -99,6 +115,40 @@ void DeviceActionsTest::normalizesLinkCodesAndStartsSelfLink()
     QCOMPARE(
         dispatcher.commands.back().value(QStringLiteral("type")).toString(),
         QStringLiteral("devices.link.startSelf"));
+}
+
+void DeviceActionsTest::clearsRetryStateAcrossAuthorityChanges()
+{
+    FakeDeviceDispatcher dispatcher;
+    kodosi::DevicesModel devices;
+    seed(devices, true);
+    kodosi::DeviceActions actions(dispatcher, devices);
+
+    devices.ingestDevicesEvent(QByteArrayLiteral(
+        "{\"authority\":\"accountContext\",\"accountUserId\":\"me\","
+        "\"accountEpoch\":1,\"type\":\"devices.error\","
+        "\"operation\":\"link.approve\",\"userCode\":\"BCDF-GHJK\","
+        "\"message\":\"approval expired\"}"));
+    QVERIFY(!actions.lastError().isEmpty());
+    QCOMPARE(actions.lastUserCode(), QStringLiteral("BCDF-GHJK"));
+
+    devices.ingestAuthEvent(QByteArrayLiteral(
+        "{\"type\":\"auth.required\",\"accountEpoch\":2}"));
+    QVERIFY(actions.lastError().isEmpty());
+    QVERIFY(actions.lastOperation().isEmpty());
+    QVERIFY(actions.lastUserCode().isEmpty());
+
+    devices.ingestAuthEvent(QByteArrayLiteral(
+        "{\"type\":\"auth.ready\",\"userId\":\"next\",\"accountEpoch\":3}"));
+    devices.ingestDevicesEvent(QByteArrayLiteral(
+        "{\"authority\":\"accountContext\",\"accountUserId\":\"next\","
+        "\"accountEpoch\":3,\"type\":\"devices.error\","
+        "\"operation\":\"refresh\",\"message\":\"offline\"}"));
+    QVERIFY(!actions.lastError().isEmpty());
+    devices.resetRuntimeAuthority();
+    QVERIFY(actions.lastError().isEmpty());
+    QVERIFY(actions.lastOperation().isEmpty());
+    QVERIFY(actions.lastUserCode().isEmpty());
 }
 
 QTEST_APPLESS_MAIN(DeviceActionsTest)

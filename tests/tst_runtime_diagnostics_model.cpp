@@ -188,7 +188,8 @@ void RuntimeDiagnosticsModelTest::diagnosticsSurfaceExposesSwiftParityContracts(
     QVERIFY(mainQml.contains(QByteArrayLiteral(
         "sequence: \"Ctrl+Shift+D\"")));
     QVERIFY(mainQml.contains(QByteArrayLiteral(
-        "enabled: !authOverlay.visible || diagnosticsDrawer.opened")));
+        "enabled: diagnosticsDrawer.opened\n"
+        "            || window.shortcutContextAvailable")));
     QVERIFY(mainQml.contains(QByteArrayLiteral(
         "RuntimeHealthBanner {")));
 }

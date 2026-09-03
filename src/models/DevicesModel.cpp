@@ -3,6 +3,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSet>
+#include <QTimeZone>
 
 #include <algorithm>
 #include <cmath>
@@ -70,6 +71,24 @@ QHash<int, QByteArray> DeviceLinkRequestsModel::roleNames() const
     };
 }
 
+quint64 DeviceLinkRequestsModel::revision() const noexcept
+{
+    return m_revision;
+}
+
+QVariantMap DeviceLinkRequestsModel::presentationAt(const int row) const
+{
+    if (row < 0 || row >= m_requests.size()) {
+        return {};
+    }
+    const auto& request = m_requests.at(row);
+    return {
+        {QStringLiteral("userCode"), request.userCode},
+        {QStringLiteral("deviceLabel"), request.deviceLabel},
+        {QStringLiteral("expiresAt"), request.expiresAt},
+    };
+}
+
 void DeviceLinkRequestsModel::replace(QVector<Request> requests)
 {
     std::ranges::sort(requests, [](const Request& lhs, const Request& rhs) {
@@ -81,6 +100,8 @@ void DeviceLinkRequestsModel::replace(QVector<Request> requests)
     const auto changed = m_requests.size() != requests.size();
     m_requests = std::move(requests);
     endResetModel();
+    ++m_revision;
+    emit stateChanged();
     if (changed) {
         emit countChanged();
     }
@@ -108,6 +129,8 @@ void DeviceLinkRequestsModel::upsert(Request request)
         beginInsertRows({}, row, row);
         m_requests.insert(insertion, std::move(request));
         endInsertRows();
+        ++m_revision;
+        emit stateChanged();
         emit countChanged();
     }
 }
@@ -122,6 +145,8 @@ void DeviceLinkRequestsModel::remove(const QString& userCode)
     beginRemoveRows({}, row, row);
     m_requests.erase(found);
     endRemoveRows();
+    ++m_revision;
+    emit stateChanged();
     emit countChanged();
 }
 
@@ -132,6 +157,8 @@ void DeviceLinkRequestsModel::removeExpired(const QDateTime& now)
             beginRemoveRows({}, row, row);
             m_requests.removeAt(row);
             endRemoveRows();
+            ++m_revision;
+            emit stateChanged();
             emit countChanged();
         }
     }
@@ -150,6 +177,11 @@ DevicesModel::DevicesModel(QObject* parent)
     , m_pendingLinks(this)
 {
     m_expiryTimer.setSingleShot(true);
+    connect(
+        &m_pendingLinks,
+        &DeviceLinkRequestsModel::stateChanged,
+        this,
+        &DevicesModel::stateChanged);
     connect(&m_expiryTimer, &QTimer::timeout, this, [this] {
         pruneExpiredLinks(QDateTime::currentDateTimeUtc());
     });
@@ -198,6 +230,28 @@ QString DevicesModel::selfDeviceId() const
     return m_selfDeviceId;
 }
 
+QString DevicesModel::selfDeviceLabel() const
+{
+    const auto* device = selfDevice();
+    return device == nullptr ? QString {} : device->label;
+}
+
+QString DevicesModel::selfCertSignerDeviceId() const
+{
+    const auto* device = selfDevice();
+    return device == nullptr ? QString {} : device->certSignerDeviceId;
+}
+
+QDateTime DevicesModel::selfCertIssuedAt() const
+{
+    const auto* device = selfDevice();
+    return device == nullptr || device->certIssuedAtMs == 0
+        ? QDateTime {}
+        : QDateTime::fromMSecsSinceEpoch(
+              static_cast<qint64>(device->certIssuedAtMs),
+              QTimeZone::UTC);
+}
+
 bool DevicesModel::hasEnrollmentState() const noexcept
 {
     return m_hasEnrollmentState;
@@ -216,6 +270,16 @@ DevicesModel::InventoryState DevicesModel::inventoryState() const noexcept
 DeviceLinkRequestsModel* DevicesModel::pendingLinks() noexcept
 {
     return &m_pendingLinks;
+}
+
+QVariantList DevicesModel::pendingLinkPresentations() const
+{
+    QVariantList presentations;
+    presentations.reserve(m_pendingLinks.rowCount());
+    for (auto row = 0; row < m_pendingLinks.rowCount(); ++row) {
+        presentations.push_back(m_pendingLinks.presentationAt(row));
+    }
+    return presentations;
 }
 
 bool DevicesModel::hasSelfLinkPending() const noexcept
@@ -243,9 +307,53 @@ DevicesModel::LinkOutcome DevicesModel::lastLinkOutcome() const noexcept
     return m_lastLinkOutcome;
 }
 
+QString DevicesModel::lastLinkOutcomeMessage() const
+{
+    switch (m_lastLinkOutcome) {
+    case LinkOutcome::LinkNone:
+        return {};
+    case LinkOutcome::LinkApproved:
+        return QStringLiteral("Device linked successfully.");
+    case LinkOutcome::LinkCancelled:
+        return QStringLiteral("The device link was cancelled.");
+    case LinkOutcome::LinkUnknown:
+        return QStringLiteral("The device link finished with an unknown status.");
+    }
+    return {};
+}
+
+bool DevicesModel::lastLinkApproved() const noexcept
+{
+    return m_lastLinkOutcome == LinkOutcome::LinkApproved;
+}
+
 DevicesModel::SelfLinkOutcome DevicesModel::selfLinkOutcome() const noexcept
 {
     return m_selfLinkOutcome;
+}
+
+QString DevicesModel::selfLinkOutcomeMessage() const
+{
+    switch (m_selfLinkOutcome) {
+    case SelfLinkOutcome::SelfLinkNone:
+        return {};
+    case SelfLinkOutcome::SelfLinkApproved:
+        return QStringLiteral("Device linked successfully.");
+    case SelfLinkOutcome::SelfLinkCancelled:
+        return QStringLiteral("The device link was cancelled.");
+    case SelfLinkOutcome::SelfLinkExpired:
+        return QStringLiteral("The link code expired. Generate a new code and try again.");
+    case SelfLinkOutcome::SelfLinkFailed:
+        return QStringLiteral("The device could not be linked.");
+    case SelfLinkOutcome::SelfLinkUnknown:
+        return QStringLiteral("The device link finished with an unknown status.");
+    }
+    return {};
+}
+
+bool DevicesModel::selfLinkApproved() const noexcept
+{
+    return m_selfLinkOutcome == SelfLinkOutcome::SelfLinkApproved;
 }
 
 QString DevicesModel::normalizeUserCode(const QString& value) const
@@ -262,6 +370,26 @@ bool DevicesModel::containsDevice(const QString& deviceId) const
 {
     return std::ranges::find(m_devices, deviceId, &Device::deviceId)
         != m_devices.end();
+}
+
+void DevicesModel::dismissLinkOutcome()
+{
+    if (m_lastLinkOutcome == LinkOutcome::LinkNone
+        && m_lastResolvedUserCode.isEmpty()) {
+        return;
+    }
+    m_lastLinkOutcome = LinkOutcome::LinkNone;
+    m_lastResolvedUserCode.clear();
+    emit stateChanged();
+}
+
+void DevicesModel::dismissSelfLinkOutcome()
+{
+    if (m_selfLinkOutcome == SelfLinkOutcome::SelfLinkNone) {
+        return;
+    }
+    m_selfLinkOutcome = SelfLinkOutcome::SelfLinkNone;
+    emit stateChanged();
 }
 
 void DevicesModel::ingestAuthEvent(QByteArray json)
@@ -450,7 +578,7 @@ void DevicesModel::applyDevicesEvent(const QJsonObject& object)
         }
         m_selfLinkUserCode = userCode;
         m_selfLinkExpiresAt = *expiry;
-        m_selfLinkOutcome = SelfLinkOutcome::None;
+        m_selfLinkOutcome = SelfLinkOutcome::SelfLinkNone;
         pruneExpiredLinks(QDateTime::currentDateTimeUtc());
         emit stateChanged();
         return;
@@ -511,9 +639,10 @@ void DevicesModel::clearAccountState()
     m_hasEnrollmentState = false;
     m_localDeviceEnrolled = false;
     m_inventoryState = InventoryState::Idle;
-    m_lastLinkOutcome = LinkOutcome::None;
-    m_selfLinkOutcome = SelfLinkOutcome::None;
+    m_lastLinkOutcome = LinkOutcome::LinkNone;
+    m_selfLinkOutcome = SelfLinkOutcome::SelfLinkNone;
     replaceDevices({});
+    emit authorityChanged();
     emit stateChanged();
 }
 
@@ -593,30 +722,30 @@ std::optional<QDateTime> DevicesModel::decodeTimestamp(const QString& value)
 DevicesModel::LinkOutcome DevicesModel::decodeLinkOutcome(const QString& value)
 {
     if (value == QStringLiteral("approved")) {
-        return LinkOutcome::Approved;
+        return LinkOutcome::LinkApproved;
     }
     if (value == QStringLiteral("cancelled")) {
-        return LinkOutcome::Cancelled;
+        return LinkOutcome::LinkCancelled;
     }
-    return LinkOutcome::Unknown;
+    return LinkOutcome::LinkUnknown;
 }
 
 DevicesModel::SelfLinkOutcome DevicesModel::decodeSelfLinkOutcome(
     const QString& value)
 {
     if (value == QStringLiteral("approved")) {
-        return SelfLinkOutcome::Approved;
+        return SelfLinkOutcome::SelfLinkApproved;
     }
     if (value == QStringLiteral("cancelled")) {
-        return SelfLinkOutcome::Cancelled;
+        return SelfLinkOutcome::SelfLinkCancelled;
     }
     if (value == QStringLiteral("expired")) {
-        return SelfLinkOutcome::Expired;
+        return SelfLinkOutcome::SelfLinkExpired;
     }
     if (value == QStringLiteral("failed")) {
-        return SelfLinkOutcome::Failed;
+        return SelfLinkOutcome::SelfLinkFailed;
     }
-    return SelfLinkOutcome::Unknown;
+    return SelfLinkOutcome::SelfLinkUnknown;
 }
 
 QString DevicesModel::normalizeCode(const QString& value)
@@ -641,6 +770,7 @@ bool DevicesModel::isCanonicalCode(const QString& value)
     if (value.size() != 9 || value.at(4) != QLatin1Char('-')) {
         return false;
     }
+
     for (auto index = 0; index < value.size(); ++index) {
         if (index == 4) {
             continue;
@@ -652,13 +782,20 @@ bool DevicesModel::isCanonicalCode(const QString& value)
     return true;
 }
 
+const DevicesModel::Device* DevicesModel::selfDevice() const
+{
+    const auto found =
+        std::ranges::find(m_devices, m_selfDeviceId, &Device::deviceId);
+    return found == m_devices.end() ? nullptr : &*found;
+}
+
 void DevicesModel::pruneExpiredLinks(const QDateTime& now)
 {
     m_pendingLinks.removeExpired(now);
     if (hasSelfLinkPending() && m_selfLinkExpiresAt <= now) {
         m_selfLinkUserCode.clear();
         m_selfLinkExpiresAt = {};
-        m_selfLinkOutcome = SelfLinkOutcome::Expired;
+        m_selfLinkOutcome = SelfLinkOutcome::SelfLinkExpired;
         emit stateChanged();
     }
     scheduleExpiry();

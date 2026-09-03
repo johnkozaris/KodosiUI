@@ -316,9 +316,9 @@ fi
 done
 
 "$probe" wait --app "$app_handle" \
-id=panel.settings.account.openDevices \
+id=panel.settings.account.signIn \
 --state showing --timeout-ms 5000 \
->"$artifact_dir/settings-account-devices.json"
+>"$artifact_dir/settings-account-sign-in.json"
 
 "$probe" find --app "$app_handle" --id panel.settings.tab.terminal \
 >"$artifact_dir/settings-tab-terminal.json"

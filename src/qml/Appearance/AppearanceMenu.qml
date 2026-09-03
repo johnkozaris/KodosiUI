@@ -10,6 +10,7 @@ KPopover {
     objectName: "panel.utility"
 
     signal openSettingsRequested()
+    signal openShortcutsRequested()
     signal signInRequested()
     signal signOutRequested()
 
@@ -131,6 +132,25 @@ KPopover {
             onClicked: {
                 root.close()
                 root.openSettingsRequested()
+            }
+        }
+
+        KButton {
+            objectName: "panel.utility.shortcuts"
+            Accessible.id: objectName
+            Layout.fillWidth: true
+            Layout.leftMargin: KodosiTheme.spacing2
+            Layout.rightMargin: KodosiTheme.spacing2
+            variant: "quiet"
+            iconName: "command"
+            text: qsTr("Keyboard shortcuts")
+            secondaryText: qsTr("Desktop commands and navigation")
+            secondaryMaximumWidth: 208
+            contentLeftAligned: true
+            Accessible.name: qsTr("Open keyboard shortcuts")
+            onClicked: {
+                root.close()
+                root.openShortcutsRequested()
             }
         }
 

@@ -224,6 +224,9 @@ int main(int argc, char* argv[])
     const auto appearanceSmokeTest =
         arguments.contains(
             QStringLiteral("--smoke-test-appearance"));
+    const auto shellParitySmokeTest =
+        arguments.contains(
+            QStringLiteral("--smoke-test-shell-parity"));
     const auto desktopStateSmokeTest =
         arguments.contains(
             QStringLiteral("--smoke-test-desktop-state"));
@@ -261,6 +264,7 @@ int main(int argc, char* argv[])
         || attentionSmokeTest
         || diagnosticsSmokeTest
         || appearanceSmokeTest
+        || shellParitySmokeTest
         || desktopStateSmokeTest
         || tilingSmokeTest;
     const auto syntheticMode = windowSize.has_value()
@@ -514,6 +518,81 @@ int main(int argc, char* argv[])
         agentSessionIntel,
         sessionCatalog,
         sessionActions);
+    if (shellParitySmokeTest) {
+        constexpr auto shellEpoch = 93;
+        const auto auth = QJsonDocument(QJsonObject {
+            {QStringLiteral("type"), QStringLiteral("auth.ready")},
+            {QStringLiteral("userId"), QStringLiteral("shell-user")},
+            {QStringLiteral("accountEpoch"), shellEpoch},
+        }).toJson(QJsonDocument::Compact);
+        authState.ingestAuthEvent(auth);
+        desktopState.ingestAuthEvent(auth);
+        devices.ingestAuthEvent(auth);
+        sessionActions.ingestAuthEvent(auth);
+        sessionCatalog.ingestAuthEvent(auth);
+        sessionShareScope.ingestAuthEvent(auth);
+        sessionCatalog.ingestSessionEvent(
+            QJsonDocument(QJsonObject {
+                {QStringLiteral("authority"),
+                 QStringLiteral("accountContext")},
+                {QStringLiteral("accountUserId"),
+                 QStringLiteral("shell-user")},
+                {QStringLiteral("accountEpoch"), shellEpoch},
+                {QStringLiteral("type"), QStringLiteral("session.list")},
+                {QStringLiteral("sessions"),
+                 QJsonArray {
+                     QJsonObject {
+                         {QStringLiteral("kind"),
+                          QStringLiteral("local")},
+                         {QStringLiteral("id"),
+                          QStringLiteral("shell-session")},
+                         {QStringLiteral("incarnationId"),
+                          QStringLiteral(
+                              "01900000-0000-7000-8000-000000000093")},
+                         {QStringLiteral("name"),
+                          QStringLiteral("Shell parity")},
+                         {QStringLiteral("project"),
+                          QStringLiteral("/repo/shell")},
+                         {QStringLiteral("mode"),
+                          QStringLiteral("normal")},
+                         {QStringLiteral("status"),
+                          QStringLiteral("active")},
+                         {QStringLiteral("recovery"),
+                          QStringLiteral("live")},
+                         {QStringLiteral("scope"),
+                          QStringLiteral("justMe")},
+                         {QStringLiteral("access"),
+                          QStringLiteral("approve")},
+                     },
+                 }},
+            }).toJson(QJsonDocument::Compact));
+        desktopState.setSelectedSessionId(
+            QStringLiteral("shell-session"));
+        devices.ingestDevicesEvent(QByteArrayLiteral(
+            "{\"authority\":\"accountContext\","
+            "\"accountUserId\":\"shell-user\",\"accountEpoch\":93,"
+            "\"type\":\"devices.list\",\"selfDeviceId\":\"device-self\","
+            "\"localDeviceEnrolled\":true,\"devices\":["
+            "{\"deviceId\":\"device-self\",\"label\":\"Linux workstation\","
+            "\"certSignerDeviceId\":\"device-signer\","
+            "\"certIssuedAtMs\":1700000000000},"
+            "{\"deviceId\":\"device-other\",\"label\":\"Travel laptop\","
+            "\"certSignerDeviceId\":\"device-self\","
+            "\"certIssuedAtMs\":1700000001000}]}"));
+        devices.ingestDevicesEvent(QByteArrayLiteral(
+            "{\"authority\":\"accountContext\","
+            "\"accountUserId\":\"shell-user\",\"accountEpoch\":93,"
+            "\"type\":\"devices.link.snapshot\",\"requests\":["
+            "{\"userCode\":\"BCDF-2345\","
+            "\"deviceLabel\":\"Tablet\","
+            "\"expiresAt\":\"2099-09-03T12:00:00Z\"}]}"));
+        devices.ingestDevicesEvent(QByteArrayLiteral(
+            "{\"authority\":\"accountContext\","
+            "\"accountUserId\":\"shell-user\",\"accountEpoch\":93,"
+            "\"type\":\"devices.link.selfPending\","
+            "\"userCode\":\"MNPQ-2345\","
+            "\"expiresAt\":\"2099-09-03T12:30:00Z\"}"));
+    }
     if (attentionSmokeTest || attentionProbePopulated || agentIntelProbeOpen) {
         constexpr auto smokeEpoch = 77;
         sessionCatalog.ingestAuthEvent(
@@ -1338,6 +1417,522 @@ int main(int argc, char* argv[])
                                                     .exitFocusMode();
                                                 application.exit(
                                                     EXIT_SUCCESS);
+                                            });
+                                    });
+                            });
+                    });
+            });
+    } else if (shellParitySmokeTest) {
+        rootObject->setProperty("width", 820);
+        rootObject->setProperty("height", 560);
+        QTimer::singleShot(
+            50,
+            &application,
+            [&application,
+             &authActions,
+             &authState,
+             &desktopState,
+             &devices,
+             rootObject] {
+                const QStringList shortcutObjects {
+                    QStringLiteral("shortcut.settings"),
+                    QStringLiteral("shortcut.session.new"),
+                    QStringLiteral("shortcut.session.intelligence"),
+                    QStringLiteral("shortcut.session.share"),
+                    QStringLiteral("shortcut.session.close"),
+                    QStringLiteral("shortcut.sidebar"),
+                    QStringLiteral("shortcut.keyboardOverlay"),
+                    QStringLiteral("shortcut.diagnostics"),
+                    QStringLiteral("shortcut.stage.focus"),
+                    QStringLiteral("shortcut.stage.next"),
+                    QStringLiteral("shortcut.stage.previous"),
+                };
+                for (const auto& name : shortcutObjects) {
+                    auto* shortcut =
+                        rootObject->findChild<QObject*>(name);
+                    if (shortcut == nullptr
+                        || !shortcut->property("enabled").toBool()) {
+                        qCritical()
+                            << "A semantic shell shortcut is missing or gated:"
+                            << name;
+                        application.exit(EXIT_FAILURE);
+                        return;
+                    }
+                }
+                auto* exitFocus =
+                    rootObject->findChild<QObject*>(
+                        QStringLiteral("shortcut.stage.exitFocus"));
+                if (exitFocus == nullptr
+                    || exitFocus->property("enabled").toBool()) {
+                    qCritical()
+                        << "Exit-focus shortcut gating is incorrect.";
+                    application.exit(EXIT_FAILURE);
+                    return;
+                }
+                if (rootObject->findChild<QObject*>(
+                        QStringLiteral("shortcut.approval.approve"))
+                        != nullptr
+                    || rootObject->findChild<QObject*>(
+                           QStringLiteral("shortcut.approval.deny"))
+                        != nullptr
+                    || !QMetaObject::invokeMethod(
+                        rootObject,
+                        "toggleKeyboardShortcuts",
+                        Qt::DirectConnection)) {
+                    qCritical()
+                        << "Approval shortcuts were invented without authority"
+                        << "or the shortcut overlay did not open.";
+                    application.exit(EXIT_FAILURE);
+                    return;
+                }
+                QTimer::singleShot(
+                    20,
+                    rootObject,
+                    [&application,
+                     &authActions,
+                     &authState,
+                     &desktopState,
+                     &devices,
+                     rootObject] {
+                        auto* overlay =
+                            rootObject->findChild<QObject*>(
+                                QStringLiteral("panel.shortcuts"));
+                        auto* close =
+                            rootObject->findChild<QObject*>(
+                                QStringLiteral("panel.shortcuts.close"));
+                        auto* escape =
+                            rootObject->findChild<QObject*>(
+                                QStringLiteral("panel.shortcuts.escape"));
+                        auto* settingsShortcut =
+                            rootObject->findChild<QObject*>(
+                                QStringLiteral("shortcut.settings"));
+                        if (overlay == nullptr
+                            || !overlay->property("opened").toBool()
+                            || overlay->property("width").toReal() > 620
+                            || overlay->property("height").toReal() > 460
+                            || close == nullptr
+                            || !close->property("activeFocus").toBool()
+                            || escape == nullptr
+                            || settingsShortcut == nullptr
+                            || settingsShortcut
+                                   ->property("enabled")
+                                   .toBool()
+                            || !QMetaObject::invokeMethod(
+                                escape,
+                                "activated",
+                                Qt::DirectConnection)) {
+                            qCritical()
+                                << "The shortcut overlay compact focus or Escape contract failed.";
+                            application.exit(EXIT_FAILURE);
+                            return;
+                        }
+                        QTimer::singleShot(
+                            0,
+                            rootObject,
+                            [&application,
+                             &authActions,
+                             &authState,
+                             &desktopState,
+                             &devices,
+                             rootObject,
+                             overlay] {
+                                if (overlay->property("opened").toBool()) {
+                                    qCritical()
+                                        << "Escape did not close the shortcut overlay.";
+                                    application.exit(EXIT_FAILURE);
+                                    return;
+                                }
+                                desktopState.setActiveView(2);
+                                QTimer::singleShot(
+                                    50,
+                                    rootObject,
+                                    [&application,
+                                     &authActions,
+                                     &authState,
+                                     &desktopState,
+                                     &devices,
+                                     rootObject] {
+                                        const QStringList deviceObjects {
+                                            QStringLiteral("devices.incoming"),
+                                            QStringLiteral(
+                                                "devices.self-link.expiry"),
+                                            QStringLiteral(
+                                                "devices.self-link.cancel"),
+                                            QStringLiteral(
+                                                "devices.current.signer"),
+                                            QStringLiteral(
+                                                "devices.current.issued"),
+                                        };
+                                        for (const auto& name :
+                                             deviceObjects) {
+                                            auto* object =
+                                                rootObject
+                                                    ->findChild<QObject*>(
+                                                        name);
+                                            if (object == nullptr
+                                                || !object
+                                                        ->property(
+                                                            "visible")
+                                                        .toBool()) {
+                                                qCritical()
+                                                    << "The device detail presentation is incomplete:"
+                                                    << name
+                                                    << "pending"
+                                                    << devices.pendingLinks()
+                                                           ->rowCount();
+                                                for (auto* candidate :
+                                                     rootObject
+                                                         ->findChildren<
+                                                             QObject*>()) {
+                                                    if (candidate
+                                                            ->objectName()
+                                                            .startsWith(
+                                                                QStringLiteral(
+                                                                    "devices.incoming"))) {
+                                                        qCritical()
+                                                            << "Available:"
+                                                            << candidate
+                                                                   ->objectName();
+                                                    }
+                                                }
+                                                application.exit(
+                                                    EXIT_FAILURE);
+                                                return;
+                                            }
+                                        }
+                                        auto* incomingRepeater =
+                                            rootObject
+                                                ->findChild<QObject*>(
+                                                    QStringLiteral(
+                                                        "devices.incoming.repeater"));
+                                        if (incomingRepeater == nullptr
+                                            || incomingRepeater
+                                                   ->property("count")
+                                                   .toInt()
+                                                != 1) {
+                                            qCritical()
+                                                << "Incoming device links were not instantiated.";
+                                            application.exit(
+                                                EXIT_FAILURE);
+                                            return;
+                                        }
+                                        devices.ingestDevicesEvent(
+                                            QByteArrayLiteral(
+                                                "{\"authority\":\"accountContext\","
+                                                "\"accountUserId\":\"shell-user\","
+                                                "\"accountEpoch\":93,"
+                                                "\"type\":\"devices.link.selfResolved\","
+                                                "\"outcome\":\"expired\"}"));
+                                        devices.ingestDevicesEvent(
+                                            QByteArrayLiteral(
+                                                "{\"authority\":\"accountContext\","
+                                                "\"accountUserId\":\"shell-user\","
+                                                "\"accountEpoch\":93,"
+                                                "\"type\":\"devices.link.resolved\","
+                                                "\"userCode\":\"BCDF-2345\","
+                                                "\"outcome\":\"approved\"}"));
+                                        devices.ingestDevicesEvent(
+                                            QByteArrayLiteral(
+                                                "{\"authority\":\"accountContext\","
+                                                "\"accountUserId\":\"shell-user\","
+                                                "\"accountEpoch\":93,"
+                                                "\"type\":\"devices.error\","
+                                                "\"operation\":\"link.approve\","
+                                                "\"userCode\":\"BCDF-2345\","
+                                                "\"message\":\"approval detail\"}"));
+                                        QTimer::singleShot(
+                                            0,
+                                            rootObject,
+                                            [&application,
+                                             &authActions,
+                                             &authState,
+                                             &desktopState,
+                                             rootObject] {
+                                                auto* selfOutcome =
+                                                    rootObject
+                                                        ->findChild<QObject*>(
+                                                            QStringLiteral(
+                                                                "devices.self-link.outcome"));
+                                                auto* linkOutcome =
+                                                    rootObject
+                                                        ->findChild<QObject*>(
+                                                            QStringLiteral(
+                                                                "devices.link.outcome"));
+                                                auto* regenerate =
+                                                    rootObject
+                                                        ->findChild<QObject*>(
+                                                            QStringLiteral(
+                                                                "devices.self-link.regenerate"));
+                                                auto* deviceError =
+                                                    rootObject
+                                                        ->findChild<QObject*>(
+                                                            QStringLiteral(
+                                                                "devices.error"));
+                                                auto* errorRetry =
+                                                    rootObject
+                                                        ->findChild<QObject*>(
+                                                            QStringLiteral(
+                                                                "devices.error.retry"));
+                                                auto* errorDismiss =
+                                                    rootObject
+                                                        ->findChild<QObject*>(
+                                                            QStringLiteral(
+                                                                "devices.error.dismiss"));
+                                                if (selfOutcome == nullptr
+                                                    || !selfOutcome
+                                                            ->property(
+                                                                "visible")
+                                                            .toBool()
+                                                    || linkOutcome == nullptr
+                                                    || !linkOutcome
+                                                            ->property(
+                                                                "visible")
+                                                            .toBool()
+                                                    || regenerate == nullptr
+                                                    || !regenerate
+                                                            ->property(
+                                                                "visible")
+                                                            .toBool()
+                                                    || deviceError == nullptr
+                                                    || !deviceError
+                                                            ->property(
+                                                                "visible")
+                                                            .toBool()
+                                                    || errorRetry == nullptr
+                                                    || !errorRetry
+                                                            ->property(
+                                                                "visible")
+                                                            .toBool()
+                                                    || errorDismiss == nullptr
+                                                    || !QMetaObject::
+                                                        invokeMethod(
+                                                            errorDismiss,
+                                                            "click",
+                                                            Qt::
+                                                                DirectConnection)
+                                                    || !QMetaObject::
+                                                        invokeMethod(
+                                                            rootObject,
+                                                            "openSettings",
+                                                            Qt::
+                                                                DirectConnection)) {
+                                                    qCritical()
+                                                        << "Device outcome presentation or Settings navigation failed.";
+                                                    application.exit(
+                                                        EXIT_FAILURE);
+                                                    return;
+                                                }
+                                                QTimer::singleShot(
+                                                    20,
+                                                    rootObject,
+                                                    [&application,
+                                                     &authActions,
+                                                     &authState,
+                                                     &desktopState,
+                                                     rootObject] {
+                                                        auto* settings =
+                                                            rootObject
+                                                                ->findChild<
+                                                                    QObject*>(
+                                                                    QStringLiteral(
+                                                                        "panel.settings"));
+                                                        if (settings
+                                                            == nullptr) {
+                                                            application.exit(
+                                                                EXIT_FAILURE);
+                                                            return;
+                                                        }
+                                                        settings->setProperty(
+                                                            "selectedCategory",
+                                                            QStringLiteral(
+                                                                "account"));
+                                                        QTimer::singleShot(
+                                                            0,
+                                                            settings,
+                                                            [&application,
+                                                             &authActions,
+                                                             &authState,
+                                                             &desktopState,
+                                                             rootObject,
+                                                             settings] {
+                                                                auto* reset =
+                                                                    rootObject
+                                                                        ->findChild<
+                                                                            QObject*>(
+                                                                            QStringLiteral(
+                                                                                "panel.settings.account.resetIdentity"));
+                                                                auto* input =
+                                                                    rootObject
+                                                                        ->findChild<
+                                                                            QObject*>(
+                                                                            QStringLiteral(
+                                                                                "panel.settings.account.resetConfirm.input"));
+                                                                auto* confirm =
+                                                                    rootObject
+                                                                        ->findChild<
+                                                                            QObject*>(
+                                                                            QStringLiteral(
+                                                                                "panel.settings.account.resetConfirm.confirm"));
+                                                                if (reset
+                                                                        == nullptr
+                                                                    || input
+                                                                        == nullptr
+                                                                    || confirm
+                                                                        == nullptr
+                                                                    || !QMetaObject::
+                                                                        invokeMethod(
+                                                                            reset,
+                                                                            "click",
+                                                                            Qt::
+                                                                                DirectConnection)) {
+                                                                    qCritical()
+                                                                        << "Identity reset confirmation controls are incomplete.";
+                                                                    application
+                                                                        .exit(
+                                                                            EXIT_FAILURE);
+                                                                    return;
+                                                                }
+                                                                input
+                                                                    ->setProperty(
+                                                                        "text",
+                                                                        QStringLiteral(
+                                                                            "reset"));
+                                                                (void)QMetaObject::
+                                                                    invokeMethod(
+                                                                        confirm,
+                                                                        "click",
+                                                                        Qt::
+                                                                            DirectConnection);
+                                                                if (authActions
+                                                                        .failedOperation()
+                                                                    == QStringLiteral(
+                                                                        "identity.reset")) {
+                                                                    qCritical()
+                                                                        << "Lowercase reset text triggered identity reset.";
+                                                                    application
+                                                                        .exit(
+                                                                            EXIT_FAILURE);
+                                                                    return;
+                                                                }
+                                                                input
+                                                                    ->setProperty(
+                                                                        "text",
+                                                                        QStringLiteral(
+                                                                            "RESET"));
+                                                                if (!confirm
+                                                                         ->property(
+                                                                             "enabled")
+                                                                         .toBool()
+                                                                    || !QMetaObject::
+                                                                        invokeMethod(
+                                                                            confirm,
+                                                                            "click",
+                                                                            Qt::
+                                                                                DirectConnection)
+                                                                    || authActions
+                                                                           .failedOperation()
+                                                                        != QStringLiteral(
+                                                                            "identity.reset")) {
+                                                                    qCritical()
+                                                                        << "Exact RESET did not dispatch identity recovery.";
+                                                                    application
+                                                                        .exit(
+                                                                            EXIT_FAILURE);
+                                                                    return;
+                                                                }
+                                                                (void)QMetaObject::
+                                                                    invokeMethod(
+                                                                        settings,
+                                                                        "close",
+                                                                        Qt::
+                                                                            DirectConnection);
+                                                                authActions
+                                                                    .clearError();
+                                                                authState
+                                                                    .ingestAuthEvent(
+                                                                        QByteArrayLiteral(
+                                                                            "{\"type\":\"auth.required\","
+                                                                            "\"reason\":\"signedOut\","
+                                                                            "\"accountEpoch\":94}"));
+                                                                desktopState
+                                                                    .setActiveView(
+                                                                        1);
+                                                                QTimer::
+                                                                    singleShot(
+                                                                        0,
+                                                                        rootObject,
+                                                                        [&application,
+                                                                         &desktopState,
+                                                                         rootObject] {
+                                                                            const QStringList signedOutObjects {
+                                                                                QStringLiteral(
+                                                                                    "header.auth.signIn"),
+                                                                                QStringLiteral(
+                                                                                    "auth.gate.missions"),
+                                                                            };
+                                                                            for (const auto& name :
+                                                                                 signedOutObjects) {
+                                                                                auto* object =
+                                                                                    rootObject
+                                                                                        ->findChild<
+                                                                                            QObject*>(
+                                                                                            name);
+                                                                                if (object
+                                                                                        == nullptr
+                                                                                    || !object
+                                                                                            ->property(
+                                                                                                "visible")
+                                                                                            .toBool()) {
+                                                                                    qCritical()
+                                                                                        << "Signed-out navigation is missing:"
+                                                                                        << name;
+                                                                                    application
+                                                                                        .exit(
+                                                                                            EXIT_FAILURE);
+                                                                                    return;
+                                                                                }
+                                                                            }
+                                                                            if (rootObject
+                                                                                    ->findChild<
+                                                                                        QObject*>(
+                                                                                        QStringLiteral(
+                                                                                            "panel.settings.account.signIn"))
+                                                                                == nullptr) {
+                                                                                qCritical()
+                                                                                    << "Settings has no signed-out account path.";
+                                                                                application
+                                                                                    .exit(
+                                                                                        EXIT_FAILURE);
+                                                                                return;
+                                                                            }
+                                                                            desktopState
+                                                                                .setActiveView(
+                                                                                    0);
+                                                                            auto* newSession =
+                                                                                rootObject
+                                                                                    ->findChild<
+                                                                                        QObject*>(
+                                                                                        QStringLiteral(
+                                                                                            "sidebar.session.new"));
+                                                                            if (newSession
+                                                                                    == nullptr
+                                                                                || !newSession
+                                                                                        ->property(
+                                                                                            "enabled")
+                                                                                        .toBool()) {
+                                                                                qCritical()
+                                                                                    << "Local My Agents was disabled while signed out.";
+                                                                                application
+                                                                                    .exit(
+                                                                                        EXIT_FAILURE);
+                                                                                return;
+                                                                            }
+                                                                            application
+                                                                                .exit(
+                                                                                    EXIT_SUCCESS);
+                                                                        });
+                                                            });
+                                                    });
                                             });
                                     });
                             });

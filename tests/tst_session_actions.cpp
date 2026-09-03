@@ -171,6 +171,20 @@ void SessionActionsTest::usesReadablePersistedWorkingDirectoryAsCreationDefault(
         actions.defaultWorkingDirectory(),
         QFileInfo(project).canonicalFilePath());
 
+    QVERIFY(actions.createDefault());
+    const auto command = dispatcher.commands.back();
+    QCOMPARE(
+        command.value(QStringLiteral("type")).toString(),
+        QStringLiteral("session.create"));
+    QCOMPARE(
+        command.value(QStringLiteral("workingDir")).toString(),
+        QFileInfo(project).canonicalFilePath());
+    const auto generatedName =
+        command.value(QStringLiteral("name")).toString();
+    QVERIFY(!generatedName.isEmpty());
+    QVERIFY(generatedName.size() <= 128);
+    QCOMPARE(generatedName.count(QLatin1Char(' ')), 1);
+
     QVERIFY(root.rmdir(QStringLiteral("project")));
     QCOMPARE(actions.defaultWorkingDirectory(), QDir::homePath());
 }

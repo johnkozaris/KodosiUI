@@ -118,6 +118,7 @@ public:
     Q_INVOKABLE [[nodiscard]] bool create(
         const QString& name,
         const QString& workingDirectory);
+    Q_INVOKABLE [[nodiscard]] bool createDefault();
     Q_INVOKABLE [[nodiscard]] bool canInterrupt(const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool canClose(const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool canSetMode(const QString& sessionId) const;
@@ -220,6 +221,7 @@ private:
     void bumpAvailability();
     [[nodiscard]] static bool interruptStatus(const QString& status);
     [[nodiscard]] static bool closeStatus(const QString& status);
+    [[nodiscard]] static QString generatedSessionName();
     [[nodiscard]] static bool stageReady(
         const SessionCatalogModel::ActionContext& context);
 };

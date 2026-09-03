@@ -8,6 +8,11 @@ import Kodosi.Models 1.0 as Models
 Item {
     id: root
     objectName: "sidebar.sessions"
+    readonly property bool modalOpen:
+        shareDialog.opened
+        || deleteConfirmation.visible
+        || leaveConfirmation.visible
+        || revokeConfirmation.visible
     Accessible.id: objectName
     Accessible.role: Accessible.Pane
     Accessible.name: qsTr("Sessions")

@@ -13,6 +13,7 @@ KPopover {
     signal openAgentIntelRequested()
     signal openDiagnosticsRequested()
     signal openProjectIntelRequested(string sourceId)
+    signal signInRequested()
 
     property string selectedCategory: "terminal"
     property bool agentIntelAvailable: false
@@ -22,6 +23,16 @@ KPopover {
     property string desktopFileError
     property bool transferringProjectIntel: false
     property bool agentsVisitActive: false
+    property bool resetConfirmationOpen: false
+    readonly property bool resetPending:
+        Models.AuthActions.busy
+        && Models.AuthActions.failedOperation === "identity.reset"
+    readonly property bool resetFailed:
+        !Models.AuthActions.busy
+        && Models.AuthActions.failedOperation === "identity.reset"
+        && Models.AuthActions.lastError.length > 0
+    readonly property bool identityRecoveryActive:
+        resetConfirmationOpen || resetPending || resetFailed
     readonly property bool compact: width < 760 || height < 580
     readonly property var categories: [
         {
@@ -79,6 +90,17 @@ KPopover {
         selectedCategory = "agents"
         resetDraft()
         open()
+    }
+
+    function openAccount() {
+        selectedCategory = "account"
+        resetDraft()
+        open()
+    }
+
+    function clearResetConfirmation() {
+        resetConfirmationOpen = false
+        resetConfirmInput.clear()
     }
 
     function acquireAgentsVisit() {
@@ -184,7 +206,8 @@ KPopover {
     }
 
     onOpened: {
-        if (selectedCategory !== "agents")
+        if (selectedCategory !== "agents"
+                && selectedCategory !== "account")
             selectedCategory = "terminal"
         resetDraft()
         closeButton.forceActiveFocus()
@@ -193,6 +216,8 @@ KPopover {
     onSelectedCategoryChanged: {
         if (!opened)
             return
+        if (selectedCategory !== "account")
+            clearResetConfirmation()
         if (selectedCategory === "agents")
             acquireAgentsVisit()
         else
@@ -208,6 +233,7 @@ KPopover {
         desktopFileError = ""
         releaseAgentsVisit(transferringProjectIntel)
         transferringProjectIntel = false
+        clearResetConfirmation()
         resetDraft()
     }
     Component.onDestruction: {
@@ -907,12 +933,15 @@ KPopover {
                                 }
                                 PlainLabel {
                                     Layout.fillWidth: true
-                                    text: qsTr("Manage device enrollment, integrations, trust pins, and account recovery on the dedicated Devices surface.")
+                                    text: Models.AuthState.signedIn
+                                        ? qsTr("Manage device enrollment, integrations, trust pins, and account recovery on the dedicated Devices surface.")
+                                        : qsTr("Sign in to link devices, use Missions, and share supervision. Local My Agents stays available.")
                                     color: KodosiTheme.textSecondary
                                     font.pixelSize: 11
                                     wrapMode: Text.Wrap
                                 }
                                 KButton {
+                                    visible: Models.AuthState.signedIn
                                     objectName:
                                         "panel.settings.account.openDevices"
                                     Accessible.id: objectName
@@ -922,6 +951,229 @@ KPopover {
                                     Accessible.name: text
                                     onClicked:
                                         root.openDevicesRequested()
+                                }
+                                KButton {
+                                    visible: !Models.AuthState.signedIn
+                                    objectName:
+                                        "panel.settings.account.signIn"
+                                    Accessible.id: objectName
+                                    variant: "directional"
+                                    iconName: "chevron-right"
+                                    text: Models.AuthActions.busy
+                                        ? qsTr("Signing in")
+                                        : qsTr("Sign in to Kodosi")
+                                    enabled: !Models.AuthActions.busy
+                                    Accessible.name: text
+                                    onClicked: root.signInRequested()
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: dangerContent.implicitHeight + 28
+                            radius: KodosiTheme.radiusLarge
+                            color: KodosiTheme.surfaceRaised
+                            border.width: 1
+                            border.color: KodosiTheme.seam
+
+                            ColumnLayout {
+                                id: dangerContent
+                                anchors.fill: parent
+                                anchors.margins: 14
+                                spacing: 9
+
+                                PlainLabel {
+                                    text: qsTr("Danger zone")
+                                    color: KodosiTheme.danger
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                }
+
+                                PlainLabel {
+                                    Layout.fillWidth: true
+                                    text: qsTr("Resetting identity clears your local keypair. All linked devices unlink and friend trust pins are forgotten. There is no undo.")
+                                    color: KodosiTheme.textSecondary
+                                    font.pixelSize: 10
+                                    wrapMode: Text.Wrap
+                                }
+
+                                KButton {
+                                    visible: !root.resetConfirmationOpen
+                                        && !root.resetPending
+                                    objectName:
+                                        "panel.settings.account.resetIdentity"
+                                    Accessible.id: objectName
+                                    variant: "dangerQuiet"
+                                    iconName: "warning"
+                                    text: qsTr("Reset identity")
+                                    enabled: !Models.AuthActions.busy
+                                    Accessible.name: text
+                                    onClicked: {
+                                        Models.AuthActions.clearError()
+                                        root.resetConfirmationOpen = true
+                                        resetConfirmInput.clear()
+                                        resetConfirmInput.forceActiveFocus(
+                                            Qt.TabFocusReason)
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    id: resetConfirmation
+                                    objectName:
+                                        "panel.settings.account.resetConfirm"
+                                    Accessible.id: objectName
+                                    visible: root.resetConfirmationOpen
+                                        && !root.resetPending
+                                    Layout.fillWidth: true
+                                    spacing: 7
+
+                                    PlainLabel {
+                                        Layout.fillWidth: true
+                                        text: qsTr("Type \"RESET\" to confirm.")
+                                        color: KodosiTheme.textPrimary
+                                        font.pixelSize: 10
+                                    }
+
+                                    KTextField {
+                                        id: resetConfirmInput
+                                        objectName:
+                                            "panel.settings.account.resetConfirm.input"
+                                        Accessible.id: objectName
+                                        Layout.fillWidth: true
+                                        maximumLength: 5
+                                        placeholderText: qsTr("RESET")
+                                        Accessible.name:
+                                            qsTr("Identity reset confirmation")
+                                        onAccepted: {
+                                            if (text === "RESET")
+                                                resetConfirmButton.clicked()
+                                        }
+                                    }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: KodosiTheme.spacing2
+
+                                        KButton {
+                                            objectName:
+                                                "panel.settings.account.resetConfirm.cancel"
+                                            Accessible.id: objectName
+                                            text: qsTr("Cancel")
+                                            variant: "quiet"
+                                            Accessible.name: text
+                                            onClicked:
+                                                root.clearResetConfirmation()
+                                        }
+
+                                        KButton {
+                                            id: resetConfirmButton
+                                            objectName:
+                                                "panel.settings.account.resetConfirm.confirm"
+                                            Accessible.id: objectName
+                                            text: qsTr("Confirm reset")
+                                            variant: "danger"
+                                            enabled:
+                                                resetConfirmInput.text === "RESET"
+                                            Accessible.name: text
+                                            onClicked: {
+                                                if (resetConfirmInput.text
+                                                        !== "RESET")
+                                                    return
+                                                resetConfirmInput.clear()
+                                                if (Models.AuthActions
+                                                        .resetIdentity()) {
+                                                    root.resetConfirmationOpen =
+                                                        false
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                RowLayout {
+                                    objectName:
+                                        "panel.settings.account.reset.pending"
+                                    Accessible.id: objectName
+                                    visible: root.resetPending
+                                    Layout.fillWidth: true
+                                    spacing: KodosiTheme.spacing2
+
+                                    KBusyIndicator {
+                                        Layout.preferredWidth: 18
+                                        Layout.preferredHeight: 18
+                                    }
+                                    PlainLabel {
+                                        text: qsTr("Resetting identity…")
+                                        color: KodosiTheme.textSecondary
+                                        font.pixelSize: 10
+                                    }
+                                }
+
+                                Rectangle {
+                                    objectName:
+                                        "panel.settings.account.reset.error"
+                                    Accessible.id: objectName
+                                    visible: root.resetFailed
+                                    Layout.fillWidth: true
+                                    implicitHeight:
+                                        resetErrorContent.implicitHeight + 16
+                                    radius: KodosiTheme.radiusSmall
+                                    color: Qt.rgba(
+                                        KodosiTheme.danger.r,
+                                        KodosiTheme.danger.g,
+                                        KodosiTheme.danger.b,
+                                        0.08)
+                                    border.width: 1
+                                    border.color: KodosiTheme.danger
+
+                                    ColumnLayout {
+                                        id: resetErrorContent
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        spacing: 6
+
+                                        PlainLabel {
+                                            Layout.fillWidth: true
+                                            text:
+                                                Models.AuthActions.lastError
+                                            color: KodosiTheme.danger
+                                            font.pixelSize: 10
+                                            wrapMode: Text.Wrap
+                                            Accessible.name: text
+                                        }
+
+                                        RowLayout {
+                                            KButton {
+                                                objectName:
+                                                    "panel.settings.account.reset.error.retry"
+                                                Accessible.id: objectName
+                                                text: qsTr("Try again")
+                                                variant: "secondary"
+                                                onClicked: {
+                                                    Models.AuthActions
+                                                        .clearError()
+                                                    root
+                                                        .resetConfirmationOpen =
+                                                        true
+                                                    resetConfirmInput.clear()
+                                                    resetConfirmInput
+                                                        .forceActiveFocus(
+                                                            Qt.TabFocusReason)
+                                                }
+                                            }
+                                            KButton {
+                                                objectName:
+                                                    "panel.settings.account.reset.error.dismiss"
+                                                Accessible.id: objectName
+                                                text: qsTr("Dismiss")
+                                                variant: "quiet"
+                                                onClicked:
+                                                    Models.AuthActions
+                                                        .clearError()
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

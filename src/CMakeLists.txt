@@ -263,6 +263,7 @@ qt_add_qml_module(kodosi-qt
         qml/Attention/AttentionSpinner.qml
         qml/Auth/AuthOverlay.qml
         qml/Auth/AuthErrorBanner.qml
+        qml/Auth/AuthGate.qml
         qml/Appearance/AppearanceMenu.qml
         qml/AgentIntel/AgentCustomAgentsSurface.qml
         qml/AgentIntel/AgentIntelDrawer.qml
@@ -301,6 +302,7 @@ qt_add_qml_module(kodosi-qt
         qml/People/MissionDetailView.qml
         qml/Settings/SettingsDrawer.qml
         qml/Settings/AgentsSettingsSurface.qml
+        qml/Shell/KeyboardShortcutsOverlay.qml
         qml/Theme/KodosiTheme.qml
         qml/Workbench/SessionSidebar.qml
         qml/Workbench/DesktopFileErrorBanner.qml

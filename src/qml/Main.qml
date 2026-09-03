@@ -20,14 +20,50 @@ ApplicationWindow {
     readonly property color themeAccent: KodosiTheme.accent
     readonly property color themeAccentForeground:
         KodosiTheme.accentForeground
+    readonly property string shortcutSelectedSessionId:
+        Models.DesktopState.selectedSessionId
+    readonly property var selectedSessionPresentation: {
+        const revision = Models.SessionActions.availabilityRevision
+        return revision >= 0
+            ? Models.Sessions.presentationForSession(
+                  shortcutSelectedSessionId)
+            : ({})
+    }
+    readonly property bool selectedSessionAvailable:
+        shortcutSelectedSessionId.length > 0
+        && Models.SessionActions.availabilityRevision >= 0
+        && Models.Sessions.authorityState === Models.Sessions.Loaded
+        && selectedSessionPresentation.sessionId
+            === shortcutSelectedSessionId
+    readonly property bool canInspectSelectedSession:
+        selectedSessionAvailable
+    readonly property bool canShareSelectedSession:
+        selectedSessionAvailable
+        && Models.SessionShareScope.stateRevision >= 0
+        && (Models.SessionShareScope.canChange(shortcutSelectedSessionId)
+            || Models.SessionShareScope.phase(shortcutSelectedSessionId)
+                !== "idle")
+    readonly property bool canCloseSelectedSession:
+        selectedSessionAvailable
+        && Models.SessionActions.canClose(shortcutSelectedSessionId)
     readonly property bool blockingOverlayOpen:
         settingsDrawer.opened
         || utilityMenu.opened
+        || keyboardShortcutsOverlay.opened
         || attentionPanel.opened
         || agentIntelDrawer.opened
         || projectIntelModal.opened
         || diagnosticsDrawer.opened
+        || closeSessionConfirmation.opened
+        || sessionSidebar.modalOpen
         || authOverlay.visible
+    readonly property bool shortcutContextAvailable:
+        !blockingOverlayOpen && !textInputOwnsShortcuts()
+
+    function textInputOwnsShortcuts() {
+        const item = window.activeFocusItem
+        return item instanceof TextInput || item instanceof TextEdit
+    }
 
     function synchronizeSelectedSessionMetadata() {
         const selectedSessionId = Models.DesktopState.selectedSessionId
@@ -161,6 +197,55 @@ ApplicationWindow {
         agentIntelDrawer.close()
         diagnosticsDrawer.close()
         settingsDrawer.open()
+    }
+
+    function openAccountSettings() {
+        utilityMenu.close()
+        attentionPanel.close()
+        agentIntelDrawer.close()
+        diagnosticsDrawer.close()
+        settingsDrawer.openAccount()
+    }
+
+    function toggleKeyboardShortcuts() {
+        if (keyboardShortcutsOverlay.opened) {
+            keyboardShortcutsOverlay.close()
+            return
+        }
+        if (blockingOverlayOpen || textInputOwnsShortcuts())
+            return
+        keyboardShortcutsOverlay.open()
+    }
+
+    function createDefaultSession() {
+        if (!shortcutContextAvailable || Models.SessionActions.creating)
+            return false
+        Models.DesktopState.activeView = 0
+        return Models.SessionActions.createDefault()
+    }
+
+    function openSelectedAgentIntel() {
+        if (!shortcutContextAvailable || !canInspectSelectedSession)
+            return false
+        return openAgentIntel(shortcutSelectedSessionId, "")
+    }
+
+    function shareSelectedSession() {
+        if (!shortcutContextAvailable || !canShareSelectedSession)
+            return false
+        Models.DesktopState.activeView = 0
+        Models.DesktopState.sidebarOpen = true
+        sessionSidebar.openShareByIdentity(
+            shortcutSelectedSessionId,
+            selectedSessionPresentation.name)
+        return true
+    }
+
+    function requestCloseSelectedSession() {
+        if (!shortcutContextAvailable || !canCloseSelectedSession)
+            return false
+        return Models.SessionActions.requestCloseConfirmation(
+            shortcutSelectedSessionId)
     }
 
     function toggleUtilityMenu() {
@@ -347,7 +432,25 @@ ApplicationWindow {
                         Accessible.id: objectName
                         glyph: "devices"
                         Accessible.name: qsTr("Open Account and Devices")
+                        visible: Models.AuthState.signedIn
                         onClicked: window.showDevices()
+                    }
+
+                    KButton {
+                        objectName: "header.auth.signIn"
+                        Accessible.id: objectName
+                        visible: !Models.AuthState.signedIn
+                        variant: "secondary"
+                        iconName: "login"
+                        text: window.width < 1000
+                            ? ""
+                            : Models.AuthActions.busy
+                              ? qsTr("Signing in")
+                              : qsTr("Sign in")
+                        compact: window.width < 1000
+                        enabled: !Models.AuthActions.busy
+                        Accessible.name: qsTr("Sign in to Kodosi")
+                        onClicked: Models.AuthActions.beginSignIn()
                     }
 
                     KIconButton {
@@ -392,6 +495,8 @@ ApplicationWindow {
 
         AuthErrorBanner {
             Layout.fillWidth: true
+            onOpenAccountRequested:
+                Qt.callLater(window.openAccountSettings)
         }
 
         DesktopFileErrorBanner {
@@ -460,11 +565,13 @@ ApplicationWindow {
             PeopleView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                onSignInRequested: Models.AuthActions.beginSignIn()
             }
 
             DevicesView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                onSignInRequested: Models.AuthActions.beginSignIn()
             }
         }
     }
@@ -484,6 +591,12 @@ ApplicationWindow {
 
     AuthOverlay {
         id: authOverlay
+        accountRecoverySurfaceOpen:
+            settingsDrawer.opened
+            && settingsDrawer.selectedCategory === "account"
+            && settingsDrawer.identityRecoveryActive
+        onAccountRecoveryRequested:
+            Qt.callLater(settingsDrawer.openAccount)
         onVisibleChanged: {
             if (!visible)
                 return
@@ -495,28 +608,82 @@ ApplicationWindow {
     }
 
     Shortcut {
-        sequence: "Ctrl+Shift+A"
-        enabled: !window.blockingOverlayOpen
-        onActivated: window.toggleAttention()
+        objectName: "shortcut.settings"
+        sequence: "Ctrl+,"
+        context: Qt.ApplicationShortcut
+        enabled: window.shortcutContextAvailable
+        onActivated: window.openSettings()
     }
 
     Shortcut {
+        objectName: "shortcut.session.new"
+        sequence: "Ctrl+S"
+        context: Qt.ApplicationShortcut
+        enabled: window.shortcutContextAvailable
+            && !Models.SessionActions.creating
+        onActivated: window.createDefaultSession()
+    }
+
+    Shortcut {
+        objectName: "shortcut.session.intelligence"
+        sequence: "Ctrl+I"
+        context: Qt.ApplicationShortcut
+        enabled: window.shortcutContextAvailable
+            && window.canInspectSelectedSession
+        onActivated: window.openSelectedAgentIntel()
+    }
+
+    Shortcut {
+        objectName: "shortcut.session.share"
+        sequence: "Ctrl+Shift+S"
+        context: Qt.ApplicationShortcut
+        enabled: window.shortcutContextAvailable
+            && window.canShareSelectedSession
+        onActivated: window.shareSelectedSession()
+    }
+
+    Shortcut {
+        objectName: "shortcut.session.close"
+        sequence: "Ctrl+Shift+W"
+        context: Qt.ApplicationShortcut
+        enabled: window.shortcutContextAvailable
+            && window.canCloseSelectedSession
+        onActivated: window.requestCloseSelectedSession()
+    }
+
+    Shortcut {
+        objectName: "shortcut.sidebar"
         sequence: "Ctrl+B"
-        enabled: !window.blockingOverlayOpen
+        context: Qt.ApplicationShortcut
+        enabled: window.shortcutContextAvailable
             && Models.DesktopState.activeView === 0
         onActivated: Models.DesktopState.sidebarOpen =
             !Models.DesktopState.sidebarOpen
     }
 
     Shortcut {
+        objectName: "shortcut.keyboardOverlay"
+        sequence: "Ctrl+Shift+/"
+        context: Qt.ApplicationShortcut
+        enabled: keyboardShortcutsOverlay.opened
+            || window.shortcutContextAvailable
+        onActivated: window.toggleKeyboardShortcuts()
+    }
+
+    Shortcut {
+        objectName: "shortcut.diagnostics"
         sequence: "Ctrl+Shift+D"
-        enabled: !authOverlay.visible || diagnosticsDrawer.opened
+        context: Qt.ApplicationShortcut
+        enabled: diagnosticsDrawer.opened
+            || window.shortcutContextAvailable
         onActivated: window.toggleDiagnostics()
     }
 
     Shortcut {
+        objectName: "shortcut.stage.focus"
         sequence: "Ctrl+Shift+Enter"
-        enabled: !window.blockingOverlayOpen
+        context: Qt.ApplicationShortcut
+        enabled: window.shortcutContextAvailable
             && Models.DesktopState.activeView === 0
             && Models.DesktopState.selectedSessionId.length > 0
         onActivated:
@@ -524,22 +691,28 @@ ApplicationWindow {
     }
 
     Shortcut {
+        objectName: "shortcut.stage.next"
         sequences: ["Ctrl+Alt+Right", "Ctrl+Alt+Down"]
-        enabled: !window.blockingOverlayOpen
+        context: Qt.ApplicationShortcut
+        enabled: window.shortcutContextAvailable
             && Models.DesktopState.activeView === 0
         onActivated: Models.DesktopState.selectAdjacentSession(1)
     }
 
     Shortcut {
+        objectName: "shortcut.stage.previous"
         sequences: ["Ctrl+Alt+Left", "Ctrl+Alt+Up"]
-        enabled: !window.blockingOverlayOpen
+        context: Qt.ApplicationShortcut
+        enabled: window.shortcutContextAvailable
             && Models.DesktopState.activeView === 0
         onActivated: Models.DesktopState.selectAdjacentSession(-1)
     }
 
     Shortcut {
+        objectName: "shortcut.stage.exitFocus"
         sequence: "Escape"
-        enabled: !window.blockingOverlayOpen
+        context: Qt.ApplicationShortcut
+        enabled: window.shortcutContextAvailable
             && Models.DesktopState.stageLayoutMode
                 === Models.DesktopState.Focus
         onActivated: Models.DesktopState.exitFocusMode()
@@ -595,8 +768,14 @@ ApplicationWindow {
         signedIn: Models.AuthState.signedIn
         authBusy: Models.AuthActions.busy
         onOpenSettingsRequested: window.openSettings()
+        onOpenShortcutsRequested:
+            Qt.callLater(window.toggleKeyboardShortcuts)
         onSignInRequested: Models.AuthActions.beginSignIn()
         onSignOutRequested: Models.AuthActions.signOut()
+    }
+
+    KeyboardShortcutsOverlay {
+        id: keyboardShortcutsOverlay
     }
 
     SettingsDrawer {
@@ -604,6 +783,7 @@ ApplicationWindow {
         agentIntelAvailable:
             Models.DesktopState.selectedSessionId.length > 0
         onOpenDevicesRequested: window.showDevices()
+        onSignInRequested: Models.AuthActions.beginSignIn()
         onOpenAgentIntelRequested: {
             if (Models.DesktopState.selectedSessionId.length > 0)
                 window.openAgentIntel(
@@ -617,6 +797,66 @@ ApplicationWindow {
                 projectIntelModal.openForSource(sourceId)
             else
                 projectIntelModal.openBrowser()
+        }
+    }
+
+    KDialog {
+        id: closeSessionConfirmation
+        objectName: "session.close.confirmation"
+        anchors.centerIn: parent
+        width: Math.min(400, parent ? parent.width - 32 : 400)
+        modal: true
+        visible:
+            Models.SessionActions.closeConfirmationSessionId.length > 0
+        title: qsTr("Close selected session?")
+        closePolicy: Popup.NoAutoClose
+
+        onOpened:
+            closeSessionCancel.forceActiveFocus(Qt.PopupFocusReason)
+
+        contentItem: ColumnLayout {
+            objectName: "session.close.confirmation.content"
+            Accessible.id: objectName
+            spacing: KodosiTheme.spacing4
+
+            PlainLabel {
+                Layout.fillWidth: true
+                text: qsTr(
+                    "The agent and terminal will stop. This action requires confirmation.")
+                color: KodosiTheme.textSecondary
+                wrapMode: Text.Wrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: KodosiTheme.spacing3
+
+                Item { Layout.fillWidth: true }
+
+                KButton {
+                    id: closeSessionCancel
+                    objectName: "session.close.confirmation.cancel"
+                    Accessible.id: objectName
+                    text: qsTr("Cancel")
+                    variant: "quiet"
+                    Accessible.name: text
+                    onClicked:
+                        Models.SessionActions.cancelCloseConfirmation()
+                }
+
+                KButton {
+                    objectName: "session.close.confirmation.confirm"
+                    Accessible.id: objectName
+                    text: qsTr("Close session")
+                    variant: "danger"
+                    enabled: Models.SessionActions.canClose(
+                        Models.SessionActions.closeConfirmationSessionId)
+                        && Models.SessionActions.availabilityRevision >= 0
+                    Accessible.name: text
+                    onClicked: Models.SessionActions.confirmClose(
+                        Models.SessionActions.closeConfirmationSessionId)
+                }
+            }
         }
     }
 

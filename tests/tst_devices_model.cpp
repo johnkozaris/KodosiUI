@@ -31,6 +31,13 @@ void DevicesModelTest::appliesAtomicInventory()
 
     QCOMPARE(model.rowCount(), 2);
     QCOMPARE(model.selfDeviceId(), QStringLiteral("device-self"));
+    QCOMPARE(model.selfDeviceLabel(), QStringLiteral("Laptop"));
+    QCOMPARE(
+        model.selfCertSignerDeviceId(),
+        QStringLiteral("device-self"));
+    QCOMPARE(
+        model.selfCertIssuedAt().toMSecsSinceEpoch(),
+        1'700'000'000'000LL);
     QVERIFY(model.hasEnrollmentState());
     QVERIFY(model.localDeviceEnrolled());
     QCOMPARE(model.inventoryState(), kodosi::DevicesModel::InventoryState::Fresh);
@@ -100,6 +107,14 @@ void DevicesModelTest::projectsLinkLifecycle()
         "\"expiresAt\":\"2099-08-13T19:00:00Z\"}]}"));
 
     QCOMPARE(model.pendingLinks()->rowCount(), 2);
+    QCOMPARE(model.pendingLinkPresentations().size(), 2);
+    QCOMPARE(
+        model.pendingLinkPresentations()
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("deviceLabel"))
+            .toString(),
+        QStringLiteral("Phone"));
     QCOMPARE(
         model.pendingLinks()
             ->data(
@@ -114,7 +129,18 @@ void DevicesModelTest::projectsLinkLifecycle()
         "\"outcome\":\"approved\"}"));
     QCOMPARE(model.pendingLinks()->rowCount(), 1);
     QCOMPARE(model.lastResolvedUserCode(), QStringLiteral("BCDF-GHJK"));
-    QCOMPARE(model.lastLinkOutcome(), kodosi::DevicesModel::LinkOutcome::Approved);
+    QCOMPARE(
+        model.lastLinkOutcome(),
+        kodosi::DevicesModel::LinkOutcome::LinkApproved);
+    QVERIFY(model.lastLinkApproved());
+    QCOMPARE(
+        model.lastLinkOutcomeMessage(),
+        QStringLiteral("Device linked successfully."));
+    model.dismissLinkOutcome();
+    QCOMPARE(
+        model.lastLinkOutcome(),
+        kodosi::DevicesModel::LinkOutcome::LinkNone);
+    QVERIFY(model.lastResolvedUserCode().isEmpty());
 
     model.ingestDevicesEvent(QByteArrayLiteral(
         "{\"authority\":\"accountContext\",\"accountUserId\":\"me\",\"accountEpoch\":1,"
@@ -122,10 +148,23 @@ void DevicesModelTest::projectsLinkLifecycle()
         "\"expiresAt\":\"2099-08-13T20:00:00Z\"}"));
     QVERIFY(model.hasSelfLinkPending());
     QCOMPARE(model.selfLinkUserCode(), QStringLiteral("MNPQ-2345"));
+    QCOMPARE(
+        model.selfLinkExpiresAt(),
+        QDateTime::fromString(
+            QStringLiteral("2099-08-13T20:00:00Z"),
+            Qt::ISODate));
     model.pruneExpiredLinks(
         QDateTime::fromString(QStringLiteral("2100-01-01T00:00:00Z"), Qt::ISODate));
     QVERIFY(!model.hasSelfLinkPending());
-    QCOMPARE(model.selfLinkOutcome(), kodosi::DevicesModel::SelfLinkOutcome::Expired);
+    QCOMPARE(
+        model.selfLinkOutcome(),
+        kodosi::DevicesModel::SelfLinkOutcome::SelfLinkExpired);
+    QVERIFY(!model.selfLinkApproved());
+    QVERIFY(model.selfLinkOutcomeMessage().contains(QStringLiteral("expired")));
+    model.dismissSelfLinkOutcome();
+    QCOMPARE(
+        model.selfLinkOutcome(),
+        kodosi::DevicesModel::SelfLinkOutcome::SelfLinkNone);
 }
 
 void DevicesModelTest::rejectsMalformedSnapshotsWithoutDestroyingState()
@@ -166,6 +205,6 @@ void DevicesModelTest::normalizesOnlyAllocatedUserCodes()
     QVERIFY(!model.isCanonicalUserCode(model.normalizeUserCode(QStringLiteral("BCDF!GHJ"))));
 }
 
-QTEST_APPLESS_MAIN(DevicesModelTest)
+QTEST_GUILESS_MAIN(DevicesModelTest)
 
 #include "tst_devices_model.moc"

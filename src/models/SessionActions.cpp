@@ -6,10 +6,12 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QRandomGenerator>
 #include <QSet>
 #include <QUuid>
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <optional>
 #include <ranges>
@@ -255,6 +257,11 @@ bool SessionActions::create(
         emit stateChanged();
     }
     return accepted;
+}
+
+bool SessionActions::createDefault()
+{
+    return create(generatedSessionName(), defaultWorkingDirectory());
 }
 
 bool SessionActions::canInterrupt(const QString& sessionId) const
@@ -1290,6 +1297,27 @@ bool SessionActions::closeStatus(const QString& status)
 {
     return interruptStatus(status)
         || status == QStringLiteral("reconnecting");
+}
+
+QString SessionActions::generatedSessionName()
+{
+    static constexpr std::array adjectives {
+        "Amber", "Brass", "Cedar", "Copper", "Dusk", "Ember",
+        "Fern", "Flint", "Juniper", "Moss", "Slate", "Willow",
+    };
+    static constexpr std::array animals {
+        "Badger", "Crane", "Falcon", "Fox", "Heron", "Lark",
+        "Otter", "Owl", "Raven", "Sparrow", "Wolf", "Wren",
+    };
+    const auto adjective = adjectives.at(
+        QRandomGenerator::global()->bounded(
+            static_cast<quint32>(adjectives.size())));
+    const auto animal = animals.at(
+        QRandomGenerator::global()->bounded(
+            static_cast<quint32>(animals.size())));
+    return QString::fromLatin1(adjective)
+        + QLatin1Char(' ')
+        + QString::fromLatin1(animal);
 }
 
 bool SessionActions::stageReady(

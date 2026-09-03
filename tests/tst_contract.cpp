@@ -16,6 +16,7 @@ class ContractTest final : public QObject
 private slots:
     void dependencyBaselineIsCurrent();
     void desktopStateQmlContractIsNativeOwned();
+    void shellAccountDeviceParityContract();
     void desktopFileIntegrationContractIsNativeOwned();
     void applicationLogUrlRedactionUsesTypedQStringSetters();
     void projectIntelligenceQmlContractIsProductSafe();
@@ -291,6 +292,191 @@ void ContractTest::desktopStateQmlContractIsNativeOwned()
         "panel.settings.autoMode.reload.cancel"));
     QVERIFY(smokeSource.contains(
         "agent-settings-external-stale.json"));
+}
+
+void ContractTest::shellAccountDeviceParityContract()
+{
+    QFile mainQml(QStringLiteral(KODOSI_SOURCE_DIR "/src/qml/Main.qml"));
+    QVERIFY2(mainQml.open(QIODevice::ReadOnly), qPrintable(mainQml.errorString()));
+    const auto mainSource = mainQml.readAll();
+    for (const auto shortcut : {
+             QByteArrayLiteral("sequence: \"Ctrl+,\""),
+             QByteArrayLiteral("sequence: \"Ctrl+S\""),
+             QByteArrayLiteral("sequence: \"Ctrl+I\""),
+             QByteArrayLiteral("sequence: \"Ctrl+Shift+S\""),
+             QByteArrayLiteral("sequence: \"Ctrl+Shift+W\""),
+             QByteArrayLiteral("sequence: \"Ctrl+B\""),
+             QByteArrayLiteral("sequence: \"Ctrl+Shift+/\""),
+             QByteArrayLiteral("sequence: \"Ctrl+Shift+D\""),
+             QByteArrayLiteral("sequence: \"Ctrl+Shift+Enter\""),
+         }) {
+        QVERIFY2(mainSource.contains(shortcut), shortcut.constData());
+    }
+    QVERIFY(mainSource.contains("textInputOwnsShortcuts()"));
+    QVERIFY(mainSource.contains("window.canShareSelectedSession"));
+    QVERIFY(mainSource.contains("window.canCloseSelectedSession"));
+    QVERIFY(mainSource.contains("sessionSidebar.modalOpen"));
+    QVERIFY(mainSource.contains(
+        "Models.SessionActions.requestCloseConfirmation("));
+    QVERIFY(mainSource.contains("Models.SessionActions.createDefault()"));
+    QVERIFY(mainSource.contains("KeyboardShortcutsOverlay"));
+    QVERIFY(mainSource.contains("header.auth.signIn"));
+    QVERIFY(!mainSource.contains("sequence: \"Ctrl+Shift+A\""));
+    QVERIFY(!mainSource.contains("sequence: \"Ctrl+Shift+X\""));
+    QVERIFY(!mainSource.contains("shortcut.approval.approve"));
+    QVERIFY(!mainSource.contains("shortcut.approval.deny"));
+
+    QFile sidebar(QStringLiteral(
+        KODOSI_SOURCE_DIR "/src/qml/Workbench/SessionSidebar.qml"));
+    QVERIFY2(sidebar.open(QIODevice::ReadOnly), qPrintable(sidebar.errorString()));
+    const auto sidebarSource = sidebar.readAll();
+    QVERIFY(sidebarSource.contains("readonly property bool modalOpen:"));
+    QVERIFY(sidebarSource.contains("shareDialog.opened"));
+    QVERIFY(sidebarSource.contains("deleteConfirmation.visible"));
+    QVERIFY(sidebarSource.contains("leaveConfirmation.visible"));
+    QVERIFY(sidebarSource.contains("revokeConfirmation.visible"));
+
+    QFile overlay(QStringLiteral(
+        KODOSI_SOURCE_DIR
+        "/src/qml/Shell/KeyboardShortcutsOverlay.qml"));
+    QVERIFY2(overlay.open(QIODevice::ReadOnly), qPrintable(overlay.errorString()));
+    const auto overlaySource = overlay.readAll();
+    for (const auto contract : {
+             QByteArrayLiteral("objectName: \"panel.shortcuts\""),
+             QByteArrayLiteral("objectName: \"panel.shortcuts.close\""),
+             QByteArrayLiteral("objectName: \"panel.shortcuts.escape\""),
+             QByteArrayLiteral("width: Math.min(620"),
+             QByteArrayLiteral("height: Math.min(460"),
+             QByteArrayLiteral("closePolicy: Popup.CloseOnEscape"),
+             QByteArrayLiteral("Accessible.role: Accessible.Dialog"),
+             QByteArrayLiteral("qsTr(\"Agent Intelligence\")"),
+             QByteArrayLiteral("qsTr(\"Close selected session\")"),
+         }) {
+        QVERIFY2(overlaySource.contains(contract), contract.constData());
+    }
+    QVERIFY(!overlaySource.contains("most-urgent"));
+
+    QFile utility(QStringLiteral(
+        KODOSI_SOURCE_DIR
+        "/src/qml/Appearance/AppearanceMenu.qml"));
+    QVERIFY2(utility.open(QIODevice::ReadOnly), qPrintable(utility.errorString()));
+    QVERIFY(utility.readAll().contains(
+        "objectName: \"panel.utility.shortcuts\""));
+
+    QFile settings(QStringLiteral(
+        KODOSI_SOURCE_DIR
+        "/src/qml/Settings/SettingsDrawer.qml"));
+    QVERIFY2(settings.open(QIODevice::ReadOnly), qPrintable(settings.errorString()));
+    const auto settingsSource = settings.readAll();
+    for (const auto contract : {
+             QByteArrayLiteral(
+                 "\"panel.settings.account.resetIdentity\""),
+             QByteArrayLiteral(
+                 "\"panel.settings.account.resetConfirm.input\""),
+             QByteArrayLiteral(
+                 "\"panel.settings.account.resetConfirm.cancel\""),
+             QByteArrayLiteral(
+                 "\"panel.settings.account.resetConfirm.confirm\""),
+             QByteArrayLiteral(
+                 "\"panel.settings.account.reset.pending\""),
+             QByteArrayLiteral(
+                 "\"panel.settings.account.reset.error\""),
+             QByteArrayLiteral(
+                 "resetConfirmInput.text === \"RESET\""),
+             QByteArrayLiteral("!== \"RESET\""),
+             QByteArrayLiteral("clears your local keypair"),
+             QByteArrayLiteral("All linked devices unlink"),
+             QByteArrayLiteral("friend trust pins are forgotten"),
+             QByteArrayLiteral(
+                 "\"panel.settings.account.signIn\""),
+             QByteArrayLiteral(
+                 "selectedCategory !== \"agents\"\n"
+                 "                && selectedCategory !== \"account\""),
+             QByteArrayLiteral(
+                 "if (selectedCategory !== \"account\")\n"
+                 "            clearResetConfirmation()"),
+             QByteArrayLiteral(
+                 "readonly property bool identityRecoveryActive:"),
+             QByteArrayLiteral(
+                 "resetConfirmationOpen || resetPending || resetFailed"),
+         }) {
+        QVERIFY2(settingsSource.contains(contract), contract.constData());
+    }
+    QVERIFY(!settingsSource.contains(
+        "resetConfirmInput.text.toUpperCase()"));
+    QVERIFY(!settingsSource.contains(
+        "resetConfirmInput.text.trim()"));
+
+    QFile authOverlay(QStringLiteral(
+        KODOSI_SOURCE_DIR "/src/qml/Auth/AuthOverlay.qml"));
+    QVERIFY2(
+        authOverlay.open(QIODevice::ReadOnly),
+        qPrintable(authOverlay.errorString()));
+    const auto authOverlaySource = authOverlay.readAll();
+    QVERIFY(authOverlaySource.contains(
+        "visible: root.failed && !root.identityReset"));
+    QVERIFY(authOverlaySource.contains(
+        "objectName: \"auth.identity-reset.return\""));
+    QVERIFY(authOverlaySource.contains(
+        "visible: !root.identityReset"));
+    QVERIFY(authOverlaySource.contains(
+        "&& !accountRecoverySurfaceOpen"));
+    QVERIFY(!authOverlaySource.contains(
+        "Models.AuthActions.clearError()\n"
+        "                            root.accountRecoveryRequested()"));
+
+    QFile authBanner(QStringLiteral(
+        KODOSI_SOURCE_DIR "/src/qml/Auth/AuthErrorBanner.qml"));
+    QVERIFY2(
+        authBanner.open(QIODevice::ReadOnly),
+        qPrintable(authBanner.errorString()));
+    const auto authBannerSource = authBanner.readAll();
+    QVERIFY(authBannerSource.contains(
+        "Models.AuthActions.failedOperation === \"identity.reset\""));
+    QVERIFY(authBannerSource.contains("root.openAccountRequested()"));
+    QVERIFY(authBannerSource.contains("Models.AuthActions.retry()"));
+    QVERIFY(!authBannerSource.contains(
+        "Models.AuthActions.clearError()\n"
+        "                    root.openAccountRequested()"));
+
+    QFile missions(QStringLiteral(
+        KODOSI_SOURCE_DIR "/src/qml/People/PeopleView.qml"));
+    QVERIFY2(missions.open(QIODevice::ReadOnly), qPrintable(missions.errorString()));
+    const auto missionsSource = missions.readAll();
+    QVERIFY(missionsSource.contains(
+        "accessibleId: \"auth.gate.missions\""));
+    QVERIFY(missionsSource.contains(
+        "visible: Models.AuthState.signedIn"));
+
+    QFile smoke(QStringLiteral(
+        KODOSI_SOURCE_DIR "/scripts/smoke-ui-probe.sh"));
+    QVERIFY2(smoke.open(QIODevice::ReadOnly), qPrintable(smoke.errorString()));
+    QVERIFY(smoke.readAll().contains(
+        "id=panel.settings.account.signIn"));
+
+    QFile devices(QStringLiteral(
+        KODOSI_SOURCE_DIR "/src/qml/Devices/DevicesView.qml"));
+    QVERIFY2(devices.open(QIODevice::ReadOnly), qPrintable(devices.errorString()));
+    const auto deviceSource = devices.readAll();
+    for (const auto contract : {
+             QByteArrayLiteral(
+                 "model: Models.Devices.pendingLinkPresentations"),
+             QByteArrayLiteral("\"devices.incoming.\" + userCode"),
+             QByteArrayLiteral("\"devices.self-link.expiry\""),
+             QByteArrayLiteral("\"devices.self-link.outcome\""),
+             QByteArrayLiteral("\"devices.self-link.regenerate\""),
+             QByteArrayLiteral("\"devices.link.outcome\""),
+             QByteArrayLiteral("\"devices.link.outcome.dismiss\""),
+             QByteArrayLiteral("\"devices.error.retry\""),
+             QByteArrayLiteral("\"devices.error.dismiss\""),
+             QByteArrayLiteral("\"devices.current.signer\""),
+             QByteArrayLiteral("\"devices.current.issued\""),
+             QByteArrayLiteral("Models.Devices.isCanonicalUserCode("),
+             QByteArrayLiteral(
+                 "accessibleId: \"auth.gate.devices\""),
+         }) {
+        QVERIFY2(deviceSource.contains(contract), contract.constData());
+    }
 }
 
 void ContractTest::desktopFileIntegrationContractIsNativeOwned()

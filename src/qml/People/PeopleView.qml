@@ -12,6 +12,7 @@ Item {
     Accessible.name: qsTr("Missions")
 
     property string selectedMissionId
+    signal signInRequested()
 
     Connections {
         target: Models.MissionDetail
@@ -27,10 +28,22 @@ Item {
         color: KodosiTheme.canvas
     }
 
+    AuthGate {
+        anchors.fill: parent
+        visible: !Models.AuthState.signedIn
+        accessibleId: "auth.gate.missions"
+        title: qsTr("Sign in to use Missions")
+        detail: qsTr(
+            "Sign in to create Missions, invite people, and share supervision. Local My Agents stays available.")
+        onSignInRequested: root.signInRequested()
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: KodosiTheme.spacing7
         spacing: KodosiTheme.spacing5
+        visible: Models.AuthState.signedIn
+        Accessible.ignored: !visible
 
         RowLayout {
             Layout.fillWidth: true

@@ -6,11 +6,42 @@ import Kodosi.Models 1.0 as Models
 KPopover {
     id: root
 
+    signal accountRecoveryRequested()
+
+    property bool accountRecoverySurfaceOpen: false
+
     readonly property bool hasCode:
         Models.AuthState.userCode.length > 0
+    readonly property bool identityReset:
+        Models.AuthActions.failedOperation === "identity.reset"
     readonly property bool failed:
         Models.AuthState.phase === Models.AuthState.Error
         || Models.AuthActions.lastError.length > 0
+    readonly property string transitionTitle:
+        identityReset && failed
+        ? qsTr("Identity reset needs attention")
+        : identityReset
+          ? qsTr("Resetting identity")
+          : failed
+            ? qsTr("Sign-in needs attention")
+            : hasCode
+              ? qsTr("Approve in your browser")
+              : qsTr("Preparing secure sign-in")
+    readonly property string transitionDetail:
+        identityReset && failed
+        ? Models.AuthActions.lastError
+        : identityReset
+          ? qsTr(
+                "Clearing the local keypair, linked devices, and friend trust pins.")
+          : failed
+            ? (Models.AuthActions.lastError.length > 0
+               ? Models.AuthActions.lastError
+               : Models.AuthState.notice)
+            : hasCode
+              ? qsTr(
+                    "Choose the account you want to use. This window updates automatically.")
+              : qsTr(
+                    "Kodosi is requesting a trusted browser code from the local runtime.")
 
     objectName: "auth.transition"
     parent: Overlay.overlay
@@ -20,6 +51,7 @@ KPopover {
     height: parent ? parent.height : 0
     visible: !Models.AuthState.signedIn
         && (Models.AuthActions.busy || hasCode || failed)
+        && !accountRecoverySurfaceOpen
     modal: true
     focus: true
     closePolicy: Popup.NoAutoClose
@@ -34,13 +66,12 @@ KPopover {
     }
 
     contentItem: FocusScope {
+        id: transitionScope
         objectName: "auth.transition"
         Accessible.id: objectName
         focus: true
         Accessible.role: Accessible.Dialog
-        Accessible.name: root.failed
-            ? qsTr("Sign-in needs attention")
-            : qsTr("Signing in to Kodosi")
+        Accessible.name: root.transitionTitle
 
         Rectangle {
             anchors.centerIn: parent
@@ -80,11 +111,7 @@ KPopover {
 
                 PlainLabel {
                     Layout.fillWidth: true
-                    text: root.failed
-                        ? qsTr("Sign-in needs attention")
-                        : root.hasCode
-                          ? qsTr("Approve in your browser")
-                          : qsTr("Preparing secure sign-in")
+                    text: root.transitionTitle
                     color: KodosiTheme.textPrimary
                     font.pixelSize: 19
                     font.weight: Font.DemiBold
@@ -93,19 +120,21 @@ KPopover {
 
                 PlainLabel {
                     Layout.fillWidth: true
-                    text: root.failed
-                        ? (Models.AuthActions.lastError.length > 0
-                           ? Models.AuthActions.lastError
-                           : Models.AuthState.notice)
-                        : root.hasCode
-                          ? qsTr("Choose the account you want to use. This window updates automatically.")
-                          : qsTr("Kodosi is requesting a trusted browser code from the local runtime.")
+                    text: root.transitionDetail
                     color: root.failed
                         ? KodosiTheme.danger
                         : KodosiTheme.textSecondary
                     font.pixelSize: 12
                     wrapMode: Text.Wrap
                     horizontalAlignment: Text.AlignHCenter
+                }
+
+                KBusyIndicator {
+                    objectName: "auth.identity-reset.pending"
+                    Accessible.id: objectName
+                    visible: root.identityReset && !root.failed
+                    Layout.alignment: Qt.AlignHCenter
+                    Accessible.name: qsTr("Resetting identity")
                 }
 
                 Rectangle {
@@ -161,7 +190,7 @@ KPopover {
 
                     KButton {
                         id: retryButton
-                        visible: root.failed
+                        visible: root.failed && !root.identityReset
                         objectName: "auth.retry"
                         Accessible.id: objectName
                         text: qsTr("Try again")
@@ -172,7 +201,21 @@ KPopover {
                     }
 
                     KButton {
+                        id: recoveryButton
+                        visible: root.failed && root.identityReset
+                        objectName: "auth.identity-reset.return"
+                        Accessible.id: objectName
+                        text: qsTr("Return to Account settings")
+                        variant: "directional"
+                        iconName: "chevron-right"
+                        Accessible.name: text
+                        onClicked:
+                            root.accountRecoveryRequested()
+                    }
+
+                    KButton {
                         id: cancelButton
+                        visible: !root.identityReset
                         objectName: "auth.cancel"
                         Accessible.id: objectName
                         text: qsTr("Cancel")
@@ -186,7 +229,11 @@ KPopover {
     }
 
     onOpened: {
-        if (root.failed)
+        if (root.identityReset && !root.failed)
+            transitionScope.forceActiveFocus(Qt.PopupFocusReason)
+        else if (root.failed && root.identityReset)
+            recoveryButton.forceActiveFocus()
+        else if (root.failed)
             retryButton.forceActiveFocus()
         else if (root.hasCode)
             browserButton.forceActiveFocus()
