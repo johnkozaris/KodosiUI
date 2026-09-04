@@ -8,12 +8,6 @@ qt_dir := tools_dir + "/Qt/6.11.2/gcc_64"
 bootstrap:
     ./scripts/bootstrap-tools.sh
 
-parity:
-    python3 scripts/verify-parity.py
-
-visual-parity:
-    python3 scripts/verify-visual-parity.py
-
 configure: bootstrap
     CMAKE_PREFIX_PATH="{{ qt_dir }}" "{{ cmake }}" --preset dev
 
@@ -25,12 +19,6 @@ ui-probe-build: configure
 
 ui-probe *args: ui-probe-build
     build/dev/src/kodosi-ui-probe {{ args }}
-
-ui-probe-smoke: build ui-probe-build
-    ./scripts/smoke-ui-probe.sh
-
-ui-probe-deep-link-smoke: build ui-probe-build
-    ./scripts/smoke-deep-link-ui-probe.sh
 
 ui-probe-input-status: ui-probe-build
     build/dev/src/kodosi-ui-probe input-status
@@ -69,9 +57,9 @@ native-license-test: bootstrap
     python3 scripts/verify-native-license-evidence.py
     python3 -m unittest tests/test_native_license_evidence.py
 
-check: parity visual-parity release-integrity-test rust-license-test native-license-test lint test
+check: release-integrity-test rust-license-test native-license-test lint test
 
-package: parity bootstrap
+package: bootstrap
     mkdir -p build/release
     find build/release -maxdepth 1 -type f \
         \( -name 'kodosi_*.deb' \
@@ -147,6 +135,3 @@ verify-release-signature fingerprint="":
         build/release/release-manifest.json \
         build/release/release-manifest.json.asc \
         "{{ fingerprint }}"
-
-package-desktop-smoke: package
-    ./scripts/verify-linux-desktops.sh

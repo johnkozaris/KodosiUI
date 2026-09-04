@@ -93,7 +93,7 @@ private slots:
     void scopedPerformanceSpansPersistOnlyBoundedMetadata();
     void reportsWritePathFailuresWithoutRecursion();
     void keepsExplicitRootsIsolated();
-    void diagnosticsContractUsesTheNativePurpose();
+    void diagnosticsDoesNotExposeLogStorage();
 };
 
 void ApplicationLogStoreTest::createsPrivateFilesAndRedactsStructuredLines()
@@ -485,34 +485,17 @@ void ApplicationLogStoreTest::keepsExplicitRootsIsolated()
     QVERIFY(second.path().startsWith(secondRoot.path()));
 }
 
-void ApplicationLogStoreTest::diagnosticsContractUsesTheNativePurpose()
+void ApplicationLogStoreTest::diagnosticsDoesNotExposeLogStorage()
 {
     QFile drawer(
         QStringLiteral(KODOSI_SOURCE_DIR)
         + QStringLiteral("/src/qml/Diagnostics/DiagnosticsDrawer.qml"));
     QVERIFY(drawer.open(QIODevice::ReadOnly));
     const auto source = drawer.readAll();
-    for (const auto& contract : {
-             QByteArrayLiteral("title: qsTr(\"Logging\")"),
-             QByteArrayLiteral("Models.ApplicationLog.healthy"),
-             QByteArrayLiteral("Models.ApplicationLog.path"),
-             QByteArrayLiteral(
-                 "objectName:\n                                \"panel.diagnostics.logging.openFolder\""),
-             QByteArrayLiteral("Models.DesktopFiles.openLogDirectory("),
-             QByteArrayLiteral(
-                 "Models.DesktopFiles.DiagnosticsLogDirectory"),
-             QByteArrayLiteral(
-                 "\"panel.diagnostics.logging.error.dismiss\""),
-         }) {
-        QVERIFY2(source.contains(contract), contract.constData());
-    }
-    QVERIFY(!source.contains(
-        QByteArrayLiteral("Models.DesktopFiles.openPath(\n"
-                          "            Models.ApplicationLog")));
-    QVERIFY(source.contains(QByteArrayLiteral(
-        "Persisted file logs are redacted and retained locally.")));
-    QVERIFY(source.contains(QByteArrayLiteral(
-        "Models.ApplicationLog.directoryAvailable")));
+    QVERIFY(!source.contains("title: qsTr(\"Logging\")"));
+    QVERIFY(!source.contains("Models.ApplicationLog"));
+    QVERIFY(!source.contains("openLogDirectory("));
+    QVERIFY(!source.contains("panel.diagnostics.logging"));
 
     QFile terminalView(
         QStringLiteral(KODOSI_SOURCE_DIR)

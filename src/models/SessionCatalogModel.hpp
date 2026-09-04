@@ -5,6 +5,7 @@
 #include <QAbstractListModel>
 #include <QByteArray>
 #include <QJsonObject>
+#include <QSet>
 #include <QString>
 #include <QTimer>
 #include <QVariantMap>
@@ -136,6 +137,7 @@ signals:
     void authorityStateChanged();
     void decodeError(QString message);
     void authoritativeSnapshotApplied();
+    void inactiveLocalObserved(QString sessionId, QString incarnationId);
 
 private:
     friend class AttentionModel;
@@ -144,6 +146,7 @@ private:
     struct Session {
         QString id;
         QString incarnationId;
+        QString createRequestId;
         QString kind;
         QString name;
         QString project;
@@ -169,6 +172,7 @@ private:
     };
 
     QVector<Session> m_sessions;
+    QSet<QString> m_runtimeSessionIds;
     AccountContextFence m_accountFence {256};
     QTimer m_refreshTimer;
     QString m_authorityError;
@@ -178,6 +182,8 @@ private:
     bool m_refreshPending = false;
 
     static std::optional<Session> decodeSession(const QJsonObject& object);
+    [[nodiscard]] static bool belongsToLiveCatalog(const Session& session);
+    [[nodiscard]] bool containsRuntimeSession(const QString& sessionId) const;
     [[nodiscard]] static PresentationSession projectPresentation(
         const Session& session);
     void applySessionEvent(const QJsonObject& object);

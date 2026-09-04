@@ -45,6 +45,11 @@ Button {
             ? 7
             : 0
 
+        Item {
+            visible: !root.contentLeftAligned
+            Layout.fillWidth: true
+        }
+
         KIcon {
             visible: root.iconName.length > 0 && !root.iconTrailing
             Layout.preferredWidth: 15
@@ -64,7 +69,7 @@ Button {
 
         PlainLabel {
             id: label
-            Layout.fillWidth: true
+            Layout.fillWidth: root.contentLeftAligned
             text: root.uppercase ? root.text.toUpperCase() : root.text
             color: !root.enabled
                 ? KodosiTheme.disabled
@@ -99,6 +104,11 @@ Button {
             Layout.preferredHeight: 14
             name: root.iconName
             color: root.iconColor
+        }
+
+        Item {
+            visible: !root.contentLeftAligned
+            Layout.fillWidth: true
         }
     }
 

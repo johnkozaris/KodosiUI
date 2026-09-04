@@ -86,7 +86,7 @@ class AppearanceModelTest final : public QObject {
 private slots:
     void cleanup();
     void persistsPreferenceAndAppliesStyleOverride();
-    void invalidStoredDataFallsBackWithError();
+    void invalidStoredDataFallsBackSilently();
     void followsLiveSystemSchemeAfterUnsettingOverride();
     void portalAbsenceDefaultsToNormalMotion();
     void portalChangesAreStrictlyValidated();
@@ -163,7 +163,7 @@ void AppearanceModelTest::persistsPreferenceAndAppliesStyleOverride()
     QCOMPARE(reloadedStyle.unsetCalls, 1);
 }
 
-void AppearanceModelTest::invalidStoredDataFallsBackWithError()
+void AppearanceModelTest::invalidStoredDataFallsBackSilently()
 {
     QTemporaryDir directory(
         QDir::current().filePath(QStringLiteral("appearance-invalid-XXXXXX")));
@@ -184,7 +184,7 @@ void AppearanceModelTest::invalidStoredDataFallsBackWithError()
     QCOMPARE(
         invalidType.preference(),
         kodosi::AppearanceModel::Preference::System);
-    QVERIFY(!invalidType.settingsError().isEmpty());
+    QVERIFY(invalidType.settingsError().isEmpty());
 
     {
         auto storage = settingsFor(directory);
@@ -205,7 +205,7 @@ void AppearanceModelTest::invalidStoredDataFallsBackWithError()
     QCOMPARE(
         malformed.preference(),
         kodosi::AppearanceModel::Preference::System);
-    QVERIFY(!malformed.settingsError().isEmpty());
+    QVERIFY(malformed.settingsError().isEmpty());
 
     QVERIFY(!malformed.setPreference(99));
     QVERIFY(malformed.setPreference(

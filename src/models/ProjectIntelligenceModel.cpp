@@ -1145,51 +1145,6 @@ void ProjectIntelligenceModel::installSyntheticFixture()
     emit agentChanged();
 }
 
-void ProjectIntelligenceModel::installSyntheticEmptyFixture(
-    const bool archive)
-{
-    ++m_demandGeneration;
-    m_pending.reset();
-    m_replyTimer.stop();
-    const auto sourceId = stableId(
-        archive
-            ? QStringLiteral("synthetic|empty|archive")
-            : QStringLiteral("synthetic|empty|active"));
-    m_sources = {
-        {
-            .id = sourceId,
-            .kind = archive
-                ? QStringLiteral("claudeArchive")
-                : QStringLiteral("active"),
-            .agent = archive
-                ? QStringLiteral("claude")
-                : QString {},
-            .label = archive
-                ? QStringLiteral("Archive · empty-project")
-                : QStringLiteral("Empty project"),
-        },
-    };
-    const PresentationListModel::Row sourceRow {
-        .itemId = sourceId,
-        .title = m_sources.constFirst().label,
-        .subtitle = archive
-            ? trText("Claude project archive")
-            : trText("Project intelligence"),
-        .kind = m_sources.constFirst().kind,
-        .agent = m_sources.constFirst().agent,
-        .available = true,
-    };
-    m_sourcesModel.replace({sourceRow});
-    m_copyDestinationsModel.replace({sourceRow});
-    m_selectedSourceId = sourceId;
-    clearSourceDetails();
-    m_hasSourceSnapshot = true;
-    m_hasMoreSources = false;
-    m_nextCursor.clear();
-    setState(State::Ready);
-    emit sourceChanged();
-}
-
 void ProjectIntelligenceModel::ingestAuthEvent(QByteArray json)
 {
     QJsonParseError error;

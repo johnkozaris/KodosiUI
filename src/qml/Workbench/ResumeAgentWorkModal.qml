@@ -10,6 +10,7 @@ KPopover {
     objectName: "panel.resumeAgentWork"
 
     property bool resumePending: false
+    property string resumeRequestId
     readonly property bool compact: width < 850 || height < 570
 
     parent: Overlay.overlay
@@ -21,34 +22,35 @@ KPopover {
     modal: true
     dim: true
     focus: true
-    closePolicy: Models.SessionActions.creating
+    closePolicy: root.resumePending
         ? Popup.NoAutoClose
         : Popup.CloseOnEscape
 
     function openModal() {
         resumePending = false
-        sessionName.clear()
+        resumeRequestId = ""
         Models.SessionActions.clearError()
         Models.ProviderConversations.open()
         open()
     }
 
     function closeModal() {
-        if (Models.SessionActions.creating)
+        if (root.resumePending)
             return false
         resumePending = false
+        resumeRequestId = ""
         close()
         return true
     }
 
     function submitResume() {
         if (!Models.ProviderConversations.canResume
-                || sessionName.text.trim().length === 0
-                || Models.SessionActions.creating)
+                || root.resumePending)
             return
         resumePending = Models.SessionActions.createResumed(
-            sessionName.text,
             Models.ProviderConversations.selectedPresentationId)
+        if (resumePending)
+            resumeRequestId = Models.SessionActions.lastCreateRequestId
     }
 
     onOpened: {
@@ -58,6 +60,7 @@ KPopover {
     onClosed: {
         focusTimer.stop()
         resumePending = false
+        resumeRequestId = ""
         Models.ProviderConversations.close()
     }
 
@@ -71,13 +74,16 @@ KPopover {
     Connections {
         target: Models.SessionActions
 
-        function onSessionCreated() {
-            if (root.resumePending)
+        function onSessionCreationResolved(requestId) {
+            if (root.resumePending
+                    && requestId === root.resumeRequestId)
                 root.closeModal()
         }
 
         function onStateChanged() {
-            if (root.resumePending && !Models.SessionActions.creating
+            if (root.resumePending
+                    && !Models.SessionActions.isCreatePending(
+                        root.resumeRequestId)
                     && Models.SessionActions.lastError.length > 0)
                 root.resumePending = false
         }
@@ -159,7 +165,7 @@ KPopover {
                     Accessible.id: objectName
                     glyph: "close"
                     Accessible.name: qsTr("Close Resume Agent Work")
-                    enabled: !Models.SessionActions.creating
+                    enabled: !root.resumePending
                     onClicked: root.closeModal()
                 }
             }
@@ -842,23 +848,11 @@ KPopover {
                     Layout.fillWidth: true
                     spacing: 2
 
-                    KTextField {
-                        id: sessionName
-                        objectName: "resumeAgentWork.sessionName"
-                        Accessible.id: objectName
-                        Layout.fillWidth: true
-                        placeholderText: qsTr("New session name")
-                        Accessible.name: placeholderText
-                        maximumLength: 128
-                        enabled: !Models.SessionActions.creating
-                        onAccepted: root.submitResume()
-                    }
-
                     PlainLabel {
                         objectName: "resumeAgentWork.creation.error"
                         Accessible.id: objectName
                         visible: Models.SessionActions.lastError.length > 0
-                            && !Models.SessionActions.creating
+                            && !root.resumePending
                         Layout.fillWidth: true
                         text: Models.SessionActions.lastError
                         color: KodosiTheme.danger
@@ -873,7 +867,7 @@ KPopover {
                     Accessible.id: objectName
                     text: qsTr("Cancel")
                     variant: "quiet"
-                    enabled: !Models.SessionActions.creating
+                    enabled: !root.resumePending
                     Accessible.name: text
                     onClicked: root.closeModal()
                 }
@@ -881,13 +875,12 @@ KPopover {
                 KButton {
                     objectName: "resumeAgentWork.resume"
                     Accessible.id: objectName
-                    text: Models.SessionActions.creating
+                    text: root.resumePending
                         ? qsTr("Resuming")
                         : qsTr("Resume")
                     variant: "primary"
                     enabled: Models.ProviderConversations.canResume
-                        && sessionName.text.trim().length > 0
-                        && !Models.SessionActions.creating
+                        && !root.resumePending
                     Accessible.name: text
                     onClicked: root.submitResume()
                 }

@@ -7,6 +7,8 @@
 #include <QJsonObject>
 #include <QString>
 #include <QUrl>
+#include <QVariantList>
+#include <QVariantMap>
 #include <QVector>
 
 #include <optional>
@@ -21,7 +23,15 @@ class PeopleModel final : public QAbstractListModel {
         int incomingCount
         READ incomingCount
         NOTIFY relationshipsChanged)
+    Q_PROPERTY(
+        int outgoingCount
+        READ outgoingCount
+        NOTIFY relationshipsChanged)
     Q_PROPERTY(bool ready READ ready NOTIFY readinessChanged)
+    Q_PROPERTY(
+        QVariantList friendPresentations
+        READ friendPresentations
+        NOTIFY relationshipsChanged)
 
 public:
     enum class Relationship {
@@ -37,6 +47,7 @@ public:
         DisplayNameRole,
         AvatarUrlRole,
         RelationshipRole,
+        RelationshipNameRole,
         CreatedAtRole,
     };
     Q_ENUM(Role)
@@ -48,7 +59,9 @@ public:
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
     [[nodiscard]] int friendCount() const noexcept;
     [[nodiscard]] int incomingCount() const noexcept;
+    [[nodiscard]] int outgoingCount() const noexcept;
     [[nodiscard]] bool ready() const noexcept;
+    [[nodiscard]] QVariantList friendPresentations() const;
     [[nodiscard]] std::optional<Relationship> relationshipForHandle(
         const QString& handle) const;
     [[nodiscard]] std::optional<QString> friendUserIdForHandle(

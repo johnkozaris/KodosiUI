@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import Kodosi.Models 1.0 as Models
 
@@ -19,18 +18,12 @@ ColumnLayout {
     Layout.fillWidth: true
     spacing: 18
 
-    function refreshAll() {
-        Models.ProjectIntelligence.refreshSources(true)
-        Models.AgentAutoModeRules.refresh(false)
-        Models.ExternalDiscovery.refresh(true)
-        Models.AgentGlobal.refresh()
-    }
-
     function requestAutoModeReload() {
-        if (Models.AgentAutoModeRules.dirty)
-            autoModeReloadDialog.open()
-        else
-            Models.AgentAutoModeRules.refresh(true)
+        Models.AgentAutoModeRules.environmentText = ""
+        Models.AgentAutoModeRules.allowText = ""
+        Models.AgentAutoModeRules.softDenyText = ""
+        Models.AgentAutoModeRules.hardDenyText = ""
+        Models.AgentAutoModeRules.refresh(true)
     }
 
     function integrationStatus(
@@ -128,15 +121,6 @@ ColumnLayout {
             font.weight: Font.DemiBold
         }
 
-        KIconButton {
-            objectName: "panel.settings.agents.refresh"
-            Accessible.id: objectName
-            glyph: "refresh"
-            glyphColor: KodosiTheme.textSecondary
-            Accessible.name:
-                qsTr("Refresh agent settings and discovery")
-            onClicked: root.refreshAll()
-        }
     }
 
     KSegmentedBar {
@@ -285,22 +269,6 @@ ColumnLayout {
             }
 
             Item { Layout.fillWidth: true }
-
-            KComboBox {
-                id: workspaceSource
-                objectName: "panel.settings.agents.workspace"
-                Accessible.id: objectName
-                Layout.preferredWidth: 240
-                model: Models.ProjectIntelligence.sources
-                textRole: "title"
-                valueRole: "itemId"
-                Accessible.name: qsTr("Agent settings workspace")
-                onCurrentValueChanged: {
-                    if (currentValue)
-                        Models.ProjectIntelligence.selectSource(
-                            currentValue)
-                }
-            }
         }
 
         ColumnLayout {
@@ -1273,90 +1241,6 @@ ColumnLayout {
                         color: KodosiTheme.seam
                     }
                 }
-        }
-    }
-
-    Item {
-        Layout.preferredWidth: 0
-        Layout.preferredHeight: 0
-
-        KDialog {
-            id: autoModeReloadDialog
-            objectName: "panel.settings.autoMode.reload.confirm"
-            parent: Overlay.overlay
-            width: Math.min(
-                440,
-                parent ? parent.width - 32 : 440)
-            x: parent
-                ? Math.round((parent.width - width) / 2)
-                : 0
-            y: parent
-                ? Math.round((parent.height - height) / 2)
-                : 0
-            title: qsTr("Reload Auto Mode rules?")
-            focus: true
-            dim: true
-            closePolicy: Popup.CloseOnEscape
-
-            onOpened:
-                autoModeReloadCancel.forceActiveFocus(
-                    Qt.PopupFocusReason)
-            onClosed: {
-                if (root.visible)
-                    autoModeReloadButton.forceActiveFocus(
-                        Qt.PopupFocusReason)
-            }
-
-            contentItem: PlainLabel {
-                width: parent ? parent.width : implicitWidth
-                text: qsTr(
-                    "Unsaved Auto Mode rule changes will be replaced by the latest saved rules.")
-                color: KodosiTheme.textSecondary
-                wrapMode: Text.Wrap
-            }
-
-            footer: Rectangle {
-                implicitHeight: 58
-                color: KodosiTheme.surface
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 18
-                    anchors.rightMargin: 18
-                    spacing: 8
-
-                    Item { Layout.fillWidth: true }
-
-                    KButton {
-                        id: autoModeReloadCancel
-                        objectName:
-                            "panel.settings.autoMode.reload.cancel"
-                        Accessible.id: objectName
-                        text: qsTr("Cancel")
-                        variant: "quiet"
-                        onClicked: autoModeReloadDialog.close()
-                    }
-
-                    KButton {
-                        objectName:
-                            "panel.settings.autoMode.reload.replace"
-                        Accessible.id: objectName
-                        text: qsTr("Reload")
-                        onClicked: {
-                            Models.AgentAutoModeRules.refresh(true)
-                            autoModeReloadDialog.close()
-                        }
-                    }
-                }
-
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    height: 1
-                    color: KodosiTheme.seam
-                }
-            }
         }
     }
 

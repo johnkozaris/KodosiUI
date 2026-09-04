@@ -61,6 +61,9 @@ constexpr auto snapshot =
 void SessionCatalogTest::completeSnapshotUpsertAndRemoval()
 {
     kodosi::SessionCatalogModel model;
+    QSignalSpy inactive(
+        &model,
+        &kodosi::SessionCatalogModel::inactiveLocalObserved);
     model.ingestAuthEvent(
         QByteArrayLiteral(R"({"type":"auth.ready","userId":"user","accountEpoch":1})"));
     model.ingestSessionEvent(QByteArrayLiteral(
@@ -72,9 +75,10 @@ void SessionCatalogTest::completeSnapshotUpsertAndRemoval()
 
     model.ingestSessionEvent(QByteArrayLiteral(
         R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.upsert","session":{"kind":"local","id":"one","incarnationId":"inc-1","name":"Renamed","project":"/repo","mode":"normal","status":"stopped","recovery":"resumable","scope":"justMe","access":"inject"}})"));
-    QCOMPARE(model.data(model.index(0), kodosi::SessionCatalogModel::NameRole).toString(),
-             QStringLiteral("Renamed"));
-    QVERIFY(!model.data(model.index(0), kodosi::SessionCatalogModel::CommandableRole).toBool());
+    QCOMPARE(model.rowCount(), 0);
+    QCOMPARE(inactive.count(), 1);
+    QCOMPARE(inactive.constFirst().at(0).toString(), QStringLiteral("one"));
+    QCOMPARE(inactive.constFirst().at(1).toString(), QStringLiteral("inc-1"));
 
     model.ingestSessionEvent(
         QByteArrayLiteral(R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.removed","sessionId":"one"})"));

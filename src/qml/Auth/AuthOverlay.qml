@@ -210,6 +210,16 @@ KPopover {
                     }
 
                     KButton {
+                        visible: root.hasCode
+                        objectName: "auth.use-another-account"
+                        Accessible.id: objectName
+                        text: qsTr("Use another account")
+                        variant: "quiet"
+                        Accessible.name: text
+                        onClicked: Models.AuthActions.useAnotherAccount()
+                    }
+
+                    KButton {
                         id: cancelButton
                         visible: !root.identityReset
                         objectName: "auth.cancel"

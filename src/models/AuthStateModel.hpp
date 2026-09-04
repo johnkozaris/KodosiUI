@@ -16,6 +16,8 @@ class AuthStateModel final : public QObject {
     Q_PROPERTY(QUrl verificationUrl READ verificationUrl NOTIFY stateChanged)
     Q_PROPERTY(QString notice READ notice NOTIFY stateChanged)
     Q_PROPERTY(QString identityHealth READ identityHealth NOTIFY stateChanged)
+    Q_PROPERTY(bool recoveryRequired READ recoveryRequired NOTIFY stateChanged)
+    Q_PROPERTY(QString recoveryMessage READ recoveryMessage NOTIFY stateChanged)
 
 public:
     enum class Phase {
@@ -37,6 +39,9 @@ public:
     [[nodiscard]] QUrl verificationUrl() const;
     [[nodiscard]] QString notice() const;
     [[nodiscard]] QString identityHealth() const;
+    [[nodiscard]] bool recoveryRequired() const noexcept;
+    [[nodiscard]] QString recoveryMessage() const;
+    Q_INVOKABLE void clearRecoveryMessage();
 
 public slots:
     void ingestAuthEvent(QByteArray json);
@@ -52,7 +57,8 @@ private:
     QString m_userCode;
     QUrl m_verificationUrl;
     QString m_notice;
-    QString m_identityHealth;
+    QString m_identityHealth = QStringLiteral("healthy");
+    QString m_recoveryMessage;
     quint64 m_accountEpoch = 0;
     bool m_hasAccountEpoch = false;
     bool m_authenticated = false;

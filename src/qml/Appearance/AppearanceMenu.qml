@@ -21,7 +21,7 @@ KPopover {
     parent: Overlay.overlay
     width: Math.min(240, parent ? parent.width - 24 : 240)
     height: contentColumn.implicitHeight
-    modal: true
+    modal: false
     dim: false
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside

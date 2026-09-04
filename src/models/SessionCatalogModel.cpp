@@ -343,6 +343,7 @@ void SessionCatalogModel::resetRuntimeAuthority()
     m_refreshTimer.stop();
     m_refreshPending = false;
     m_hasAuthoritativeSnapshot = false;
+    m_runtimeSessionIds.clear();
     replaceSnapshot({});
     setAuthorityState(AuthorityState::Loading);
 }
@@ -379,15 +380,43 @@ void SessionCatalogModel::applySessionEvent(const QJsonObject& object)
             decoded.push_back(std::move(*session));
         }
         if (complete) {
+            m_runtimeSessionIds.clear();
+            QVector<QPair<QString, QString>> inactiveLocals;
+            QVector<Session> live;
+            live.reserve(decoded.size());
+            for (auto& session : decoded) {
+                m_runtimeSessionIds.insert(session.id);
+                if (belongsToLiveCatalog(session)) {
+                    live.push_back(std::move(session));
+                } else if (session.kind == QStringLiteral("local")) {
+                    inactiveLocals.push_back({
+                        session.id,
+                        session.incarnationId,
+                    });
+                }
+            }
             m_refreshTimer.stop();
             m_refreshPending = false;
             m_hasAuthoritativeSnapshot = true;
-            replaceSnapshot(std::move(decoded));
+            replaceSnapshot(std::move(live));
             setAuthorityState(AuthorityState::Loaded);
+            for (const auto& [sessionId, incarnationId] : inactiveLocals) {
+                emit inactiveLocalObserved(sessionId, incarnationId);
+            }
             emit authoritativeSnapshotApplied();
         } else {
             for (auto& session : decoded) {
-                upsert(std::move(session));
+                m_runtimeSessionIds.insert(session.id);
+                if (belongsToLiveCatalog(session)) {
+                    upsert(std::move(session));
+                } else {
+                    remove(session.id);
+                    if (session.kind == QStringLiteral("local")) {
+                        emit inactiveLocalObserved(
+                            session.id,
+                            session.incarnationId);
+                    }
+                }
             }
             settleRefreshFailure(
                 QStringLiteral(
@@ -399,13 +428,24 @@ void SessionCatalogModel::applySessionEvent(const QJsonObject& object)
         const auto value = object.value(QStringLiteral("session"));
         if (value.isObject()) {
             if (auto session = decodeSession(value.toObject())) {
-                upsert(std::move(*session));
+                m_runtimeSessionIds.insert(session->id);
+                if (belongsToLiveCatalog(*session)) {
+                    upsert(std::move(*session));
+                } else {
+                    remove(session->id);
+                    if (session->kind == QStringLiteral("local")) {
+                        emit inactiveLocalObserved(
+                            session->id,
+                            session->incarnationId);
+                    }
+                }
                 return;
             }
         }
         emit decodeError(QStringLiteral("Session upsert is invalid."));
     } else if (*type == QStringLiteral("session.removed")) {
         if (const auto sessionId = requiredString(object, QStringLiteral("sessionId"))) {
+            m_runtimeSessionIds.remove(*sessionId);
             remove(*sessionId);
         } else {
             emit decodeError(QStringLiteral("Session removal has no valid sessionId."));
@@ -437,6 +477,7 @@ void SessionCatalogModel::activateAccount(QString userId, const quint64 epoch)
         m_refreshTimer.stop();
         m_refreshPending = false;
         m_hasAuthoritativeSnapshot = false;
+        m_runtimeSessionIds.clear();
         replaceSnapshot({});
         setAuthorityState(AuthorityState::Loading);
     }
@@ -585,6 +626,8 @@ std::optional<SessionCatalogModel::Session> SessionCatalogModel::decodeSession(
     return Session {
         .id = *id,
         .incarnationId = incarnationId,
+        .createRequestId =
+            optionalString(object, QStringLiteral("createRequestId")),
         .kind = *kind,
         .name = *name,
         .project = *project,
@@ -663,6 +706,22 @@ SessionCatalogModel::projectPresentation(const Session& session)
             && (isLocal || isStageReady)
             && (isLocal || (session.permissions & resizePermission) != 0),
     };
+}
+
+bool SessionCatalogModel::belongsToLiveCatalog(const Session& session)
+{
+    if (session.status == QStringLiteral("stopped")) {
+        return false;
+    }
+    return session.kind == QStringLiteral("local")
+        ? session.recovery == QStringLiteral("live")
+        : session.recovery != QStringLiteral("quarantined");
+}
+
+bool SessionCatalogModel::containsRuntimeSession(
+    const QString& sessionId) const
+{
+    return m_runtimeSessionIds.contains(sessionId);
 }
 
 void SessionCatalogModel::replaceSnapshot(QVector<Session> sessions)

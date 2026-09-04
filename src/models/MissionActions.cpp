@@ -7,6 +7,7 @@
 #include <QUuid>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -328,6 +329,7 @@ QVariantList MissionActions::assignmentOptions() const
     }
     options.push_back(QVariantMap {
         {QStringLiteral("sessionId"), QString {}},
+        {QStringLiteral("presentationId"), QString {}},
         {QStringLiteral("name"), QStringLiteral("Unassigned")},
     });
     for (auto row = 0; row < m_sessions.rowCount(); ++row) {
@@ -342,8 +344,12 @@ QVariantList MissionActions::assignmentOptions() const
             || context->assignmentIncarnationId.isEmpty()) {
             continue;
         }
+        const auto presentationId = m_detail.crew()->presentationForSession(
+            sessionId,
+            context->incarnationId);
         options.push_back(QVariantMap {
             {QStringLiteral("sessionId"), sessionId},
+            {QStringLiteral("presentationId"), presentationId},
             {QStringLiteral("name"),
              m_sessions.data(index, SessionCatalogModel::NameRole)},
         });
@@ -354,6 +360,55 @@ QVariantList MissionActions::assignmentOptions() const
 quint64 MissionActions::assignmentRevision() const noexcept
 {
     return m_assignmentRevision;
+}
+
+QVariantList MissionActions::inviteCandidates() const
+{
+    QVariantList candidates;
+    if (!canManageSelectedMission() || !m_detail.membersReady()
+        || !m_directory.invitationsReady() || !m_people.ready()) {
+        return candidates;
+    }
+    QSet<QString> liveUserIds;
+    for (auto row = 0; row < m_people.rowCount(); ++row) {
+        const auto index = m_people.index(row);
+        if (m_people
+                .data(index, PeopleModel::RelationshipRole)
+                .value<PeopleModel::Relationship>()
+            != PeopleModel::Relationship::Friend) {
+            continue;
+        }
+        const auto userId =
+            m_people.data(index, PeopleModel::UserIdRole).toString();
+        if (userId.isEmpty() || m_detail.members()->containsUser(userId)
+            || m_directory.hasOutgoingInvitation(currentMissionId(), userId)) {
+            continue;
+        }
+        liveUserIds.insert(userId);
+        auto& token = m_inviteCandidateTokensByUserId[userId];
+        if (token.isEmpty()) {
+            token = QStringLiteral("invite-candidate-")
+                + QUuid::createUuidV7().toString(QUuid::WithoutBraces);
+        }
+        m_inviteCandidateUserIdsByToken[token] = userId;
+        candidates.push_back(QVariantMap {
+            {QStringLiteral("candidateId"), token},
+            {QStringLiteral("displayName"),
+             m_people.data(index, PeopleModel::DisplayNameRole)},
+            {QStringLiteral("handle"),
+             m_people.data(index, PeopleModel::HandleRole)},
+        });
+    }
+    for (auto it = m_inviteCandidateTokensByUserId.begin();
+         it != m_inviteCandidateTokensByUserId.end();) {
+        if (liveUserIds.contains(it.key())) {
+            ++it;
+            continue;
+        }
+        m_inviteCandidateUserIdsByToken.remove(it.value());
+        it = m_inviteCandidateTokensByUserId.erase(it);
+    }
+    return candidates;
 }
 
 QString MissionActions::createMissionName() const
@@ -447,6 +502,37 @@ QString MissionActions::chatRecipientSummary() const
         : names.join(QStringLiteral(", "));
 }
 
+QVariantList MissionActions::chatUnavailableRecipients() const
+{
+    QVariantList unavailable;
+    const auto* draft = currentChatDraft();
+    if (draft == nullptr) {
+        return unavailable;
+    }
+    auto ids = draft->recipientPresentationIds.values();
+    std::ranges::sort(ids);
+    for (const auto& presentationId : ids) {
+        const auto context =
+            m_detail.crew()->recipientContext(presentationId);
+        if (context && context->canDispatch) {
+            continue;
+        }
+        unavailable.push_back(QVariantMap {
+            {QStringLiteral("presentationId"), presentationId},
+            {QStringLiteral("displayName"),
+             draft->recipientLabels.value(
+                 presentationId,
+                 tr("Unavailable recipient"))},
+        });
+    }
+    return unavailable;
+}
+
+bool MissionActions::chatHasUnavailableRecipients() const
+{
+    return !chatUnavailableRecipients().isEmpty();
+}
+
 MissionActions::Outcome MissionActions::chatOutcome() const
 {
     const auto* draft = currentChatDraft();
@@ -466,7 +552,7 @@ bool MissionActions::chatCanCheck() const
 
 bool MissionActions::chatCanRetry() const
 {
-    return canRetry(chatOutcome());
+    return canRetry(chatOutcome()) && !chatHasUnavailableRecipients();
 }
 
 bool MissionActions::chatCanDiscard() const
@@ -640,9 +726,7 @@ QString MissionActions::ledgerError() const
 
 bool MissionActions::ledgerCanCheck() const
 {
-    const auto outcome = ledgerOutcome();
-    return outcome == Outcome::Unknown
-        || outcome == Outcome::AcceptedAwaitingProjection;
+    return ledgerOutcome() == Outcome::Unknown;
 }
 
 bool MissionActions::ledgerCanRetry() const
@@ -789,6 +873,11 @@ bool MissionActions::toggleChatRecipient(const QString& presentationId)
             return false;
         }
         draft->recipientPresentationIds.insert(presentationId);
+        draft->recipientLabels.insert(
+            presentationId,
+            context->displayName);
+    } else {
+        draft->recipientLabels.remove(presentationId);
     }
     ++draft->revision;
     publishCurrentDraftSelection();
@@ -803,6 +892,7 @@ bool MissionActions::removeChatRecipient(const QString& presentationId)
         || draft->recipientPresentationIds.remove(presentationId) == 0) {
         return false;
     }
+    draft->recipientLabels.remove(presentationId);
     ++draft->revision;
     publishCurrentDraftSelection();
     emit draftsChanged();
@@ -816,6 +906,7 @@ void MissionActions::selectChatBroadcast()
         return;
     }
     draft->recipientPresentationIds.clear();
+    draft->recipientLabels.clear();
     ++draft->revision;
     publishCurrentDraftSelection();
     emit draftsChanged();
@@ -864,11 +955,9 @@ bool MissionActions::submitChatDraft(const QString& missionId)
         }
     }
     if (!stale.isEmpty()) {
-        draft->recipientPresentationIds.subtract(stale);
-        ++draft->revision;
         draft->state.outcome = Outcome::Failed;
         draft->state.error =
-            tr("Unavailable recipients were removed. Review the audience and send again.");
+            tr("Remove unavailable recipients before sending.");
         publishCurrentDraftSelection();
         emit draftsChanged();
         return false;
@@ -1160,6 +1249,7 @@ bool MissionActions::postBroadcast(
     auto& draft = m_chatDrafts[missionId];
     draft.body = body;
     draft.recipientPresentationIds.clear();
+    draft.recipientLabels.clear();
     ++draft.revision;
     touchChatDraft(missionId);
     if (missionId == currentMissionId()) {
@@ -1213,6 +1303,34 @@ bool MissionActions::inviteFriend(
             {QStringLiteral("room_id"), missionId},
             {QStringLiteral("invitee_user_id"), *friendId},
         });
+}
+
+bool MissionActions::inviteFriendCandidate(const QString& candidateId)
+{
+    const auto userId = m_inviteCandidateUserIdsByToken.value(candidateId);
+    if (userId.isEmpty()) {
+        m_lastError =
+            QStringLiteral("That friend can no longer be invited to this Mission.");
+        emit stateChanged();
+        return false;
+    }
+    for (auto row = 0; row < m_people.rowCount(); ++row) {
+        const auto index = m_people.index(row);
+        if (m_people.data(index, PeopleModel::UserIdRole).toString() != userId
+            || m_people
+                    .data(index, PeopleModel::RelationshipRole)
+                    .value<PeopleModel::Relationship>()
+                != PeopleModel::Relationship::Friend) {
+            continue;
+        }
+        return inviteFriend(
+            currentMissionId(),
+            m_people.data(index, PeopleModel::HandleRole).toString());
+    }
+    m_lastError =
+        QStringLiteral("That friend can no longer be invited to this Mission.");
+    emit stateChanged();
+    return false;
 }
 
 bool MissionActions::acceptInvitation(const QString& invitationId)
@@ -1415,6 +1533,20 @@ bool MissionActions::assignTask(
     return dispatchMutation(std::move(pending), std::move(command));
 }
 
+bool MissionActions::assignTaskByPresentationId(
+    const QString& taskId,
+    const QString& presentationId)
+{
+    if (presentationId.isEmpty()) {
+        return assignTask(currentMissionId(), taskId, {});
+    }
+    const auto context =
+        m_detail.crew()->recipientContext(presentationId);
+    return context && context->kind == MissionCrewModel::Kind::Agent
+        && context->canAssignTask
+        && assignTask(currentMissionId(), taskId, context->localSessionId);
+}
+
 QString MissionActions::assignmentForTask(const QString& taskId) const
 {
     const auto task = m_detail.tasks()->actionContext(taskId);
@@ -1435,6 +1567,67 @@ QString MissionActions::assignmentForTask(const QString& taskId) const
         }
     }
     return {};
+}
+
+QString MissionActions::assignmentPresentationForTask(
+    const QString& taskId) const
+{
+    const auto sessionId = assignmentForTask(taskId);
+    if (sessionId.isEmpty()) {
+        return {};
+    }
+    const auto context = m_sessions.actionContext(sessionId);
+    return context
+        ? m_detail.crew()->presentationForSession(
+              sessionId,
+              context->incarnationId)
+        : QString {};
+}
+
+QVariantList MissionActions::transitionOptionsForTask(
+    const QString& taskId) const
+{
+    QVariantList options;
+    const auto task = m_detail.tasks()->actionContext(taskId);
+    if (!task || !canManageSelectedMission() || !m_detail.tasksReady()
+        || !knownTaskStatus(task->status)) {
+        return options;
+    }
+    if (task->status == QStringLiteral("Archived")) {
+        options.push_back(QVariantMap {
+            {QStringLiteral("status"), QStringLiteral("Open")},
+            {QStringLiteral("label"), tr("Restore")},
+            {QStringLiteral("requiresEvidence"), false},
+            {QStringLiteral("destructive"), false},
+        });
+        return options;
+    }
+    const std::array statuses {
+        std::pair {QStringLiteral("Open"), tr("Move to Open")},
+        std::pair {QStringLiteral("InProgress"), tr("Move to In progress")},
+        std::pair {QStringLiteral("Review"), tr("Move to Review")},
+        std::pair {QStringLiteral("Done"), tr("Move to Done")},
+    };
+    for (const auto& [status, label] : statuses) {
+        if (status == task->status) {
+            continue;
+        }
+        options.push_back(QVariantMap {
+            {QStringLiteral("status"), status},
+            {QStringLiteral("label"), label},
+            {QStringLiteral("requiresEvidence"),
+             status == QStringLiteral("Review")
+                 || status == QStringLiteral("Done")},
+            {QStringLiteral("destructive"), false},
+        });
+    }
+    options.push_back(QVariantMap {
+        {QStringLiteral("status"), QStringLiteral("Archived")},
+        {QStringLiteral("label"), tr("Archive")},
+        {QStringLiteral("requiresEvidence"), false},
+        {QStringLiteral("destructive"), true},
+    });
+    return options;
 }
 
 bool MissionActions::discardUnknown()
@@ -1857,6 +2050,8 @@ void MissionActions::activateAccount(QString userId, const quint64 epoch)
             m_chatDrafts.clear();
             m_taskDrafts.clear();
             m_ledgerPresentations.clear();
+            m_inviteCandidateTokensByUserId.clear();
+            m_inviteCandidateUserIdsByToken.clear();
             m_chatDraftOrder.clear();
             m_taskDraftOrder.clear();
             m_createDraft = {};
@@ -3550,23 +3745,15 @@ void MissionActions::reconcileDraftAuthorities()
         publishCurrentDraftSelection();
         return;
     }
-    auto* chat = currentChatDraft(false);
     bool changed = false;
+    auto* chat = currentChatDraft(false);
     if (chat != nullptr) {
-        for (auto id = chat->recipientPresentationIds.begin();
-             id != chat->recipientPresentationIds.end();) {
-            const auto context = m_detail.crew()->recipientContext(*id);
-            if (!context || !context->canDispatch) {
-                id = chat->recipientPresentationIds.erase(id);
-                changed = true;
-            } else {
-                ++id;
+        for (const auto& id : chat->recipientPresentationIds) {
+            const auto context = m_detail.crew()->recipientContext(id);
+            if (context && context->canDispatch
+                && !context->displayName.isEmpty()) {
+                chat->recipientLabels[id] = context->displayName;
             }
-        }
-        if (changed) {
-            ++chat->revision;
-            chat->state.error =
-                tr("Unavailable recipients were removed from this draft.");
         }
     }
     auto* task = currentTaskDraft(false);
@@ -3638,6 +3825,7 @@ void MissionActions::completeDirectDraft(
             if (outcome == Outcome::Succeeded && unchanged) {
                 found->body.clear();
                 found->recipientPresentationIds.clear();
+                found->recipientLabels.clear();
             }
         }
         publishCurrentDraftSelection();
@@ -3801,8 +3989,7 @@ bool MissionActions::discardLedger()
 
 bool MissionActions::canCheck(const Outcome outcome) noexcept
 {
-    return outcome == Outcome::Unknown
-        || outcome == Outcome::AcceptedAwaitingProjection;
+    return outcome == Outcome::Unknown;
 }
 
 bool MissionActions::canRetry(const Outcome outcome) noexcept

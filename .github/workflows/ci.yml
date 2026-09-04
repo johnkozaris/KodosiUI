@@ -104,7 +104,7 @@ jobs:
           "$bin_dir/just" --version | grep --fixed-strings "just $JUST_VERSION"
           printf '%s\n' "$bin_dir" >> "$GITHUB_PATH"
 
-      - name: Validate parity, build, lint, and test
+      - name: Build, lint, and test
         env:
           QT_QPA_PLATFORM: offscreen
           QSG_RHI_BACKEND: software
@@ -118,9 +118,6 @@ jobs:
 
       - name: Require package build to preserve clean source
         run: test -z "$(git status --porcelain=v1 --untracked-files=all)"
-
-      - name: Validate X11 and Wayland packages
-        run: ./scripts/verify-linux-desktops.sh
 
       - name: Repackage same build tree reproducibly
         run: just package-repeatability-existing

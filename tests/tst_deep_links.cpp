@@ -679,27 +679,14 @@ void DeepLinksTest::qmlAndDesktopRegistrationContract()
     QVERIFY(contents.contains("window.openDeepLinkedApproval("));
     QVERIFY(contents.contains("window.openMissingDeepLinkedApproval("));
     QVERIFY(contents.contains("activateSessionWithRemote(sessionId, true)"));
+    QVERIFY(contents.contains("resumeAgentWorkModal.closeModal()"));
+    QVERIFY(contents.contains("projectIntelModal.close()"));
+    QVERIFY(contents.contains("keyboardShortcutsOverlay.close()"));
     QVERIFY(contents.contains(
         "requestSessionSelection(sessionId, openRemote === true)"));
-    QVERIFY(contents.contains("objectName: \"deepLink.status\""));
-    QVERIFY(contents.contains(
-        "objectName: \"deepLink.status.dismiss\""));
-    QVERIFY(contents.contains(
-        "onClicked: Models.DeepLinks.clearStatus()"));
-    QVERIFY(contents.contains(
-        "objectName: \"deepLink.status.label\""));
-    QVERIFY(contents.contains("case \"waitingRuntime\":"));
-    QVERIFY(contents.contains(
-        "Waiting for Kodosi to finish starting before opening the link"));
-    QVERIFY(contents.contains(
-        "Models.ApplicationLifecycle.state"));
-    QVERIFY(contents.contains(
-        "=== Models.ApplicationLifecycle.Ready"));
-    QVERIFY(contents.contains(
-        "enabled: deepLinkStatus.available"));
-    QVERIFY(contents.contains(
-        "Accessible.ignored: !deepLinkStatus.available"));
-    QVERIFY(contents.contains("sessionSidebar.closeConflictingOverlays()"));
+    QVERIFY(!contents.contains("objectName: \"deepLink.status\""));
+    QVERIFY(!contents.contains("deepLinkStatusText"));
+    QVERIFY(!contents.contains("closeDeepLinkOverlays"));
     QVERIFY(!contents.contains("XDG_ACTIVATION_TOKEN"));
 
     QFile composition(
@@ -712,18 +699,6 @@ void DeepLinksTest::qmlAndDesktopRegistrationContract()
         "pendingPermissions,\n        applicationLifecycle"));
     QVERIFY(compositionSource.contains(
         "qunsetenv(\"XDG_ACTIVATION_TOKEN\")"));
-
-    QFile probe(QStringLiteral(
-        KODOSI_SOURCE_DIR
-        "/scripts/smoke-deep-link-ui-probe.sh"));
-    QVERIFY(probe.open(QIODevice::ReadOnly));
-    const auto probeSource = probe.readAll();
-    QVERIFY(probeSource.contains(
-        "--window-size 820x560"));
-    QVERIFY(probeSource.contains(
-        "\"kodosi://session/%GG\""));
-    QVERIFY(probeSource.contains(
-        "--id deepLink.status.dismiss"));
 
     QFile desktop(QStringLiteral(
         KODOSI_SOURCE_DIR

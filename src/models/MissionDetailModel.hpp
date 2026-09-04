@@ -199,6 +199,7 @@ public:
     enum Role {
         PresentationIdRole = Qt::UserRole + 1,
         KindRole,
+        KindNameRole,
         DisplayNameRole,
         SecondaryLabelRole,
         StatusRole,
@@ -332,6 +333,7 @@ public:
         RiskRole,
         ToneRole,
         ActionKindRole,
+        ActionNameRole,
         CanApproveRole,
         CanDenyRole,
         CanJumpRole,
@@ -403,8 +405,15 @@ class MissionDetailModel final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString missionId READ missionId NOTIFY stateChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY stateChanged)
+    Q_PROPERTY(bool membersLoading READ membersLoading NOTIFY stateChanged)
     Q_PROPERTY(bool membersReady READ membersReady NOTIFY stateChanged)
+    Q_PROPERTY(bool membersStaleDataVisible READ membersStaleDataVisible NOTIFY stateChanged)
+    Q_PROPERTY(bool chatLoading READ chatLoading NOTIFY stateChanged)
+    Q_PROPERTY(bool chatReady READ chatReady NOTIFY stateChanged)
+    Q_PROPERTY(bool chatStaleDataVisible READ chatStaleDataVisible NOTIFY stateChanged)
+    Q_PROPERTY(bool tasksLoading READ tasksLoading NOTIFY stateChanged)
     Q_PROPERTY(bool tasksReady READ tasksReady NOTIFY stateChanged)
+    Q_PROPERTY(bool tasksStaleDataVisible READ tasksStaleDataVisible NOTIFY stateChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY stateChanged)
     Q_PROPERTY(kodosi::MissionMembersModel* members READ members CONSTANT)
     Q_PROPERTY(kodosi::MissionMessagesModel* messages READ messages CONSTANT)
@@ -446,6 +455,18 @@ class MissionDetailModel final : public QObject {
         bool selectedCanInterrupt
         READ selectedCanInterrupt
         NOTIFY focusChanged)
+    Q_PROPERTY(
+        bool selectedDispatchSelected
+        READ selectedDispatchSelected
+        NOTIFY focusChanged)
+    Q_PROPERTY(
+        QString selectedDeliveryState
+        READ selectedDeliveryState
+        NOTIFY focusChanged)
+    Q_PROPERTY(
+        QString selectedDeliveryDetail
+        READ selectedDeliveryDetail
+        NOTIFY focusChanged)
 
 public:
     struct Dependencies {
@@ -471,8 +492,15 @@ public:
 
     [[nodiscard]] QString missionId() const;
     [[nodiscard]] bool loading() const noexcept;
+    [[nodiscard]] bool membersLoading() const noexcept;
     [[nodiscard]] bool membersReady() const noexcept;
+    [[nodiscard]] bool membersStaleDataVisible() const noexcept;
+    [[nodiscard]] bool chatLoading() const noexcept;
+    [[nodiscard]] bool chatReady() const noexcept;
+    [[nodiscard]] bool chatStaleDataVisible() const noexcept;
+    [[nodiscard]] bool tasksLoading() const noexcept;
     [[nodiscard]] bool tasksReady() const noexcept;
+    [[nodiscard]] bool tasksStaleDataVisible() const noexcept;
     [[nodiscard]] QString lastError() const;
     [[nodiscard]] MissionMembersModel* members() noexcept;
     [[nodiscard]] MissionMessagesModel* messages() noexcept;
@@ -487,6 +515,9 @@ public:
     [[nodiscard]] bool selectedCanToggleDispatch() const;
     [[nodiscard]] bool selectedCanSteer() const;
     [[nodiscard]] bool selectedCanInterrupt() const;
+    [[nodiscard]] bool selectedDispatchSelected() const;
+    [[nodiscard]] QString selectedDeliveryState() const;
+    [[nodiscard]] QString selectedDeliveryDetail() const;
     [[nodiscard]] static bool isCompleteMessageEntity(
         const QJsonObject& object,
         const QString& missionId);

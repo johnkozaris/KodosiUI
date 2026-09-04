@@ -32,7 +32,7 @@ private slots:
     void dispatchesTypedAuthCommands();
     void settlesFromAuthEventsAndRejectsUnsafeUrls();
     void surfacesImmediateRejection();
-    void retriesExactOperationAndBoundsProgress();
+    void retriesExactOperationAndSwitchesAccount();
 };
 
 void AuthActionsTest::dispatchesTypedAuthCommands()
@@ -81,19 +81,31 @@ void AuthActionsTest::surfacesImmediateRejection()
     QVERIFY(!actions.lastError().isEmpty());
 }
 
-void AuthActionsTest::retriesExactOperationAndBoundsProgress()
+void AuthActionsTest::retriesExactOperationAndSwitchesAccount()
 {
     FakeAuthDispatcher dispatcher;
-    kodosi::AuthActions actions(dispatcher, 1);
+    kodosi::AuthActions actions(dispatcher);
     actions.ingestAuthEvent(QByteArrayLiteral(
         "{\"type\":\"auth.error\",\"operation\":\"logout\","
         "\"message\":\"try later\"}"));
     QCOMPARE(actions.failedOperation(), QStringLiteral("logout"));
     QVERIFY(actions.retry());
     QCOMPARE(dispatcher.commandTypes.back(), QStringLiteral("auth.logout"));
-    QTest::qWait(100);
+    QVERIFY(actions.busy());
+    actions.ingestAuthEvent(QByteArrayLiteral(
+        "{\"type\":\"auth.required\",\"reason\":\"signedOut\","
+        "\"accountEpoch\":2}"));
     QVERIFY(!actions.busy());
-    QVERIFY(!actions.lastError().isEmpty());
+
+    QVERIFY(actions.useAnotherAccount());
+    QCOMPARE(dispatcher.commandTypes.back(), QStringLiteral("auth.logout"));
+    actions.ingestAuthEvent(QByteArrayLiteral(
+        "{\"type\":\"auth.required\",\"reason\":\"signedOut\","
+        "\"accountEpoch\":3}"));
+    QCOMPARE(
+        dispatcher.commandTypes.back(),
+        QStringLiteral("auth.login.start"));
+    QVERIFY(actions.busy());
 
     actions.ingestAuthEvent(QByteArrayLiteral(
         "{\"type\":\"auth.device_code\",\"userCode\":\"CODE\","
@@ -104,12 +116,19 @@ void AuthActionsTest::retriesExactOperationAndBoundsProgress()
 
     actions.ingestAuthEvent(QByteArrayLiteral(
         "{\"type\":\"auth.error\",\"operation\":\"login.start\","
-        "\"message\":\"approval expired\"}"));
+        "\"message\":\"login failed: device code expired\"}"));
+    QCOMPARE(
+        actions.lastError(),
+        QStringLiteral(
+            "This sign-in code expired. Try again to generate a new one."));
     actions.ingestAuthEvent(QByteArrayLiteral(
         "{\"type\":\"auth.required\",\"reason\":\"expired\","
         "\"accountEpoch\":2}"));
     QCOMPARE(actions.failedOperation(), QStringLiteral("login.start"));
-    QCOMPARE(actions.lastError(), QStringLiteral("approval expired"));
+    QCOMPARE(
+        actions.lastError(),
+        QStringLiteral(
+            "This sign-in code expired. Try again to generate a new one."));
 }
 
 QTEST_GUILESS_MAIN(AuthActionsTest)

@@ -62,13 +62,17 @@ class SessionActionsTest final : public QObject {
 
 private slots:
     void dispatchesCurrentIncarnationOnly();
+    void closeIsIdempotentAndRecoversAfterTimeout();
     void rejectsUnavailableLifecycleActions();
     void correlatesAsynchronousFailures();
     void createsLocalSessionWithCorrelatedReceipt();
+    void tracksConcurrentCreationsIndependently();
+    void authoritativeProjectionRecoversLostCreationReceipt();
     void createsResumedSessionFromOpaqueCurrentIdentity();
     void usesReadablePersistedWorkingDirectoryAsCreationDefault();
-    void renamesReopensAndDeletesLocalSessions();
-    void authoritativeSnapshotRecoversDroppedLifecycleEvents();
+    void renamesAndCleansInactiveLocalSessions();
+    void authoritativeSnapshotSettlesInactiveCleanup();
+    void inactiveCleanupIsBoundedAndTimeoutReleasesRetry();
     void opensHidesAndRestoresRemoteSessions();
     void reincarnatedRemoteOpenClearsStalePendingIdentity();
 };
@@ -155,6 +159,27 @@ void SessionActionsTest::dispatchesCurrentIncarnationOnly()
     QCOMPARE(
         dispatcher.commands.back().value(QStringLiteral("type")).toString(),
         QStringLiteral("session.close"));
+}
+
+void SessionActionsTest::closeIsIdempotentAndRecoversAfterTimeout()
+{
+    FakeSessionDispatcher dispatcher;
+    kodosi::SessionCatalogModel sessions;
+    auth(sessions);
+    localSession(sessions, QStringLiteral("inc-1"));
+    kodosi::SessionActions actions(dispatcher, sessions, 1);
+
+    QVERIFY(actions.requestCloseConfirmation(QStringLiteral("session-1")));
+    QVERIFY(actions.confirmClose(QStringLiteral("session-1")));
+    const auto commandCount = dispatcher.commands.size();
+    QVERIFY(!actions.canClose(QStringLiteral("session-1")));
+    QVERIFY(!actions.requestCloseConfirmation(QStringLiteral("session-1")));
+    QCOMPARE(dispatcher.commands.size(), commandCount);
+
+    QTRY_VERIFY_WITH_TIMEOUT(
+        actions.canClose(QStringLiteral("session-1")),
+        250);
+    QVERIFY(actions.lastError().contains(QStringLiteral("Try Close Session")));
 }
 
 void SessionActionsTest::usesReadablePersistedWorkingDirectoryAsCreationDefault()
@@ -334,8 +359,161 @@ void SessionActionsTest::createsLocalSessionWithCorrelatedReceipt()
         {QStringLiteral("sessionId"), QStringLiteral("new-session")},
         {QStringLiteral("runtimeIncarnationId"), QStringLiteral("new-incarnation")},
     }).toJson(QJsonDocument::Compact));
+    QVERIFY(actions.creating());
+    QCOMPARE(created.count(), 0);
+
+    sessions.ingestAuthEvent(
+        QByteArrayLiteral(
+            "{\"type\":\"auth.ready\",\"userId\":\"other\",\"accountEpoch\":2}"));
+    const auto projected = QJsonDocument(QJsonObject {
+        {QStringLiteral("authority"), QStringLiteral("accountContext")},
+        {QStringLiteral("accountUserId"), QStringLiteral("other")},
+        {QStringLiteral("accountEpoch"), 2},
+        {QStringLiteral("type"), QStringLiteral("session.upsert")},
+        {QStringLiteral("session"),
+         QJsonObject {
+             {QStringLiteral("kind"), QStringLiteral("local")},
+             {QStringLiteral("id"), QStringLiteral("new-session")},
+             {QStringLiteral("incarnationId"),
+              QStringLiteral("new-incarnation")},
+             {QStringLiteral("name"), QStringLiteral("Agent 2")},
+             {QStringLiteral("project"), directory.path()},
+             {QStringLiteral("mode"), QStringLiteral("normal")},
+             {QStringLiteral("status"), QStringLiteral("active")},
+             {QStringLiteral("recovery"), QStringLiteral("live")},
+             {QStringLiteral("scope"), QStringLiteral("justMe")},
+             {QStringLiteral("access"), QStringLiteral("approve")},
+         }},
+    }).toJson(QJsonDocument::Compact);
+    sessions.ingestSessionEvent(projected);
+    actions.ingestSessionEvent(projected);
     QVERIFY(!actions.creating());
     QCOMPARE(created.count(), 1);
+}
+
+void SessionActionsTest::tracksConcurrentCreationsIndependently()
+{
+    FakeSessionDispatcher dispatcher;
+    kodosi::SessionCatalogModel sessions;
+    kodosi::SessionActions actions(dispatcher, sessions);
+    actions.ingestAuthEvent(
+        QByteArrayLiteral(
+            "{\"type\":\"auth.ready\",\"userId\":\"me\",\"accountEpoch\":1}"));
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSignalSpy resolved(
+        &actions,
+        &kodosi::SessionActions::sessionCreationResolved);
+
+    QVERIFY(actions.create(QStringLiteral("First"), directory.path()));
+    const auto firstRequestId = actions.lastCreateRequestId();
+    QVERIFY(actions.create(QStringLiteral("Second"), directory.path()));
+    const auto secondRequestId = actions.lastCreateRequestId();
+    QVERIFY(firstRequestId != secondRequestId);
+    QCOMPARE(actions.pendingCreations().size(), 2);
+
+    actions.ingestSessionEvent(QJsonDocument(QJsonObject {
+        {QStringLiteral("authority"), QStringLiteral("accountContext")},
+        {QStringLiteral("accountUserId"), QStringLiteral("me")},
+        {QStringLiteral("accountEpoch"), 1},
+        {QStringLiteral("type"), QStringLiteral("session.error")},
+        {QStringLiteral("operation"), QStringLiteral("session.create")},
+        {QStringLiteral("requestId"), firstRequestId},
+        {QStringLiteral("message"), QStringLiteral("first failed")},
+    }).toJson(QJsonDocument::Compact));
+    QCOMPARE(actions.pendingCreations().size(), 1);
+    QVERIFY(actions.isCreatePending(secondRequestId));
+
+    actions.ingestSessionEvent(QJsonDocument(QJsonObject {
+        {QStringLiteral("authority"), QStringLiteral("accountContext")},
+        {QStringLiteral("accountUserId"), QStringLiteral("me")},
+        {QStringLiteral("accountEpoch"), 1},
+        {QStringLiteral("type"), QStringLiteral("session.created")},
+        {QStringLiteral("requestId"), secondRequestId},
+        {QStringLiteral("sessionId"), QStringLiteral("second-session")},
+        {QStringLiteral("runtimeIncarnationId"), QStringLiteral("second-inc")},
+    }).toJson(QJsonDocument::Compact));
+    QVERIFY(actions.isCreatePending(secondRequestId));
+    auth(sessions);
+    const auto projected = QJsonDocument(QJsonObject {
+        {QStringLiteral("authority"), QStringLiteral("accountContext")},
+        {QStringLiteral("accountUserId"), QStringLiteral("me")},
+        {QStringLiteral("accountEpoch"), 1},
+        {QStringLiteral("type"), QStringLiteral("session.upsert")},
+        {QStringLiteral("session"),
+         QJsonObject {
+             {QStringLiteral("kind"), QStringLiteral("local")},
+             {QStringLiteral("id"), QStringLiteral("second-session")},
+             {QStringLiteral("incarnationId"), QStringLiteral("second-inc")},
+             {QStringLiteral("name"), QStringLiteral("Second")},
+             {QStringLiteral("project"), directory.path()},
+             {QStringLiteral("mode"), QStringLiteral("normal")},
+             {QStringLiteral("status"), QStringLiteral("active")},
+             {QStringLiteral("recovery"), QStringLiteral("live")},
+             {QStringLiteral("scope"), QStringLiteral("justMe")},
+             {QStringLiteral("access"), QStringLiteral("approve")},
+         }},
+    }).toJson(QJsonDocument::Compact);
+    sessions.ingestSessionEvent(projected);
+    actions.ingestSessionEvent(projected);
+
+    QVERIFY(!actions.creating());
+    QVERIFY(actions.pendingCreations().isEmpty());
+    QCOMPARE(resolved.count(), 1);
+    QCOMPARE(
+        resolved.constFirst().at(0).toString(),
+        secondRequestId);
+    QCOMPARE(
+        resolved.constFirst().at(1).toString(),
+        QStringLiteral("second-session"));
+}
+
+void SessionActionsTest::authoritativeProjectionRecoversLostCreationReceipt()
+{
+    FakeSessionDispatcher dispatcher;
+    kodosi::SessionCatalogModel sessions;
+    kodosi::SessionActions actions(dispatcher, sessions);
+    actions.ingestAuthEvent(
+        QByteArrayLiteral(
+            "{\"type\":\"auth.ready\",\"userId\":\"me\",\"accountEpoch\":1}"));
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSignalSpy resolved(
+        &actions,
+        &kodosi::SessionActions::sessionCreationResolved);
+
+    QVERIFY(actions.create(QStringLiteral("Projected"), directory.path()));
+    const auto requestId = actions.lastCreateRequestId();
+    auth(sessions);
+    const auto projected = QJsonDocument(QJsonObject {
+        {QStringLiteral("authority"), QStringLiteral("accountContext")},
+        {QStringLiteral("accountUserId"), QStringLiteral("me")},
+        {QStringLiteral("accountEpoch"), 1},
+        {QStringLiteral("type"), QStringLiteral("session.upsert")},
+        {QStringLiteral("session"),
+         QJsonObject {
+             {QStringLiteral("kind"), QStringLiteral("local")},
+             {QStringLiteral("id"), QStringLiteral("projected-session")},
+             {QStringLiteral("incarnationId"), QStringLiteral("projected-inc")},
+             {QStringLiteral("createRequestId"), requestId},
+             {QStringLiteral("name"), QStringLiteral("Projected")},
+             {QStringLiteral("project"), directory.path()},
+             {QStringLiteral("mode"), QStringLiteral("normal")},
+             {QStringLiteral("status"), QStringLiteral("active")},
+             {QStringLiteral("recovery"), QStringLiteral("live")},
+             {QStringLiteral("scope"), QStringLiteral("justMe")},
+             {QStringLiteral("access"), QStringLiteral("approve")},
+         }},
+    }).toJson(QJsonDocument::Compact);
+    sessions.ingestSessionEvent(projected);
+    actions.ingestSessionEvent(projected);
+
+    QVERIFY(!actions.creating());
+    QCOMPARE(resolved.count(), 1);
+    QCOMPARE(resolved.constFirst().at(0).toString(), requestId);
+    QCOMPARE(
+        resolved.constFirst().at(1).toString(),
+        QStringLiteral("projected-session"));
 }
 
 void SessionActionsTest::createsResumedSessionFromOpaqueCurrentIdentity()
@@ -355,6 +533,7 @@ void SessionActionsTest::createsResumedSessionFromOpaqueCurrentIdentity()
         .nativeConversationId =
             QStringLiteral("01900000-0000-4000-8000-000000000123"),
         .workingDirectory = canonicalDirectory,
+        .title = QStringLiteral("Review flaky terminal tests"),
         .accountUserId = QStringLiteral("me"),
         .accountEpoch = 1,
     };
@@ -365,11 +544,9 @@ void SessionActionsTest::createsResumedSessionFromOpaqueCurrentIdentity()
 
     const auto preResumeCommands = dispatcher.commands.size();
     QVERIFY(!actions.createResumed(
-        QStringLiteral("Resume"),
         QStringLiteral("not-current")));
     QCOMPARE(dispatcher.commands.size(), preResumeCommands);
     QVERIFY(actions.createResumed(
-        QStringLiteral(" Resumed review "),
         resolver.acceptedPresentationId));
     const auto command = dispatcher.commands.constLast();
     const auto commandKeys = command.keys();
@@ -390,7 +567,7 @@ void SessionActionsTest::createsResumedSessionFromOpaqueCurrentIdentity()
         QStringLiteral("session.create"));
     QCOMPARE(
         command.value(QStringLiteral("name")).toString(),
-        QStringLiteral("Resumed review"));
+        QStringLiteral("Copilot: Review flaky terminal tests"));
     QCOMPARE(
         command.value(QStringLiteral("workingDir")).toString(),
         canonicalDirectory);
@@ -416,6 +593,31 @@ void SessionActionsTest::createsResumedSessionFromOpaqueCurrentIdentity()
         {QStringLiteral("runtimeIncarnationId"),
          QStringLiteral("01900000-0000-7000-8000-000000000124")},
     }).toJson(QJsonDocument::Compact));
+    QVERIFY(actions.creating());
+    auth(sessions);
+    const auto projected = QJsonDocument(QJsonObject {
+        {QStringLiteral("authority"), QStringLiteral("accountContext")},
+        {QStringLiteral("accountUserId"), QStringLiteral("me")},
+        {QStringLiteral("accountEpoch"), 1},
+        {QStringLiteral("type"), QStringLiteral("session.upsert")},
+        {QStringLiteral("session"),
+         QJsonObject {
+             {QStringLiteral("kind"), QStringLiteral("local")},
+             {QStringLiteral("id"), QStringLiteral("resumed")},
+             {QStringLiteral("incarnationId"),
+              QStringLiteral("01900000-0000-7000-8000-000000000124")},
+             {QStringLiteral("name"),
+              QStringLiteral("Copilot: Review flaky terminal tests")},
+             {QStringLiteral("project"), canonicalDirectory},
+             {QStringLiteral("mode"), QStringLiteral("normal")},
+             {QStringLiteral("status"), QStringLiteral("active")},
+             {QStringLiteral("recovery"), QStringLiteral("live")},
+             {QStringLiteral("scope"), QStringLiteral("justMe")},
+             {QStringLiteral("access"), QStringLiteral("approve")},
+         }},
+    }).toJson(QJsonDocument::Compact);
+    sessions.ingestSessionEvent(projected);
+    actions.ingestSessionEvent(projected);
     QVERIFY(!actions.creating());
 
     actions.ingestAuthEvent(
@@ -423,13 +625,12 @@ void SessionActionsTest::createsResumedSessionFromOpaqueCurrentIdentity()
             "{\"type\":\"auth.ready\",\"userId\":\"other\",\"accountEpoch\":2}"));
     const auto before = dispatcher.commands.size();
     QVERIFY(!actions.createResumed(
-        QStringLiteral("Stale"),
         resolver.acceptedPresentationId));
     QCOMPARE(dispatcher.commands.size(), before);
     QVERIFY(actions.lastError().contains(QStringLiteral("no longer current")));
 }
 
-void SessionActionsTest::renamesReopensAndDeletesLocalSessions()
+void SessionActionsTest::renamesAndCleansInactiveLocalSessions()
 {
     FakeSessionDispatcher dispatcher;
     kodosi::SessionCatalogModel sessions;
@@ -439,8 +640,6 @@ void SessionActionsTest::renamesReopensAndDeletesLocalSessions()
     actions.ingestAuthEvent(
         QByteArrayLiteral(
             "{\"type\":\"auth.ready\",\"userId\":\"me\",\"accountEpoch\":1}"));
-    QSignalSpy reopened(&actions, &kodosi::SessionActions::sessionReopened);
-
     QVERIFY(actions.canRename(QStringLiteral("session-1")));
     QVERIFY(!actions.rename(
         QStringLiteral("session-1"),
@@ -471,77 +670,26 @@ void SessionActionsTest::renamesReopensAndDeletesLocalSessions()
         QStringLiteral("recoverable"),
         QStringLiteral("Renamed"));
     actions.ingestSessionEvent(stopped);
-    QVERIFY(actions.canReopen(QStringLiteral("session-1")));
-    QVERIFY(actions.canDelete(QStringLiteral("session-1")));
-    QVERIFY(actions.reopen(QStringLiteral("session-1")));
+    QVERIFY(!sessions.containsSession(QStringLiteral("session-1")));
+    QCOMPARE(actions.inactiveCleanupCount(), 1);
     auto command = dispatcher.commands.back();
     QCOMPARE(
         command.value(QStringLiteral("type")).toString(),
-        QStringLiteral("session.reopen"));
+        QStringLiteral("session.delete"));
     QCOMPARE(
         command.value(QStringLiteral("expectedRuntimeIncarnationId")).toString(),
         QStringLiteral("inc-1"));
     QCOMPARE(
         QUuid(command.value(QStringLiteral("requestId")).toString()).version(),
         QUuid::Version::UnixEpoch);
-    const auto reopenedEvent = localSession(
+    const auto repeated = localSession(
         sessions,
-        QStringLiteral("inc-2"),
-        QStringLiteral("active"),
-        QStringLiteral("live"),
-        QStringLiteral("Renamed"));
-    actions.ingestSessionEvent(reopenedEvent);
-    QCOMPARE(reopened.count(), 1);
-
-    const auto failedRecoverable = localSession(
-        sessions,
-        QStringLiteral("inc-2"),
-        QStringLiteral("blocked"),
-        QStringLiteral("recoverable"),
-        QStringLiteral("Renamed"));
-    actions.ingestSessionEvent(failedRecoverable);
-    QVERIFY(actions.canReopen(QStringLiteral("session-1")));
-
-    const auto stoppedAgain = localSession(
-        sessions,
-        QStringLiteral("inc-2"),
-        QStringLiteral("blocked"),
-        QStringLiteral("crashed"),
-        QStringLiteral("Renamed"));
-    actions.ingestSessionEvent(stoppedAgain);
-    QVERIFY(actions.canReopen(QStringLiteral("session-1")));
-    QVERIFY(actions.reopen(QStringLiteral("session-1")));
-    const auto immediateStop = localSession(
-        sessions,
-        QStringLiteral("inc-3"),
+        QStringLiteral("inc-1"),
         QStringLiteral("stopped"),
         QStringLiteral("recoverable"),
         QStringLiteral("Renamed"));
-    actions.ingestSessionEvent(immediateStop);
-    QVERIFY(actions.lastError().contains(
-        QStringLiteral("stopped before becoming ready")));
-    QVERIFY(actions.canReopen(QStringLiteral("session-1")));
-    QVERIFY(actions.requestDeleteConfirmation(QStringLiteral("session-1")));
-    const auto replacement = localSession(
-        sessions,
-        QStringLiteral("inc-4"),
-        QStringLiteral("stopped"),
-        QStringLiteral("recoverable"),
-        QStringLiteral("Renamed"));
-    actions.ingestSessionEvent(replacement);
-    QVERIFY(actions.deleteConfirmationSessionId().isEmpty());
-    QVERIFY(!actions.confirmDelete(QStringLiteral("session-1")));
-
-    QVERIFY(actions.requestDeleteConfirmation(QStringLiteral("session-1")));
-    QVERIFY(actions.confirmDelete(QStringLiteral("session-1")));
+    actions.ingestSessionEvent(repeated);
     QCOMPARE(actions.inactiveCleanupCount(), 1);
-    command = dispatcher.commands.back();
-    QCOMPARE(
-        command.value(QStringLiteral("type")).toString(),
-        QStringLiteral("session.delete"));
-    QCOMPARE(
-        command.value(QStringLiteral("expectedRuntimeIncarnationId")).toString(),
-        QStringLiteral("inc-4"));
 
     const auto removed = QJsonDocument(QJsonObject {
         {QStringLiteral("authority"), QStringLiteral("accountContext")},
@@ -556,7 +704,7 @@ void SessionActionsTest::renamesReopensAndDeletesLocalSessions()
     QVERIFY(!sessions.containsSession(QStringLiteral("session-1")));
 }
 
-void SessionActionsTest::authoritativeSnapshotRecoversDroppedLifecycleEvents()
+void SessionActionsTest::authoritativeSnapshotSettlesInactiveCleanup()
 {
     FakeSessionDispatcher dispatcher;
     kodosi::SessionCatalogModel sessions;
@@ -566,8 +714,6 @@ void SessionActionsTest::authoritativeSnapshotRecoversDroppedLifecycleEvents()
     actions.ingestAuthEvent(
         QByteArrayLiteral(
             "{\"type\":\"auth.ready\",\"userId\":\"me\",\"accountEpoch\":1}"));
-    QSignalSpy reopened(&actions, &kodosi::SessionActions::sessionReopened);
-
     const auto snapshot = [&](const QString& incarnation,
                               const QString& status,
                               const QString& recovery,
@@ -607,32 +753,16 @@ void SessionActionsTest::authoritativeSnapshotRecoversDroppedLifecycleEvents()
     actions.ingestSessionEvent(renamed);
     QVERIFY(actions.canRename(QStringLiteral("session-1")));
 
-    const auto stopped = localSession(
-        sessions,
+    const auto stopped = snapshot(
         QStringLiteral("inc-1"),
         QStringLiteral("stopped"),
         QStringLiteral("recoverable"),
         QStringLiteral("Snapshot Name"));
+    sessions.ingestSessionEvent(stopped);
     actions.ingestSessionEvent(stopped);
-    QVERIFY(actions.reopen(QStringLiteral("session-1")));
-    const auto active = snapshot(
-        QStringLiteral("inc-2"),
-        QStringLiteral("active"),
-        QStringLiteral("live"),
-        QStringLiteral("Snapshot Name"));
-    sessions.ingestSessionEvent(active);
-    actions.ingestSessionEvent(active);
-    QCOMPARE(reopened.count(), 1);
+    QCOMPARE(actions.inactiveCleanupCount(), 1);
+    QVERIFY(!sessions.containsSession(QStringLiteral("session-1")));
 
-    const auto stoppedAgain = localSession(
-        sessions,
-        QStringLiteral("inc-2"),
-        QStringLiteral("stopped"),
-        QStringLiteral("recoverable"),
-        QStringLiteral("Snapshot Name"));
-    actions.ingestSessionEvent(stoppedAgain);
-    QVERIFY(actions.requestDeleteConfirmation(QStringLiteral("session-1")));
-    QVERIFY(actions.confirmDelete(QStringLiteral("session-1")));
     const auto empty = QJsonDocument(QJsonObject {
         {QStringLiteral("authority"), QStringLiteral("accountContext")},
         {QStringLiteral("accountUserId"), QStringLiteral("me")},
@@ -642,7 +772,72 @@ void SessionActionsTest::authoritativeSnapshotRecoversDroppedLifecycleEvents()
     }).toJson(QJsonDocument::Compact);
     sessions.ingestSessionEvent(empty);
     actions.ingestSessionEvent(empty);
+    QCOMPARE(actions.inactiveCleanupCount(), 0);
     QVERIFY(!sessions.containsSession(QStringLiteral("session-1")));
+}
+
+void SessionActionsTest::inactiveCleanupIsBoundedAndTimeoutReleasesRetry()
+{
+    FakeSessionDispatcher dispatcher;
+    kodosi::SessionCatalogModel sessions;
+    auth(sessions);
+    kodosi::SessionActions actions(dispatcher, sessions, 50);
+    actions.ingestAuthEvent(
+        QByteArrayLiteral(
+            "{\"type\":\"auth.ready\",\"userId\":\"me\",\"accountEpoch\":1}"));
+    const auto inactiveSession = [](const QString& id) {
+        return QJsonObject {
+            {QStringLiteral("kind"), QStringLiteral("local")},
+            {QStringLiteral("id"), id},
+            {QStringLiteral("incarnationId"), id + QStringLiteral("-inc")},
+            {QStringLiteral("name"), id},
+            {QStringLiteral("project"), QStringLiteral("/repo")},
+            {QStringLiteral("mode"), QStringLiteral("normal")},
+            {QStringLiteral("status"), QStringLiteral("stopped")},
+            {QStringLiteral("recovery"), QStringLiteral("recoverable")},
+            {QStringLiteral("scope"), QStringLiteral("justMe")},
+            {QStringLiteral("access"), QStringLiteral("approve")},
+        };
+    };
+    const auto snapshot = QJsonDocument(QJsonObject {
+        {QStringLiteral("authority"), QStringLiteral("accountContext")},
+        {QStringLiteral("accountUserId"), QStringLiteral("me")},
+        {QStringLiteral("accountEpoch"), 1},
+        {QStringLiteral("type"), QStringLiteral("session.list")},
+        {QStringLiteral("sessions"),
+         QJsonArray {
+             inactiveSession(QStringLiteral("inactive-1")),
+             inactiveSession(QStringLiteral("inactive-2")),
+             inactiveSession(QStringLiteral("inactive-3")),
+         }},
+    }).toJson(QJsonDocument::Compact);
+
+    sessions.ingestSessionEvent(snapshot);
+    actions.ingestSessionEvent(snapshot);
+    const auto deleteCount = [&] {
+        return std::ranges::count_if(
+            dispatcher.commands,
+            [](const QJsonObject& command) {
+                return command.value(QStringLiteral("type")).toString()
+                    == QStringLiteral("session.delete");
+            });
+    };
+    QCOMPARE(deleteCount(), 2);
+    QCOMPARE(actions.inactiveCleanupCount(), 3);
+    QTRY_COMPARE_WITH_TIMEOUT(deleteCount(), 3, 500);
+    QTRY_COMPARE_WITH_TIMEOUT(actions.inactiveCleanupCount(), 0, 500);
+
+    const auto retry = QJsonDocument(QJsonObject {
+        {QStringLiteral("authority"), QStringLiteral("accountContext")},
+        {QStringLiteral("accountUserId"), QStringLiteral("me")},
+        {QStringLiteral("accountEpoch"), 1},
+        {QStringLiteral("type"), QStringLiteral("session.upsert")},
+        {QStringLiteral("session"),
+         inactiveSession(QStringLiteral("inactive-1"))},
+    }).toJson(QJsonDocument::Compact);
+    sessions.ingestSessionEvent(retry);
+    actions.ingestSessionEvent(retry);
+    QCOMPARE(deleteCount(), 4);
 }
 
 void SessionActionsTest::opensHidesAndRestoresRemoteSessions()

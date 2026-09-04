@@ -22,6 +22,10 @@ DeviceActions::DeviceActions(
             const QString& operation,
             const QString& message,
             const QString& userCode) {
+            if (operation == QStringLiteral("link.approve")) {
+                m_pendingApprovals.remove(
+                    m_devices.normalizeUserCode(userCode));
+            }
             m_lastOperation = operation;
             m_lastUserCode = userCode;
             m_lastError = message;
@@ -31,7 +35,22 @@ DeviceActions::DeviceActions(
         &devices,
         &DevicesModel::authorityChanged,
         this,
-        &DeviceActions::clearError);
+        [this] {
+            m_pendingApprovals.clear();
+            clearError();
+        });
+    connect(
+        &devices,
+        &DevicesModel::stateChanged,
+        this,
+        [this] {
+            const auto resolved =
+                m_devices.lastResolvedUserCode();
+            if (!resolved.isEmpty()
+                && m_pendingApprovals.remove(resolved)) {
+                emit stateChanged();
+            }
+        });
 }
 
 QString DeviceActions::lastError() const
@@ -47,6 +66,12 @@ QString DeviceActions::lastOperation() const
 QString DeviceActions::lastUserCode() const
 {
     return m_lastUserCode;
+}
+
+bool DeviceActions::approvalPending(const QString& userCode) const
+{
+    return m_pendingApprovals.contains(
+        m_devices.normalizeUserCode(userCode));
 }
 
 bool DeviceActions::refresh()
@@ -90,10 +115,23 @@ bool DeviceActions::approveLink(const QString& userCode)
         emit stateChanged();
         return false;
     }
-    return send({
+    if (m_pendingApprovals.contains(canonical)) {
+        m_lastOperation = QStringLiteral("link.approve");
+        m_lastUserCode = canonical;
+        m_lastError =
+            QStringLiteral("That device code is already being approved.");
+        emit stateChanged();
+        return false;
+    }
+    const auto accepted = send({
         {QStringLiteral("type"), QStringLiteral("devices.link.approve")},
         {QStringLiteral("userCode"), canonical},
     });
+    if (accepted) {
+        m_pendingApprovals.insert(canonical);
+        emit stateChanged();
+    }
+    return accepted;
 }
 
 bool DeviceActions::startSelfLink()

@@ -463,6 +463,10 @@ QVariant MissionCrewModel::data(const QModelIndex& index, const int role) const
     switch (role) {
     case PresentationIdRole: return entry.presentationId;
     case KindRole: return QVariant::fromValue(entry.kind);
+    case KindNameRole:
+        return entry.kind == Kind::Agent
+            ? QStringLiteral("agent")
+            : QStringLiteral("member");
     case DisplayNameRole: return entry.displayName;
     case SecondaryLabelRole: return entry.secondaryLabel;
     case StatusRole: return entry.status;
@@ -484,6 +488,7 @@ QHash<int, QByteArray> MissionCrewModel::roleNames() const
     return {
         {PresentationIdRole, QByteArrayLiteral("presentationId")},
         {KindRole, QByteArrayLiteral("kind")},
+        {KindNameRole, QByteArrayLiteral("kindName")},
         {DisplayNameRole, QByteArrayLiteral("displayName")},
         {SecondaryLabelRole, QByteArrayLiteral("secondaryLabel")},
         {StatusRole, QByteArrayLiteral("status")},
@@ -624,6 +629,15 @@ QVariant MissionScopedAttentionModel::data(
     case RiskRole: return QVariant::fromValue(entry.risk);
     case ToneRole: return QVariant::fromValue(entry.tone);
     case ActionKindRole: return QVariant::fromValue(entry.actionKind);
+    case ActionNameRole:
+        switch (entry.actionKind) {
+        case ActionKind::None: return QStringLiteral("none");
+        case ActionKind::Jump: return QStringLiteral("jump");
+        case ActionKind::Review: return QStringLiteral("review");
+        case ActionKind::Approve: return QStringLiteral("approve");
+        case ActionKind::BulkApprove: return QStringLiteral("bulkApprove");
+        }
+        return {};
     case CanApproveRole: return entry.canApprove;
     case CanDenyRole: return entry.canDeny;
     case CanJumpRole: return entry.canJump;
@@ -644,6 +658,7 @@ QHash<int, QByteArray> MissionScopedAttentionModel::roleNames() const
         {RiskRole, QByteArrayLiteral("risk")},
         {ToneRole, QByteArrayLiteral("tone")},
         {ActionKindRole, QByteArrayLiteral("actionKind")},
+        {ActionNameRole, QByteArrayLiteral("actionName")},
         {CanApproveRole, QByteArrayLiteral("canApprove")},
         {CanDenyRole, QByteArrayLiteral("canDeny")},
         {CanJumpRole, QByteArrayLiteral("canJump")},
@@ -875,14 +890,49 @@ bool MissionDetailModel::loading() const noexcept
     return m_membersLoading || m_chatLoading || m_tasksLoading;
 }
 
+bool MissionDetailModel::membersLoading() const noexcept
+{
+    return m_membersLoading;
+}
+
 bool MissionDetailModel::membersReady() const noexcept
 {
     return !m_missionId.isEmpty() && m_membersAuthoritative;
 }
 
+bool MissionDetailModel::membersStaleDataVisible() const noexcept
+{
+    return m_membersLoading && !m_members.m_members.isEmpty();
+}
+
+bool MissionDetailModel::chatLoading() const noexcept
+{
+    return m_chatLoading;
+}
+
+bool MissionDetailModel::chatReady() const noexcept
+{
+    return !m_missionId.isEmpty() && m_chatAuthoritative;
+}
+
+bool MissionDetailModel::chatStaleDataVisible() const noexcept
+{
+    return m_chatLoading && !m_messages.m_messages.isEmpty();
+}
+
+bool MissionDetailModel::tasksLoading() const noexcept
+{
+    return m_tasksLoading;
+}
+
 bool MissionDetailModel::tasksReady() const noexcept
 {
     return !m_missionId.isEmpty() && m_tasksAuthoritative;
+}
+
+bool MissionDetailModel::tasksStaleDataVisible() const noexcept
+{
+    return m_tasksLoading && !m_tasks.m_tasks.isEmpty();
 }
 
 QString MissionDetailModel::lastError() const
@@ -966,6 +1016,25 @@ bool MissionDetailModel::selectedCanInterrupt() const
     const auto entry = selectedCrewEntry();
     return entry && entry->kind == MissionCrewModel::Kind::Agent
         && entry->canInterrupt;
+}
+
+bool MissionDetailModel::selectedDispatchSelected() const
+{
+    const auto entry = selectedCrewEntry();
+    return entry && entry->kind == MissionCrewModel::Kind::Agent
+        && entry->dispatchSelected;
+}
+
+QString MissionDetailModel::selectedDeliveryState() const
+{
+    const auto entry = selectedCrewEntry();
+    return entry ? entry->deliveryState : QString {};
+}
+
+QString MissionDetailModel::selectedDeliveryDetail() const
+{
+    const auto entry = selectedCrewEntry();
+    return entry ? entry->deliveryDetail : QString {};
 }
 
 bool MissionDetailModel::openMission(const QString& missionId)
@@ -1893,7 +1962,12 @@ void MissionDetailModel::rebuildCrew()
                 .presentationId = presentationId,
                 .kind = MissionCrewModel::Kind::Member,
                 .displayName = displayForUser(member.userId),
-                .secondaryLabel = member.role,
+                .secondaryLabel =
+                    member.role == QStringLiteral("owner")
+                    ? tr("Owner")
+                    : member.role == QStringLiteral("member")
+                        ? tr("Member")
+                        : tr("Unknown role"),
                 .status = QStringLiteral("member"),
                 .localSessionId = {},
                 .sessionIncarnationId = {},
@@ -1918,6 +1992,9 @@ void MissionDetailModel::rebuildCrew()
         m_crew.m_tokensByKey.remove(m_crew.m_tokenOrder.takeFirst());
     }
     m_crew.replace(std::move(entries));
+    if (!m_selectedCrewPresentationId.isEmpty()) {
+        emit focusChanged();
+    }
 }
 
 void MissionDetailModel::rebuildMessagePresentation()

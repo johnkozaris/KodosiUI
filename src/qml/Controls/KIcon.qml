@@ -12,6 +12,7 @@ Item {
         switch (name) {
         case "plus": return "M12 5 V19 M5 12 H19"
         case "folder": return "M3 7.5 Q3 6 4.5 6 H9 L11 8 H19.5 Q21 8 21 9.5 V18 Q21 20 19 20 H5 Q3 20 3 18 Z"
+        case "folder-plus": return "M3 8 Q3 6.5 4.5 6.5 H9 L11 8.5 H20 V19 H3 Z M16 3 V9 M13 6 H19"
         case "archive": return "M4 7 H20 V20 H4 Z M3 4 H21 V8 H3 Z M9 12 H15"
         case "clock": return "M12 3 A9 9 0 1 1 5.64 5.64 M12 7 V12 L16 14"
         case "command": return "M9 7 A3 3 0 1 0 6 10 H18 A3 3 0 1 0 15 7 V17 A3 3 0 1 0 18 14 H6 A3 3 0 1 0 9 17 Z"
@@ -50,7 +51,9 @@ Item {
         case "sliders": return "M4 7 H20 M8 4 V10 M4 17 H20 M16 14 V20"
         case "sidebar": return "M4 5 H20 V19 H4 Z M9 5 V19"
         case "diagnostics": return "M8 4 V10 A4 4 0 0 0 16 10 V4 M6 4 H10 M14 4 H18 M12 14 V17 A4 4 0 0 0 20 17 V14 M20 14 A2 2 0 1 0 20 10 A2 2 0 1 0 20 14"
-        default: return "M5 5 H19 V19 H5 Z"
+        case "document": return "M6 3 H14 L19 8 V21 H6 Z M14 3 V8 H19 M9 12 H16 M9 16 H16"
+        case "send": return "M3 11.5 L21 3 L14 21 L11 13 Z M11 13 L16 8"
+        default: return ""
         }
     }
 

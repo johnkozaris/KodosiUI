@@ -299,7 +299,7 @@ private slots:
     void failedRemoteRestoreIsSuppressedWithinAuthorityGeneration();
     void remoteRestorationRepeatsForFreshRuntimeAuthority();
     void remoteRestorationTracksConnectableUpsertsOnce();
-    void seventhStageMutationIsRejectedAndPersistsExactly();
+    void explicitStageMutationsAreNotRestorationCapped();
     void stageLayoutModeIsTransientAcrossRestart();
 };
 
@@ -324,7 +324,7 @@ void DesktopStateModelTest::loadsShellStateBeforeAttach()
         settingsFor(directory),
         desktopScreens);
 
-    QCOMPARE(state.activeView(), 2);
+    QCOMPARE(state.activeView(), 0);
     QVERIFY(!state.sidebarOpen());
     QCOMPARE(
         state.selectedSessionId(),
@@ -1009,11 +1009,11 @@ void DesktopStateModelTest::shellStatePersists()
         desktopScreens);
     QWindow window;
     state.attachWindow(&window);
-    state.setActiveView(2);
+    state.setActiveView(1);
     state.setSidebarOpen(false);
     state.setSelectedSessionId(QStringLiteral("session-0190"));
 
-    QCOMPARE(state.activeView(), 2);
+    QCOMPARE(state.activeView(), 1);
     QVERIFY(!state.sidebarOpen());
     QCOMPARE(state.selectedSessionId(), QStringLiteral("session-0190"));
     QVERIFY(state.lastError().isEmpty());
@@ -1023,7 +1023,7 @@ void DesktopStateModelTest::shellStatePersists()
         desktopScreens);
     QWindow restoredWindow;
     reloaded.attachWindow(&restoredWindow);
-    QCOMPARE(reloaded.activeView(), 2);
+    QCOMPARE(reloaded.activeView(), 1);
     QVERIFY(!reloaded.sidebarOpen());
     QCOMPARE(
         reloaded.selectedSessionId(),
@@ -1735,7 +1735,7 @@ void DesktopStateModelTest::repeatedAttachIgnoresDetachedWindowCallbacks()
             settingsFor(directory),
             desktopScreens);
 
-        QCOMPARE(state.activeView(), 2);
+        QCOMPARE(state.activeView(), 0);
         QVERIFY(!state.sidebarOpen());
         QCOMPARE(
             state.selectedSessionId(),
@@ -1748,6 +1748,7 @@ void DesktopStateModelTest::repeatedAttachIgnoresDetachedWindowCallbacks()
             kodosi::DesktopStateModel::StageLayoutMode::Grid);
         const auto migrated = readStoredState(directory);
         QCOMPARE(migrated.value(QStringLiteral("version")).toInt(), 2);
+        QCOMPARE(migrated.value(QStringLiteral("activeView")).toInt(), 0);
         QCOMPARE(readNormalGeometry(migrated), QRect(120, 90, 1'060, 700));
         QVERIFY(migrated.value(QStringLiteral("window"))
                     .toObject()
@@ -3060,71 +3061,37 @@ void DesktopStateModelTest::repeatedAttachIgnoresDetachedWindowCallbacks()
     }
 
     void DesktopStateModelTest::
-        seventhStageMutationIsRejectedAndPersistsExactly()
+        explicitStageMutationsAreNotRestorationCapped()
     {
         auto directory = stateDirectory(
-            QStringLiteral("desktop-state-six-stage-invariant"));
+            QStringLiteral("desktop-state-explicit-stage-budget"));
         QVERIFY(directory.isValid());
-        QStringList expectedStaged;
-        QString expectedSelected;
-        {
-            kodosi::DesktopStateModel state(
-                settingsFor(directory),
-                desktopScreens);
-            kodosi::SessionCatalogModel sessions;
-            state.attachSessionCatalog(&sessions);
-            activateAccount(state, sessions, {}, 1);
-            QJsonArray entries;
-            for (auto index = 0; index < 7; ++index) {
-                entries.append(liveSession(
-                    QStringLiteral("local-%1").arg(index)));
-            }
-            applySnapshot(sessions, {}, 1, entries);
-            expectedStaged = state.stagedSessionIds();
-            expectedSelected = state.selectedSessionId();
-            QCOMPARE(expectedStaged.size(), 6);
-
-            QVERIFY(!state.selectSession(QStringLiteral("local-6")));
-            QCOMPARE(state.stagedSessionIds(), expectedStaged);
-            QCOMPARE(state.selectedSessionId(), expectedSelected);
-            QVERIFY(state.lastError().contains(
-                QStringLiteral("six sessions")));
-
-            QVERIFY(!state.stageSession(QStringLiteral("local-6")));
-            QCOMPARE(state.stagedSessionIds(), expectedStaged);
-            QCOMPARE(state.selectedSessionId(), expectedSelected);
-            QVERIFY(state.lastError().contains(
-                QStringLiteral("six sessions")));
-
-            expectedSelected = expectedStaged.constLast();
-            QVERIFY(state.selectSession(expectedSelected));
-            QCOMPARE(state.stagedSessionIds(), expectedStaged);
-            QCOMPARE(state.selectedSessionId(), expectedSelected);
-            QCOMPARE(
-                readStoredState(directory)
-                    .value(QStringLiteral("stage"))
-                    .toObject()
-                    .value(QStringLiteral("stagedSessionIds"))
-                    .toArray()
-                    .size(),
-                6);
-        }
-
-        kodosi::DesktopStateModel reloaded(
+        kodosi::DesktopStateModel state(
             settingsFor(directory),
             desktopScreens);
         kodosi::SessionCatalogModel sessions;
-        reloaded.attachSessionCatalog(&sessions);
-        activateAccount(reloaded, sessions, {}, 1);
+        state.attachSessionCatalog(&sessions);
+        activateAccount(state, sessions, {}, 1);
         QJsonArray entries;
         for (auto index = 0; index < 7; ++index) {
             entries.append(liveSession(
                 QStringLiteral("local-%1").arg(index)));
         }
         applySnapshot(sessions, {}, 1, entries);
+        QCOMPARE(state.stagedSessionIds().size(), 6);
 
-        QCOMPARE(reloaded.stagedSessionIds(), expectedStaged);
-        QCOMPARE(reloaded.selectedSessionId(), expectedSelected);
+        QVERIFY(state.stageSession(QStringLiteral("local-6")));
+        QCOMPARE(state.stagedSessionIds().size(), 7);
+        QVERIFY(state.selectSession(QStringLiteral("local-6")));
+        QCOMPARE(state.selectedSessionId(), QStringLiteral("local-6"));
+        QCOMPARE(
+            readStoredState(directory)
+                .value(QStringLiteral("stage"))
+                .toObject()
+                .value(QStringLiteral("stagedSessionIds"))
+                .toArray()
+                .size(),
+            7);
     }
 
     void DesktopStateModelTest::

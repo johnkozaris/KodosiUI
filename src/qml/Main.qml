@@ -11,6 +11,7 @@ ApplicationWindow {
     property string selectedProject
     property string selectedStatus
     property string selectedMode
+    property var optimisticRemoteOpens: ({})
     readonly property int themeMotionFast: KodosiTheme.motionFast
     readonly property int themeMotionNormal: KodosiTheme.motionNormal
     readonly property real sidebarActualWidth:
@@ -51,12 +52,10 @@ ApplicationWindow {
     readonly property bool blockingOverlayOpen:
         startupOverlay.visible
         || settingsDrawer.opened
-        || utilityMenu.opened
         || keyboardShortcutsOverlay.opened
         || agentIntelDrawer.opened
         || projectIntelModal.opened
         || resumeAgentWorkModal.opened
-        || diagnosticsDrawer.opened
         || closeSessionConfirmation.opened
         || sessionSidebar.modalOpen
         || authOverlay.visible
@@ -98,12 +97,31 @@ ApplicationWindow {
         if (sessionId.length === 0)
             return false
         const session = Models.Sessions.presentationForSession(sessionId)
+        const wasStaged =
+            Models.DesktopState.stagedSessionIds.indexOf(sessionId) >= 0
         if (session.sessionId !== sessionId
                 || !Models.DesktopState.selectSession(sessionId))
             return false
         synchronizeSelectedSessionMetadata()
-        if (openRemote && Models.SessionActions.canOpenRemote(sessionId))
-            Models.SessionActions.openRemote(sessionId)
+        if (openRemote && Models.SessionActions.canOpenRemote(sessionId)) {
+            if (!wasStaged) {
+                const pending = Object.assign(
+                    {},
+                    optimisticRemoteOpens)
+                pending[sessionId] = true
+                optimisticRemoteOpens = pending
+            }
+            if (!Models.SessionActions.openRemote(sessionId)) {
+                if (!wasStaged)
+                    Models.DesktopState.unstageSession(sessionId)
+                const failed = Object.assign(
+                    {},
+                    optimisticRemoteOpens)
+                delete failed[sessionId]
+                optimisticRemoteOpens = failed
+                return false
+            }
+        }
         return true
     }
 
@@ -125,6 +143,16 @@ ApplicationWindow {
             false)
     }
 
+    function prepareApprovalReview() {
+        if (!resumeAgentWorkModal.closeModal())
+            return false
+        keyboardShortcutsOverlay.close()
+        settingsDrawer.close()
+        diagnosticsDrawer.close()
+        projectIntelModal.close()
+        return true
+    }
+
     function openAgentIntelWithRemote(
             sessionId,
             approvalIdentityToken,
@@ -132,10 +160,10 @@ ApplicationWindow {
         const session = Models.Sessions.presentationForSession(sessionId)
         if (!session.sessionId)
             return false
+        if (!prepareApprovalReview())
+            return false
         if (!activateSessionWithRemote(sessionId, openRemote))
             return false
-        settingsDrawer.close()
-        diagnosticsDrawer.close()
         agentIntelDrawer.openForSession(
             sessionId,
             session.name,
@@ -144,20 +172,7 @@ ApplicationWindow {
         return true
     }
 
-    function closeDeepLinkOverlays() {
-        utilityMenu.close()
-        keyboardShortcutsOverlay.close()
-        settingsDrawer.close()
-        agentIntelDrawer.close()
-        projectIntelModal.close()
-        resumeAgentWorkModal.closeModal()
-        diagnosticsDrawer.close()
-        Models.SessionActions.cancelCloseConfirmation()
-        sessionSidebar.closeConflictingOverlays()
-    }
-
     function openDeepLinkedSession(sessionId) {
-        closeDeepLinkOverlays()
         const opened = activateSessionWithRemote(sessionId, true)
         if (!opened)
             Models.DeepLinks.reportNavigationResult(false)
@@ -165,7 +180,6 @@ ApplicationWindow {
     }
 
     function openDeepLinkedApproval(sessionId, identityToken) {
-        closeDeepLinkOverlays()
         const opened = openAgentIntelWithRemote(
             sessionId,
             identityToken,
@@ -176,9 +190,9 @@ ApplicationWindow {
     }
 
     function openMissingDeepLinkedApproval(sessionId) {
-        closeDeepLinkOverlays()
         const session = Models.Sessions.presentationForSession(sessionId)
         const opened = session.sessionId === sessionId
+            && prepareApprovalReview()
             && activateSessionWithRemote(sessionId, true)
         if (opened) {
             agentIntelDrawer.openForSession(
@@ -190,49 +204,6 @@ ApplicationWindow {
         if (!opened)
             Models.DeepLinks.reportNavigationResult(false)
         return opened
-    }
-
-    function deepLinkStatusText(code) {
-        switch (code) {
-        case "tooLong":
-            return qsTr("The link is too long to open safely.")
-        case "malformedEncoding":
-            return qsTr("The link contains malformed text encoding.")
-        case "unsafeText":
-            return qsTr("The link contains unsafe text.")
-        case "unsupportedParameters":
-            return qsTr("The link contains unsupported parameters.")
-        case "queueFull":
-            return qsTr("Too many links are waiting to open. Try the link again.")
-        case "waitingRuntime":
-            return qsTr("Waiting for Kodosi to finish starting before opening the link…")
-        case "waitingAccount":
-            return qsTr("Waiting for the active account before opening the link…")
-        case "waitingSessions":
-            return qsTr("Waiting for the authoritative session list…")
-        case "accountChanged":
-            return qsTr("The link expired because the active account changed.")
-        case "expired":
-            return qsTr("The link expired before its authoritative data became available.")
-        case "sessionsUnavailable":
-            return qsTr("Sessions are unavailable, so the link could not be opened.")
-        case "sessionMissing":
-            return qsTr("The linked session is no longer available.")
-        case "sessionRestarted":
-            return qsTr("The link expired because the session restarted.")
-        case "waitingApprovals":
-            return qsTr("Waiting for the authoritative approval list…")
-        case "approvalMissing":
-            return qsTr("This approval is no longer pending.")
-        case "approvalsUnavailable":
-            return qsTr("Pending approvals are unavailable. The linked session was opened instead.")
-        case "navigationFailed":
-            return qsTr("The linked session could not be staged. Close another staged session and try again.")
-        case "invalid":
-            return qsTr("This Kodosi link is invalid or unsupported.")
-        default:
-            return ""
-        }
     }
 
     function openProjectIntelForSession(sessionId) {
@@ -275,19 +246,10 @@ ApplicationWindow {
         return openAgentIntel(sessionId, identityToken)
     }
 
-    function showDevices() {
-        agentIntelDrawer.close()
-        settingsDrawer.close()
-        diagnosticsDrawer.close()
-        Models.DesktopState.activeView = 2
-    }
-
     function toggleDiagnostics() {
         if ((authOverlay.visible || startupOverlay.visible)
                 && !diagnosticsDrawer.opened)
             return
-        agentIntelDrawer.close()
-        settingsDrawer.close()
         if (diagnosticsDrawer.opened)
             diagnosticsDrawer.close()
         else
@@ -331,7 +293,7 @@ ApplicationWindow {
     }
 
     function createDefaultSession() {
-        if (!shortcutContextAvailable || Models.SessionActions.creating)
+        if (!shortcutContextAvailable)
             return false
         Models.DesktopState.activeView = 0
         return Models.SessionActions.createDefault()
@@ -359,6 +321,17 @@ ApplicationWindow {
             return false
         return Models.SessionActions.requestCloseConfirmation(
             shortcutSelectedSessionId)
+    }
+
+    function handleTopApproval(approve) {
+        const request = Models.PendingPermissions.topPresentation()
+        if (request.identityToken === undefined)
+            return false
+        if (!approve)
+            return Models.PendingPermissions.deny(request.identityToken)
+        if (request.risk === "safe" || request.risk === "network")
+            return Models.PendingPermissions.approve(request.identityToken)
+        return openAgentIntel(request.sessionId, request.identityToken)
     }
 
     function toggleUtilityMenu() {
@@ -533,10 +506,6 @@ ApplicationWindow {
                 Qt.callLater(window.openAccountSettings)
         }
 
-        DesktopFileErrorBanner {
-            Layout.fillWidth: true
-        }
-
         RuntimeHealthBanner {
             Layout.fillWidth: true
             onOpenDiagnosticsRequested: window.toggleDiagnostics()
@@ -580,10 +549,7 @@ ApplicationWindow {
                     sidebarOpen: Models.DesktopState.sidebarOpen
                     interactionEnabled: !window.blockingOverlayOpen
                         && Models.DesktopState.activeView === 0
-                    onNewSessionRequested: {
-                        Models.DesktopState.sidebarOpen = true
-                        sessionSidebar.createOpen = true
-                    }
+                    onNewSessionRequested: window.createDefaultSession()
                     onShowSidebarRequested:
                         Models.DesktopState.sidebarOpen = true
                     onInspectSessionRequested: (sessionId, sessionName) => {
@@ -604,11 +570,6 @@ ApplicationWindow {
                 onSignInRequested: Models.AuthActions.beginSignIn()
             }
 
-            DevicesView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                onSignInRequested: Models.AuthActions.beginSignIn()
-            }
         }
     }
 
@@ -645,65 +606,6 @@ ApplicationWindow {
         }
     }
 
-    Rectangle {
-        id: deepLinkStatus
-        objectName: "deepLink.status"
-        Accessible.id: objectName
-        readonly property bool available:
-            Models.ApplicationLifecycle.state
-                === Models.ApplicationLifecycle.Ready
-            && Models.DeepLinks.statusCode.length > 0
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.margins: KodosiTheme.spacing3
-        implicitHeight: visible
-            ? Math.max(44, deepLinkStatusRow.implicitHeight
-                + KodosiTheme.spacing4)
-            : 0
-        height: implicitHeight
-        visible: deepLinkStatus.available
-        enabled: deepLinkStatus.available
-        z: 10000
-        radius: KodosiTheme.radiusMedium
-        color: KodosiTheme.surfaceElevated
-        Accessible.role: Accessible.AlertMessage
-        Accessible.name: deepLinkStatusLabel.text
-        Accessible.ignored: !deepLinkStatus.available
-
-        RowLayout {
-            id: deepLinkStatusRow
-            enabled: deepLinkStatus.available
-            anchors.fill: parent
-            anchors.leftMargin: KodosiTheme.spacing5
-            anchors.rightMargin: KodosiTheme.spacing5
-            spacing: KodosiTheme.spacing3
-
-            PlainLabel {
-                id: deepLinkStatusLabel
-                objectName: "deepLink.status.label"
-                Accessible.id: objectName
-                Layout.fillWidth: true
-                Layout.minimumWidth: 0
-                verticalAlignment: Text.AlignVCenter
-                text: window.deepLinkStatusText(
-                    Models.DeepLinks.statusCode)
-                color: KodosiTheme.textPrimary
-                wrapMode: Text.Wrap
-                Accessible.ignored: !deepLinkStatus.available
-            }
-
-            KIconButton {
-                objectName: "deepLink.status.dismiss"
-                Accessible.id: objectName
-                glyph: "close"
-                Accessible.name: qsTr("Dismiss link status")
-                Accessible.ignored: !deepLinkStatus.available
-                onClicked: Models.DeepLinks.clearStatus()
-            }
-        }
-    }
-
     Shortcut {
         objectName: "shortcut.settings"
         sequence: "Ctrl+,"
@@ -717,8 +619,31 @@ ApplicationWindow {
         sequence: "Ctrl+S"
         context: Qt.ApplicationShortcut
         enabled: window.shortcutContextAvailable
-            && !Models.SessionActions.creating
         onActivated: window.createDefaultSession()
+    }
+
+    Shortcut {
+        objectName: "shortcut.session.resumeAgentWork"
+        sequence: "Ctrl+Shift+R"
+        context: Qt.ApplicationShortcut
+        enabled: window.shortcutContextAvailable
+        onActivated: window.openResumeAgentWork()
+    }
+
+    Shortcut {
+        objectName: "shortcut.approval.approve"
+        sequence: "Ctrl+Shift+A"
+        context: Qt.ApplicationShortcut
+        enabled: window.shortcutContextAvailable
+        onActivated: window.handleTopApproval(true)
+    }
+
+    Shortcut {
+        objectName: "shortcut.approval.deny"
+        sequence: "Ctrl+Shift+X"
+        context: Qt.ApplicationShortcut
+        enabled: window.shortcutContextAvailable
+        onActivated: window.handleTopApproval(false)
     }
 
     Shortcut {
@@ -816,6 +741,33 @@ ApplicationWindow {
     }
 
     Connections {
+        target: Models.SessionActions
+
+        function onSessionCreated(sessionId) {
+            Models.DesktopState.activeView = 0
+            Models.DesktopState.selectSession(sessionId)
+        }
+
+        function onRemoteOpenSucceeded(sessionId) {
+            const pending = Object.assign(
+                {},
+                window.optimisticRemoteOpens)
+            delete pending[sessionId]
+            window.optimisticRemoteOpens = pending
+        }
+
+        function onRemoteOpenFailed(sessionId) {
+            if (window.optimisticRemoteOpens[sessionId] === true)
+                Models.DesktopState.unstageSession(sessionId)
+            const pending = Object.assign(
+                {},
+                window.optimisticRemoteOpens)
+            delete pending[sessionId]
+            window.optimisticRemoteOpens = pending
+        }
+    }
+
+    Connections {
         target: Models.Attention
 
         function onNavigationRequested(sessionId, approvalIdentityToken) {
@@ -890,7 +842,6 @@ ApplicationWindow {
         id: settingsDrawer
         agentIntelAvailable:
             Models.DesktopState.selectedSessionId.length > 0
-        onOpenDevicesRequested: window.showDevices()
         onSignInRequested: Models.AuthActions.beginSignIn()
         onOpenAgentIntelRequested: {
             if (Models.DesktopState.selectedSessionId.length > 0)
@@ -898,6 +849,7 @@ ApplicationWindow {
                     Models.DesktopState.selectedSessionId,
                     "")
         }
+
         onOpenDiagnosticsRequested: window.toggleDiagnostics()
         onOpenProjectIntelRequested: function(sourceId) {
             settingsDrawer.close()

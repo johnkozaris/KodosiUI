@@ -482,7 +482,7 @@ QString ProviderConversationsModel::selectedSummary() const
 bool ProviderConversationsModel::canResume() const
 {
     return selectedItem() != nullptr && selectedVisible()
-        && m_hasAccountContext && !m_syntheticFixture
+        && m_hasAccountContext
         && m_state == State::Ready && !m_workingDirectory.isEmpty();
 }
 bool ProviderConversationsModel::previewLoading() const noexcept
@@ -505,12 +505,7 @@ ProviderConversationsModel::preview() noexcept
 
 bool ProviderConversationsModel::open()
 {
-    if (m_syntheticFixture) {
-        m_demanded = true;
-        return true;
-    }
     m_demanded = true;
-    m_syntheticFixture = false;
     if (m_workingDirectory.isEmpty()) {
         const auto validation = DesktopFileIntegration::validateDirectory(
             m_settings.effectiveWorkingDirectory());
@@ -548,7 +543,6 @@ void ProviderConversationsModel::close()
     m_state = State::Dormant;
     m_error.clear();
     m_loadMoreError.clear();
-    m_syntheticFixture = false;
     emit stateChanged();
 }
 
@@ -669,80 +663,10 @@ ProviderConversationsModel::resolveResumeTarget(
         .provider = item->provider,
         .nativeConversationId = item->nativeConversationId,
         .workingDirectory = item->workingDirectory,
+        .title = item->title,
         .accountUserId = m_accountUserId,
         .accountEpoch = m_accountEpoch,
     };
-}
-
-void ProviderConversationsModel::installSyntheticFixture()
-{
-    ++m_demandGeneration;
-    ++m_folderGeneration;
-    ++m_selectionGeneration;
-    m_catalogReplyTimer.stop();
-    m_previewReplyTimer.stop();
-    m_catalogPending.reset();
-    m_previewPending.reset();
-    m_workingDirectory = QStringLiteral("/synthetic/provider-project");
-    m_items.clear();
-    for (const auto& fixture : {
-             std::pair {
-                 QStringLiteral("01900000-0000-4000-8000-000000000101"),
-                 QStringLiteral("Investigate Linux packaging")},
-             std::pair {
-                 QStringLiteral("01900000-0000-4000-8000-000000000102"),
-                 QStringLiteral("Review terminal reconnect")},
-         }) {
-        const auto provider = QStringLiteral("claude");
-        const auto identity =
-            itemIdentityKey(provider, fixture.first);
-        m_items.push_back({
-            .presentationId = stablePresentationId(identity),
-            .identityKey = identity,
-            .provider = provider,
-            .nativeConversationId = fixture.first,
-            .workingDirectory = m_workingDirectory,
-            .title = fixture.second,
-            .createdAt = QStringLiteral("2026-09-01T09:30:00Z"),
-            .updatedAt = QStringLiteral("2026-09-03T11:45:00Z"),
-            .accessibleId = stablePresentationId(
-                QStringLiteral("accessible") + identity),
-        });
-    }
-    m_provider = Provider::Claude;
-    m_searchText.clear();
-    m_nextCursor.clear();
-    m_hasMore = false;
-    m_capped = false;
-    m_error.clear();
-    m_loadMoreError.clear();
-    m_state = State::Ready;
-    m_demanded = true;
-    m_syntheticFixture = true;
-    rebuildFilter();
-    m_selectedPresentationId = m_items.constFirst().presentationId;
-    m_preview.replace({
-        {
-            .role = QStringLiteral("user"),
-            .content = QStringLiteral(
-                "Check the Linux package and preserve the existing runtime authority."),
-            .toolName = {},
-            .timestamp = QStringLiteral("2026-09-03T11:42:00Z"),
-        },
-        {
-            .role = QStringLiteral("assistant"),
-            .content = QStringLiteral(
-                "The package metadata is consistent and no provider archive was changed."),
-            .toolName = {},
-            .timestamp = QStringLiteral("2026-09-03T11:45:00Z"),
-        },
-    });
-    m_previewLoading = false;
-    m_previewError.clear();
-    m_previewNotice = translated(
-        "Showing the latest entries. Earlier turns remain with the provider.");
-    emit stateChanged();
-    emit selectionChanged();
 }
 
 void ProviderConversationsModel::ingestAuthEvent(QByteArray json)

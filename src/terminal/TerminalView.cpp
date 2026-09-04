@@ -19,6 +19,7 @@
 #include <QMetaObject>
 #include <QMouseEvent>
 #include <QQuickWindow>
+#include <QRawFont>
 #include <QSGSimpleTextureNode>
 #include <QSGTexture>
 #include <QThread>
@@ -41,6 +42,59 @@ constexpr qsizetype maximumQueuedInputBytes = 1024 * 1024;
 constexpr std::size_t maximumQueuedInputFrames = 1024;
 constexpr int maximumWheelRowsPerEvent = 100;
 constexpr int inputBackoffMilliseconds[] {4, 8, 16, 32, 64};
+constexpr char32_t powerlineRightSeparator = 0xE0B0;
+constexpr char32_t powerlineLeftCap = 0xE0B6;
+constexpr char32_t nerdFontLinux = 0xF31B;
+
+bool supportsTerminalSymbols(const QString& family)
+{
+    auto candidate = QFont(family);
+    candidate.setStyleStrategy(QFont::NoFontMerging);
+    const auto rawFont = QRawFont::fromFont(candidate);
+    return rawFont.isValid()
+        && rawFont.supportsCharacter(powerlineRightSeparator)
+        && rawFont.supportsCharacter(powerlineLeftCap)
+        && rawFont.supportsCharacter(nerdFontLinux);
+}
+
+QString terminalSymbolFamily()
+{
+    static const auto family = [] {
+        const QFontDatabase database;
+        const QStringList preferred {
+            QStringLiteral("Symbols Nerd Font Mono"),
+            QStringLiteral("JetBrainsMono Nerd Font Mono"),
+            QStringLiteral("MesloLGLDZ Nerd Font Mono"),
+        };
+        const auto installed = database.families();
+        for (const auto& candidate : preferred) {
+            if (installed.contains(candidate)
+                && supportsTerminalSymbols(candidate)) {
+                return candidate;
+            }
+        }
+        for (const auto& candidate : installed) {
+            if (database.isFixedPitch(candidate)
+                && supportsTerminalSymbols(candidate)) {
+                return candidate;
+            }
+        }
+        return QString {};
+    }();
+    return family;
+}
+
+void configureTerminalFont(QFont& font, const QString& requestedFamily)
+{
+    QStringList families {requestedFamily};
+    const auto symbolFamily = terminalSymbolFamily();
+    if (!symbolFamily.isEmpty() && symbolFamily != requestedFamily) {
+        families.push_back(symbolFamily);
+    }
+    font.setFamilies(families);
+    font.setFixedPitch(true);
+    font.setStyleHint(QFont::Monospace);
+}
 
 void publishAccessibleTextChange(
     QObject* object,
@@ -174,6 +228,20 @@ TerminalModifiers modifiers(const Qt::KeyboardModifiers value)
         .alt = value.testFlag(Qt::AltModifier),
         .superKey = value.testFlag(Qt::MetaModifier),
     };
+}
+
+TerminalMouseButton mouseButton(const Qt::MouseButton button)
+{
+    switch (button) {
+    case Qt::LeftButton:
+        return TerminalMouseButton::Left;
+    case Qt::RightButton:
+        return TerminalMouseButton::Right;
+    case Qt::MiddleButton:
+        return TerminalMouseButton::Middle;
+    default:
+        return TerminalMouseButton::None;
+    }
 }
 
 std::optional<TerminalKey> terminalKey(const QKeyEvent* event)
@@ -361,7 +429,7 @@ TerminalView::TerminalView(QQuickItem* parent)
     setFlag(ItemHasContents, true);
     setFlag(ItemAcceptsInputMethod, true);
     setActiveFocusOnTab(true);
-    setAcceptedMouseButtons(Qt::LeftButton);
+    setAcceptedMouseButtons(Qt::AllButtons);
     setAcceptHoverEvents(true);
     auto* accessible = qobject_cast<QQuickAccessibleAttached*>(
         qmlAttachedPropertiesObject<QQuickAccessibleAttached>(this, true));
@@ -372,9 +440,7 @@ TerminalView::TerminalView(QQuickItem* parent)
     accessible->set_readOnly(true);
     accessible->set_multiLine(true);
     accessible->set_selectableText(true);
-    m_font.setFamily(QStringLiteral("JetBrains Mono"));
-    m_font.setFixedPitch(true);
-    m_font.setStyleHint(QFont::Monospace);
+    configureTerminalFont(m_font, QStringLiteral("JetBrains Mono"));
     m_font.setPixelSize(14);
     m_cursorBlinkTimer.setObjectName(QStringLiteral("terminal.cursorBlinkTimer"));
     m_cursorBlinkTimer.setInterval(500);
@@ -486,6 +552,22 @@ bool TerminalView::canResize() const noexcept
 bool TerminalView::readOnly() const noexcept
 {
     return !m_canSendInput;
+}
+
+bool TerminalView::hasSelection() const
+{
+    const auto selection = accessibleSelection();
+    return selection.first >= 0 && selection.second > selection.first;
+}
+
+bool TerminalView::copySelectionToClipboard()
+{
+    return copySelection();
+}
+
+void TerminalView::pasteFromClipboard()
+{
+    pasteClipboard();
 }
 
 bool TerminalView::focusedSizeAuthority() const noexcept
@@ -651,9 +733,7 @@ void TerminalView::setFontFamily(const QString& family)
     if (trimmed.isEmpty() || trimmed == m_font.family()) {
         return;
     }
-    m_font.setFamily(trimmed);
-    m_font.setFixedPitch(true);
-    m_font.setStyleHint(QFont::Monospace);
+    configureTerminalFont(m_font, trimmed);
     invalidateMetrics();
     emit fontFamilyChanged();
 }
@@ -1052,6 +1132,7 @@ void TerminalView::detach()
     m_preedit.clear();
     m_renderedPreedit.clear();
     m_selecting = false;
+    m_reportedMouseButton = Qt::NoButton;
     m_copyShortcutActive = false;
     m_pasteShortcutKey.reset();
     m_pressedLink.reset();
@@ -1350,7 +1431,33 @@ void TerminalView::focusOutEvent(QFocusEvent* event)
 
 void TerminalView::mousePressEvent(QMouseEvent* event)
 {
-    if (event->button() != Qt::LeftButton || !m_terminalReady) {
+    if (!m_terminalReady) {
+        QQuickItem::mousePressEvent(event);
+        return;
+    }
+    forceActiveFocus(Qt::MouseFocusReason);
+    if (m_canSendInput
+        && !event->modifiers().testFlag(Qt::ShiftModifier)
+        && sendMouseEvent(
+            TerminalMouseAction::Press,
+            mouseButton(event->button()),
+            event->position(),
+            event->modifiers(),
+            event->buttons() != Qt::NoButton)) {
+        m_reportedMouseButton = event->button();
+        m_pressedLink.reset();
+        m_selecting = false;
+        event->accept();
+        return;
+    }
+    if (event->button() == Qt::RightButton) {
+        emit contextMenuRequested(
+            event->position().x(),
+            event->position().y());
+        event->accept();
+        return;
+    }
+    if (event->button() != Qt::LeftButton) {
         QQuickItem::mousePressEvent(event);
         return;
     }
@@ -1359,8 +1466,7 @@ void TerminalView::mousePressEvent(QMouseEvent* event)
         QQuickItem::mousePressEvent(event);
         return;
     }
-    forceActiveFocus(Qt::MouseFocusReason);
-    if (event->modifiers() == Qt::NoModifier) {
+    if (m_canSendInput && event->modifiers() == Qt::NoModifier) {
         if (auto link = linkAtCell(*cell, true)) {
             m_pressedLink = std::move(*link);
             m_selecting = false;
@@ -1375,6 +1481,18 @@ void TerminalView::mousePressEvent(QMouseEvent* event)
 
 void TerminalView::mouseMoveEvent(QMouseEvent* event)
 {
+    if (m_canSendInput
+        && !event->modifiers().testFlag(Qt::ShiftModifier)
+        && m_reportedMouseButton != Qt::NoButton
+        && sendMouseEvent(
+            TerminalMouseAction::Motion,
+            mouseButton(m_reportedMouseButton),
+            event->position(),
+            event->modifiers(),
+            event->buttons() != Qt::NoButton)) {
+        event->accept();
+        return;
+    }
     if (m_pressedLink && event->buttons().testFlag(Qt::LeftButton)) {
         event->accept();
         return;
@@ -1393,6 +1511,17 @@ void TerminalView::mouseMoveEvent(QMouseEvent* event)
 
 void TerminalView::mouseReleaseEvent(QMouseEvent* event)
 {
+    if (event->button() == m_reportedMouseButton) {
+        (void)sendMouseEvent(
+            TerminalMouseAction::Release,
+            mouseButton(event->button()),
+            event->position(),
+            event->modifiers(),
+            false);
+        m_reportedMouseButton = Qt::NoButton;
+        event->accept();
+        return;
+    }
     if (event->button() == Qt::LeftButton && m_pressedLink) {
         const auto pressed = std::exchange(m_pressedLink, std::nullopt);
         const auto cell = terminalCellAt(
@@ -1401,7 +1530,7 @@ void TerminalView::mouseReleaseEvent(QMouseEvent* event)
         const auto released = cell ? linkAtCell(*cell, true) : std::nullopt;
         if (released && *released == *pressed
             && !QDesktopServices::openUrl(*released)) {
-            emit terminalError(QStringLiteral("The terminal link could not be opened."));
+            emit operationError(QStringLiteral("The terminal link could not be opened."));
         }
         event->accept();
         return;
@@ -1421,6 +1550,17 @@ void TerminalView::mouseReleaseEvent(QMouseEvent* event)
 
 void TerminalView::hoverMoveEvent(QHoverEvent* event)
 {
+    if (m_canSendInput
+        && sendMouseEvent(
+            TerminalMouseAction::Motion,
+            TerminalMouseButton::None,
+            event->position(),
+            event->modifiers(),
+            false)) {
+        clearHoverLink();
+        event->accept();
+        return;
+    }
     updateHoverLink(event->position());
     event->accept();
 }
@@ -1437,11 +1577,26 @@ void TerminalView::wheelEvent(QWheelEvent* event)
         QQuickItem::wheelEvent(event);
         return;
     }
+    const auto delta = event->pixelDelta().y() != 0
+        ? event->pixelDelta().y()
+        : event->angleDelta().y();
+    if (m_canSendInput && delta != 0
+        && sendMouseEvent(
+            TerminalMouseAction::Press,
+            delta > 0
+                ? TerminalMouseButton::WheelUp
+                : TerminalMouseButton::WheelDown,
+            event->position(),
+            event->modifiers(),
+            false)) {
+        event->accept();
+        return;
+    }
     const auto rows = wheelRows(event);
     if (rows != 0) {
         auto scrolled = m_registry->scrollViewport(surfaceIdentity(), rows);
         if (!scrolled) {
-            emit terminalError(scrolled.error().message);
+            emit operationError(scrolled.error().message);
         }
     }
     if (event->pixelDelta().y() != 0 || event->angleDelta().y() != 0) {
@@ -1449,6 +1604,54 @@ void TerminalView::wheelEvent(QWheelEvent* event)
         return;
     }
     QQuickItem::wheelEvent(event);
+}
+
+bool TerminalView::sendMouseEvent(
+    const TerminalMouseAction action,
+    const TerminalMouseButton button,
+    const QPointF& position,
+    const Qt::KeyboardModifiers keyboardModifiers,
+    const bool anyButtonPressed)
+{
+    if (!m_canSendInput || m_registry == nullptr || m_runtime == nullptr
+        || !m_terminalReady) {
+        return false;
+    }
+    const auto cellSize =
+        TerminalRasterizer::cellSize(m_font, m_lineHeight);
+    if (cellSize.width() <= 0 || cellSize.height() <= 0
+        || width() <= 0 || height() <= 0) {
+        emit operationError(
+            QStringLiteral("Terminal mouse geometry is unavailable."));
+        return true;
+    }
+    auto encoded = m_registry->encodeMouse(
+        surfaceIdentity(),
+        {
+            .action = action,
+            .button = button,
+            .modifiers = modifiers(keyboardModifiers),
+            .x = static_cast<float>(position.x()),
+            .y = static_cast<float>(position.y()),
+            .screenWidth = static_cast<std::uint32_t>(
+                std::ceil(width())),
+            .screenHeight = static_cast<std::uint32_t>(
+                std::ceil(height())),
+            .cellWidth = static_cast<std::uint32_t>(
+                std::ceil(cellSize.width())),
+            .cellHeight = static_cast<std::uint32_t>(
+                std::ceil(cellSize.height())),
+            .anyButtonPressed = anyButtonPressed,
+        });
+    if (!encoded) {
+        emit operationError(encoded.error().message);
+        return true;
+    }
+    if (encoded->isEmpty()) {
+        return false;
+    }
+    (void)enqueueInput(std::move(*encoded));
+    return true;
 }
 
 void TerminalView::itemChange(const ItemChange change, const ItemChangeData& value)
@@ -1573,12 +1776,12 @@ void TerminalView::pasteClipboard()
     if (text.size() > maximumQueuedInputBytes
         || m_queuedInputBytes > maximumQueuedInputBytes - text.size()
         || m_inputQueue.size() >= maximumQueuedInputFrames) {
-        emit terminalError(QStringLiteral("Terminal input queue is full; input was not accepted."));
+        emit operationError(QStringLiteral("Terminal input queue is full; input was not accepted."));
         return;
     }
     auto encoded = m_registry->encodePaste(surfaceIdentity(), std::move(text));
     if (!encoded) {
-        emit terminalError(encoded.error().message);
+        emit operationError(encoded.error().message);
         return;
     }
     (void)enqueueInput(std::move(*encoded));
@@ -1623,7 +1826,7 @@ bool TerminalView::sendKey(QKeyEvent* event, const TerminalKeyAction action)
             .modifiers = modifiers(event->modifiers()),
         });
     if (!encoded) {
-        emit terminalError(encoded.error().message);
+        emit operationError(encoded.error().message);
         return true;
     }
     (void)enqueueInput(std::move(*encoded));
@@ -1639,12 +1842,12 @@ bool TerminalView::enqueueInput(QByteArray bytes)
     if (bytes.size() > maximumQueuedInputBytes
         || m_queuedInputBytes > maximumQueuedInputBytes - bytes.size()
         || m_inputQueue.size() >= maximumQueuedInputFrames) {
-        emit terminalError(QStringLiteral("Terminal input queue is full; input was not accepted."));
+        emit operationError(QStringLiteral("Terminal input queue is full; input was not accepted."));
         return false;
     }
     auto bottom = m_registry->scrollViewportToBottom(surfaceIdentity());
     if (!bottom) {
-        emit terminalError(bottom.error().message);
+        emit operationError(bottom.error().message);
         return false;
     }
     m_queuedInputBytes += bytes.size();
@@ -1697,7 +1900,7 @@ void TerminalView::drainInputQueue()
         m_inputQueue.clear();
         m_queuedInputBytes = 0;
         m_inputBackoffStep = 0;
-        emit terminalError(message);
+        emit operationError(message);
         return;
     }
     if (!m_inputQueue.empty()) {
@@ -1760,7 +1963,7 @@ void TerminalView::dispatchFocus(const FocusOperation operation)
         } else {
             m_focusRetryQueued = false;
             m_focusRetryOperation = FocusOperation::None;
-            emit terminalError(result.error().message);
+            emit operationError(result.error().message);
         }
         return;
     }
@@ -1821,7 +2024,7 @@ void TerminalView::handleFocusOutcome(TerminalFocusOutcome outcome)
     m_pendingFocusRequestId.clear();
     m_focusClaimed = outcome.applied;
     if (!outcome.applied) {
-        emit terminalError(
+        emit operationError(
             outcome.reason.isEmpty()
                 ? QStringLiteral("The runtime rejected terminal focus.")
                 : std::move(outcome.reason));
@@ -1852,7 +2055,7 @@ void TerminalView::handleResizeOutcome(TerminalResizeOutcome outcome)
             m_resizeClaimPending = false;
         }
     } else {
-        emit terminalError(
+        emit operationError(
             outcome.reason.isEmpty()
                 ? QStringLiteral("The runtime rejected terminal resize.")
                 : std::move(outcome.reason));
@@ -1909,7 +2112,7 @@ void TerminalView::dispatchResize()
         static_cast<std::uint64_t>(rows) * cellHeightPixels;
     if (widthProduct > std::numeric_limits<std::uint32_t>::max()
         || heightProduct > std::numeric_limits<std::uint32_t>::max()) {
-        emit terminalError(QStringLiteral("Terminal pixel geometry exceeds the runtime limit."));
+        emit operationError(QStringLiteral("Terminal pixel geometry exceeds the runtime limit."));
         return;
     }
     const auto widthPixels = static_cast<std::uint32_t>(widthProduct);
@@ -1966,7 +2169,7 @@ void TerminalView::dispatchResize()
         if (result.error().ffiResult == KODOSI_FFI_BUSY) {
             scheduleResizeRetry();
         } else {
-            emit terminalError(result.error().message);
+            emit operationError(result.error().message);
         }
     }
 }
@@ -2022,7 +2225,7 @@ std::optional<QUrl> TerminalView::linkAtCell(
         if (reportFailure
             && value.error().code
                 != GhosttyTerminalKernel::Failure::Code::StaleFrame) {
-            emit terminalError(value.error().message);
+            emit operationError(value.error().message);
         }
         return std::nullopt;
     }
@@ -2088,7 +2291,7 @@ void TerminalView::beginSelection(const QPoint& anchor)
         static_cast<std::uint16_t>(anchor.y()));
     m_selecting = selected.has_value();
     if (!selected && !selected.error().isRecoverableHitTestRace()) {
-        emit terminalError(selected.error().message);
+        emit operationError(selected.error().message);
     }
 }
 
@@ -2107,11 +2310,11 @@ void TerminalView::updateSelection(const QPoint& endpoint)
             m_selecting = false;
             if (auto cleared = m_registry->clearSelection(surfaceIdentity());
                 !cleared) {
-                emit terminalError(cleared.error().message);
+                emit operationError(cleared.error().message);
             }
             return;
         }
-        emit terminalError(selected.error().message);
+        emit operationError(selected.error().message);
     }
 }
 
@@ -2122,7 +2325,7 @@ bool TerminalView::copySelection()
     }
     auto text = m_registry->selectedText(surfaceIdentity());
     if (!text) {
-        emit terminalError(text.error().message);
+        emit operationError(text.error().message);
         return true;
     }
     if (text->isEmpty()) {
@@ -2151,7 +2354,7 @@ void TerminalView::configureAttachedKernel()
     if (auto configured =
             m_registry->configure(surfaceIdentity(), kernelSettings());
         !configured) {
-        emit terminalError(configured.error().message);
+        emit operationError(configured.error().message);
     }
 }
 

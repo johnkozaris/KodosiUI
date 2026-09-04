@@ -309,8 +309,6 @@ void ApplicationLifecycleModelTest::
         mainSource.count("kodosi::RuntimeBridge runtime(terminalSessions);"),
         1);
     QCOMPARE(mainSource.count("(void)agentGlobal.refresh();"), 1);
-    QVERIFY(mainSource.contains(
-        "\"--test-startup-failure-once\""));
 }
 
 QTEST_GUILESS_MAIN(ApplicationLifecycleModelTest)

@@ -6,6 +6,7 @@
 #include <QAbstractListModel>
 #include <QByteArray>
 #include <QDateTime>
+#include <QHash>
 #include <QJsonObject>
 #include <QString>
 #include <QVector>
@@ -32,8 +33,10 @@ public:
         RoomNameRole,
         RoomSlugRole,
         DirectionRole,
+        DirectionNameRole,
         CounterpartyHandleRole,
         CounterpartyDisplayNameRole,
+        CounterpartyLabelRole,
         StatusRole,
         CreatedAtRole,
     };
@@ -117,6 +120,8 @@ public:
         MissionIdRole = Qt::UserRole + 1,
         NameRole,
         SlugRole,
+        UnreadCountRole,
+        LatestMessageBodyRole,
     };
     Q_ENUM(Role)
 
@@ -138,6 +143,10 @@ public:
     [[nodiscard]] bool hasAuthoritativeSnapshot() const noexcept;
 
     Q_INVOKABLE [[nodiscard]] bool refresh();
+    Q_INVOKABLE void markMissionRead(const QString& missionId);
+    Q_INVOKABLE void setMissionChatPinned(
+        const QString& missionId,
+        bool pinned);
     Q_INVOKABLE [[nodiscard]] bool containsMission(const QString& missionId) const;
     [[nodiscard]] std::optional<MissionActionContext> actionContext(
         const QString& missionId) const;
@@ -170,12 +179,21 @@ private:
         Failed,
     };
 
+    struct ChatMessageSummary {
+        QString body;
+        qint64 sequence = 0;
+    };
+
     struct Mission {
         QString id;
         QString name;
         QString slug;
         QString ownerUserId;
+        QString latestMessageBody;
         qint64 rosterGeneration;
+        QHash<QString, ChatMessageSummary> messages;
+        qint64 lastReadSequence = 0;
+        int unreadCount = 0;
     };
 
     CommandDispatcher& m_dispatcher;
@@ -183,6 +201,7 @@ private:
     MissionInvitationsModel m_invitations;
     QVector<Mission> m_missions;
     QString m_lastError;
+    QString m_pinnedMissionId;
     bool m_loading = false;
     bool m_authenticated = false;
     bool m_invitationsReady = false;
@@ -200,6 +219,9 @@ private:
     void failRefreshHalf(RefreshHalfState& half, QString error);
     void finishRefreshIfReady();
     void replaceMissions(QVector<Mission> missions);
+    void applyChatSummary(const QJsonObject& object);
+    void applyChatSnapshot(const QJsonObject& object);
+    static void recomputeChatSummary(Mission& mission);
     void setAuthorityState(AuthorityState state, QString error = {});
 
     [[nodiscard]] static std::optional<Mission> decodeMission(

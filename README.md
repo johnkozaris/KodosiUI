@@ -105,8 +105,6 @@ Diagnostics reports logging health, native path, size, retained archive count,
 and the last filesystem error. Logging health is status, not the Open Log
 Folder gate: that action remains available whenever the owned directory exists
 and passes native validation.
-Smoke-test and UI-probe processes set isolated `XDG_CONFIG_HOME` and
-`XDG_STATE_HOME` roots under `build/`; they do not write normal user logs.
 
 `DesktopStateModel` owns Stage membership, selection, focus mode, account-scoped
 remote restoration, and versioned desktop persistence. The pure
@@ -148,7 +146,6 @@ bounded display text, action availability, and opaque presentation IDs only.
 ## Development
 
 ```bash
-just parity
 just configure
 just build
 just test
@@ -171,27 +168,15 @@ just ui-probe pointer --element <handle> --position center
 just ui-probe button --button left --click
 just ui-probe drag --from-x 10 --from-y 20 --to-x 300 --to-y 200
 just ui-probe-input-status
-just ui-probe-smoke
-just ui-probe-deep-link-smoke
 ```
-
-Set `KODOSI_UI_PROBE_SKIP_INTERACTIVE_PORTALS=1` when running the real-app
-probe unattended. The flow still verifies the Browse and Open Folder
-accessibility contracts but does not click Browse or request screenshot
-consent.
-
-The real-app probe also launches an isolated
-`--ui-probe-tiling-synthetic` process to exercise multi-pane selection, focus,
-divider adjustment, accessibility values, and exact PID isolation without
-reading or writing normal user configuration.
 
 `apps` reports each application's exact Unix process ID together with its
 AT-SPI unique bus name, root object path, and opaque application handle.
-Automation should resolve the launched PID together with the expected
-application name or accessible ID once, then pass that application handle to
-every `tree`, `find`, and `wait`; element handles returned by that identity are
-used for `click`, `focus`, and `set-text`. Any ambiguous PID/name association
-is rejected rather than guessed.
+Resolve the launched PID together with the expected application name or
+accessible ID, then pass that application handle to `tree`, `find`, `inspect`,
+and `wait`. Choose elements from the current tree and use their returned
+handles for `click`, `focus`, and `set-text`; do not replay a fixed sequence.
+Any ambiguous PID/name association is rejected rather than guessed.
 
 On X11, `key`, `shortcut`, `pointer`, `button`, and `drag` call the official
 AT-SPI `org.a11y.atspi.DeviceEventController` methods after non-mutating
@@ -239,9 +224,7 @@ limit.
 
 The target is intentionally not installed by the DEB or Arch package.
 Applications under test should be launched with
-`QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`. The packaged X11/Wayland smoke also
-checks the adjacent release-build probe's Wayland adapter selection and portal
-authority reporting without opening an unattended consent request.
+`QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`.
 
 The sibling `../Kodosi`, `../kodosiSwift`, and `../kodosi-ghostty` checkouts
 are required. CI checks out their immutable baseline commits and requires a
@@ -270,8 +253,9 @@ three artifacts are rebuilt. It records the product version; clean, exact
 build-time identities for KodosiQT, `../Kodosi`, and `../kodosi-ghostty`;
 Qt/runtime/Ghostty pins;
 ABI/protocol versions, and each artifact's filename, size, SHA-256, and embedded
-source identities. The Swift parity checkout remains pinned by the parity gate
-but is not package provenance because it is neither compiled nor installed.
+source identities. The Swift reference checkout remains pinned in the desktop
+client manifest but is not package provenance because it is neither compiled
+nor installed.
 The independent verifier rejects path traversal, symlinks, duplicate names,
 unexpected or oversized artifacts, hash changes, pin drift, dirty siblings,
 artifacts from stale sibling commits, a changed `LinuxGhostty.ref`, and

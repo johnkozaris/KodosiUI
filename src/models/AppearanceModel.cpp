@@ -226,14 +226,10 @@ void AppearanceModel::load()
         return;
     }
     if (stored.metaType() != QMetaType::fromType<QByteArray>()) {
-        setError(tr(
-            "Saved appearance settings have an invalid type. Follow System is in use."));
         return;
     }
     const auto decoded = decode(stored.toByteArray());
     if (!decoded) {
-        setError(tr(
-            "Saved appearance settings are malformed. Follow System is in use."));
         return;
     }
     m_preference = *decoded;

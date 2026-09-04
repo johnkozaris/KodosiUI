@@ -10,6 +10,7 @@ struct ProviderConversationResumeTarget {
     QString provider;
     QString nativeConversationId;
     QString workingDirectory;
+    QString title;
     QString accountUserId;
     quint64 accountEpoch = 0;
 };

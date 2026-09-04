@@ -178,8 +178,6 @@ public:
     [[nodiscard]] std::optional<ProviderConversationResumeTarget>
     resolveResumeTarget(const QString& presentationId) const override;
 
-    void installSyntheticFixture();
-
 public slots:
     void ingestAuthEvent(QByteArray json);
     void ingestAgentIntelEvent(QByteArray json);
@@ -278,7 +276,6 @@ private:
     bool m_hasMore = false;
     bool m_capped = false;
     bool m_previewLoading = false;
-    bool m_syntheticFixture = false;
 
     void activateAccount(QString userId, quint64 epoch);
     void applyAgentIntelEvent(const QByteArray& json);

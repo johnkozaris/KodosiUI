@@ -71,10 +71,6 @@
     "versioning": "unversioned-libghostty-tip"
   },
   "packaging": {
-    "ubuntuContainer": {
-      "image": "ubuntu",
-      "digest": "sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517"
-    },
     "archLinuxContainer": {
       "image": "archlinux",
       "digest": "sha256:b860afd5823683f7ea389ba5f00d812f4fe55f6f286dea329d2abeefa535e309"

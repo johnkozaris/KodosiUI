@@ -46,13 +46,34 @@ Rectangle {
             }
         }
 
-        PlainLabel {
+        RowLayout {
             visible: Models.Trust.lastError.length > 0
             Layout.fillWidth: true
-            text: Models.Trust.lastError
-            color: KodosiTheme.danger
-            font.pixelSize: 10
-            wrapMode: Text.Wrap
+
+            PlainLabel {
+                Layout.fillWidth: true
+                text: Models.Trust.lastError
+                color: KodosiTheme.danger
+                font.pixelSize: 10
+                wrapMode: Text.Wrap
+            }
+
+            KButton {
+                objectName: "trust.error.retry"
+                Accessible.id: objectName
+                text: qsTr("Retry")
+                compact: true
+                onClicked: Models.Trust.retry()
+            }
+
+            KButton {
+                objectName: "trust.error.dismiss"
+                Accessible.id: objectName
+                text: qsTr("Dismiss")
+                compact: true
+                variant: "quiet"
+                onClicked: Models.Trust.clearError()
+            }
         }
 
         ListView {

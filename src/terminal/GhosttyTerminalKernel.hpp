@@ -73,6 +73,34 @@ struct TerminalKeyEvent {
     TerminalModifiers modifiers;
 };
 
+enum class TerminalMouseAction {
+    Press,
+    Release,
+    Motion,
+};
+
+enum class TerminalMouseButton {
+    None,
+    Left,
+    Right,
+    Middle,
+    WheelUp,
+    WheelDown,
+};
+
+struct TerminalMouseEvent {
+    TerminalMouseAction action;
+    TerminalMouseButton button;
+    TerminalModifiers modifiers;
+    float x = 0;
+    float y = 0;
+    std::uint32_t screenWidth = 0;
+    std::uint32_t screenHeight = 0;
+    std::uint32_t cellWidth = 0;
+    std::uint32_t cellHeight = 0;
+    bool anyButtonPressed = false;
+};
+
 class GhosttyTerminalKernel final {
 public:
     struct Failure {
@@ -123,6 +151,9 @@ public:
     [[nodiscard]] std::expected<QByteArray, Failure> encodePaste(
         const TerminalSubscription& subscription,
         QByteArray text);
+    [[nodiscard]] std::expected<QByteArray, Failure> encodeMouse(
+        const TerminalSubscription& subscription,
+        TerminalMouseEvent event);
     [[nodiscard]] Result scrollViewport(
         const TerminalSubscription& subscription,
         int rows);

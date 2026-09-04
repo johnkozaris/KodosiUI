@@ -535,6 +535,36 @@ TerminalSessionRegistry::encodePaste(
         std::move(text));
 }
 
+std::expected<QByteArray, GhosttyTerminalKernel::Failure>
+TerminalSessionRegistry::encodeMouse(
+    const TerminalSurfaceIdentity& identity,
+    TerminalMouseEvent event)
+{
+    auto entry = m_impl->exact(identity);
+    if (!entry) {
+        return std::unexpected(GhosttyTerminalKernel::Failure {
+            GhosttyTerminalKernel::Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal mouse input belongs to an unregistered surface."),
+        });
+    }
+    return entry->kernel.encodeMouse(
+        identity.subscription,
+        std::move(event));
+}
+
+std::expected<QByteArray, GhosttyTerminalKernel::Failure>
+TerminalSessionRegistry::encodeMouse(
+    const TerminalSubscription& subscription,
+    TerminalMouseEvent event)
+{
+    return encodeMouse(
+        {
+            .subscription = subscription,
+            .surfaceGeneration = 0,
+        },
+        std::move(event));
+}
+
 GhosttyTerminalKernel::Result TerminalSessionRegistry::scrollViewport(
     const TerminalSurfaceIdentity& identity,
     const int rows)

@@ -62,6 +62,7 @@ class TerminalView : public QQuickItem {
     Q_PROPERTY(bool canSendFocus READ canSendFocus NOTIFY capabilitiesChanged)
     Q_PROPERTY(bool canResize READ canResize NOTIFY capabilitiesChanged)
     Q_PROPERTY(bool readOnly READ readOnly NOTIFY capabilitiesChanged)
+    Q_PROPERTY(bool hasSelection READ hasSelection NOTIFY frameChanged)
     Q_PROPERTY(
         bool focusedSizeAuthority
         READ focusedSizeAuthority
@@ -88,6 +89,7 @@ public:
     [[nodiscard]] bool canSendFocus() const noexcept;
     [[nodiscard]] bool canResize() const noexcept;
     [[nodiscard]] bool readOnly() const noexcept;
+    [[nodiscard]] bool hasSelection() const;
     [[nodiscard]] bool focusedSizeAuthority() const noexcept;
     [[nodiscard]] QString accessibleText() const;
     [[nodiscard]] int accessibleCursorPosition() const;
@@ -118,6 +120,8 @@ public:
         QString expectedRuntimeIncarnationId,
         std::uint64_t surfaceGeneration = 1);
     Q_INVOKABLE void detach();
+    Q_INVOKABLE [[nodiscard]] bool copySelectionToClipboard();
+    Q_INVOKABLE void pasteFromClipboard();
 
 signals:
     void fontFamilyChanged();
@@ -135,6 +139,8 @@ signals:
     void focusedSizeAuthorityChanged();
     void frameChanged();
     void terminalError(QString message);
+    void operationError(QString message);
+    void contextMenuRequested(qreal x, qreal y);
     void connectionCompleted(bool connected, std::int32_t result);
     void terminalNotificationRequested(QString title, QString body);
     void terminalClosed();
@@ -225,6 +231,7 @@ private:
     std::atomic<std::uint64_t> m_attachmentEpoch {0};
     detail::TerminalFrameMailbox m_frameMailbox;
     bool m_selecting = false;
+    Qt::MouseButton m_reportedMouseButton = Qt::NoButton;
     bool m_copyShortcutActive = false;
     std::optional<int> m_pasteShortcutKey;
     std::optional<QUrl> m_pressedLink;
@@ -264,6 +271,12 @@ private:
     void beginSelection(const QPoint& anchor);
     void updateSelection(const QPoint& endpoint);
     [[nodiscard]] bool copySelection();
+    [[nodiscard]] bool sendMouseEvent(
+        TerminalMouseAction action,
+        TerminalMouseButton button,
+        const QPointF& position,
+        Qt::KeyboardModifiers modifiers,
+        bool anyButtonPressed);
     [[nodiscard]] TerminalKernelSettings kernelSettings() const;
     void configureAttachedKernel();
     void updateBlinkTimer();

@@ -27,6 +27,20 @@ QString AuthStateModel::userCode() const { return m_userCode; }
 QUrl AuthStateModel::verificationUrl() const { return m_verificationUrl; }
 QString AuthStateModel::notice() const { return m_notice; }
 QString AuthStateModel::identityHealth() const { return m_identityHealth; }
+bool AuthStateModel::recoveryRequired() const noexcept
+{
+    return m_identityHealth != QStringLiteral("healthy");
+}
+QString AuthStateModel::recoveryMessage() const { return m_recoveryMessage; }
+
+void AuthStateModel::clearRecoveryMessage()
+{
+    if (m_recoveryMessage.isEmpty()) {
+        return;
+    }
+    m_recoveryMessage.clear();
+    emit stateChanged();
+}
 
 void AuthStateModel::ingestAuthEvent(QByteArray json)
 {
@@ -65,7 +79,8 @@ void AuthStateModel::ingestAuthEvent(QByteArray json)
         if (type == QStringLiteral("auth.ready")) {
             clearTransientFlow();
             if (accountChanged) {
-                m_identityHealth.clear();
+                m_identityHealth = QStringLiteral("healthy");
+                m_recoveryMessage.clear();
             }
             m_phase = Phase::Ready;
             m_authenticated = true;
@@ -95,14 +110,22 @@ void AuthStateModel::ingestAuthEvent(QByteArray json)
         m_notice = optionalString(object, QStringLiteral("message"));
     } else if (type == QStringLiteral("auth.identity_health")) {
         const auto state = object.value(QStringLiteral("state"));
-        if (!state.isString()
-            || (state.toString() != QStringLiteral("healthy")
-                && state.toString() != QStringLiteral("recoveryRequired"))) {
-            emit decodeError(QStringLiteral("Identity-health state is unknown."));
+        if (!state.isString() || state.toString().isEmpty()
+            || state.toString().size() > 64) {
+            emit decodeError(QStringLiteral("Identity-health state is invalid."));
             return;
         }
         m_identityHealth = state.toString();
-        m_notice = optionalString(object, QStringLiteral("message"));
+        if (recoveryRequired()) {
+            m_recoveryMessage =
+                optionalString(object, QStringLiteral("message"));
+            if (m_recoveryMessage.isEmpty()) {
+                m_recoveryMessage = QStringLiteral(
+                    "This device's collaboration identity needs recovery.");
+            }
+        } else {
+            m_recoveryMessage.clear();
+        }
     } else if (type == QStringLiteral("auth.error")) {
         m_phase = Phase::Error;
         m_notice = optionalString(object, QStringLiteral("message"));
@@ -133,7 +156,8 @@ void AuthStateModel::clearAccountState()
     clearTransientFlow();
     m_authenticated = false;
     m_userId.clear();
-    m_identityHealth.clear();
+    m_identityHealth = QStringLiteral("healthy");
+    m_recoveryMessage.clear();
 }
 
 } // namespace kodosi

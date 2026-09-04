@@ -9,9 +9,12 @@
 #include <QHash>
 #include <QJsonObject>
 #include <QObject>
+#include <QQueue>
 #include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
+#include <QVariantList>
 #include <QVector>
 
 namespace kodosi {
@@ -65,11 +68,15 @@ class SessionActions final : public QObject {
         QString closeConfirmationSessionId
         READ closeConfirmationSessionId
         NOTIFY stateChanged)
-    Q_PROPERTY(
-        QString deleteConfirmationSessionId
-        READ deleteConfirmationSessionId
-        NOTIFY stateChanged)
     Q_PROPERTY(bool creating READ creating NOTIFY stateChanged)
+    Q_PROPERTY(
+        QVariantList pendingCreations
+        READ pendingCreations
+        NOTIFY stateChanged)
+    Q_PROPERTY(
+        QString lastCreateRequestId
+        READ lastCreateRequestId
+        NOTIFY stateChanged)
     Q_PROPERTY(
         int inactiveCleanupCount
         READ inactiveCleanupCount
@@ -92,6 +99,11 @@ public:
     SessionActions(
         CommandDispatcher& dispatcher,
         SessionCatalogModel& sessions,
+        qint64 closeTimeoutMs,
+        QObject* parent = nullptr);
+    SessionActions(
+        CommandDispatcher& dispatcher,
+        SessionCatalogModel& sessions,
         DesktopSettings& settings,
         QObject* parent = nullptr);
     SessionActions(
@@ -109,8 +121,9 @@ public:
     [[nodiscard]] QString lastError() const;
     [[nodiscard]] quint64 availabilityRevision() const noexcept;
     [[nodiscard]] QString closeConfirmationSessionId() const;
-    [[nodiscard]] QString deleteConfirmationSessionId() const;
     [[nodiscard]] bool creating() const noexcept;
+    [[nodiscard]] QVariantList pendingCreations() const;
+    [[nodiscard]] QString lastCreateRequestId() const;
     [[nodiscard]] int inactiveCleanupCount() const noexcept;
     [[nodiscard]] QString defaultWorkingDirectory() const;
     [[nodiscard]] HiddenSessionsModel* hiddenSessions() noexcept;
@@ -119,16 +132,17 @@ public:
     Q_INVOKABLE [[nodiscard]] bool create(
         const QString& name,
         const QString& workingDirectory);
+    Q_INVOKABLE [[nodiscard]] bool createInDirectory(
+        const QString& workingDirectory);
     Q_INVOKABLE [[nodiscard]] bool createResumed(
-        const QString& name,
         const QString& conversationPresentationId);
     Q_INVOKABLE [[nodiscard]] bool createDefault();
+    Q_INVOKABLE [[nodiscard]] bool isCreatePending(
+        const QString& requestId) const;
     Q_INVOKABLE [[nodiscard]] bool canInterrupt(const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool canClose(const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool canSetMode(const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool canRename(const QString& sessionId) const;
-    Q_INVOKABLE [[nodiscard]] bool canReopen(const QString& sessionId) const;
-    Q_INVOKABLE [[nodiscard]] bool canDelete(const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool canOpenRemote(const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool canHide(const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool interrupt(const QString& sessionId);
@@ -139,11 +153,6 @@ public:
     Q_INVOKABLE [[nodiscard]] bool rename(
         const QString& sessionId,
         const QString& name);
-    Q_INVOKABLE [[nodiscard]] bool reopen(const QString& sessionId);
-    Q_INVOKABLE [[nodiscard]] bool requestDeleteConfirmation(
-        const QString& sessionId);
-    Q_INVOKABLE [[nodiscard]] bool confirmDelete(const QString& sessionId);
-    Q_INVOKABLE void cancelDeleteConfirmation();
     Q_INVOKABLE [[nodiscard]] bool openRemote(const QString& sessionId);
     Q_INVOKABLE [[nodiscard]] bool restoreRemote(const QString& sessionId);
     Q_INVOKABLE [[nodiscard]] bool hide(const QString& sessionId);
@@ -165,7 +174,7 @@ signals:
     void stateChanged();
     void availabilityChanged();
     void sessionCreated(QString sessionId);
-    void sessionReopened(QString sessionId);
+    void sessionCreationResolved(QString requestId, QString sessionId);
     void remoteOpenSucceeded(
         QString sessionId,
         QString incarnationId);
@@ -200,9 +209,23 @@ private:
     QTimer m_hiddenRetryTimer;
     QString m_closeConfirmationSessionId;
     QString m_closeConfirmationIncarnationId;
-    QString m_deleteConfirmationSessionId;
-    QString m_deleteConfirmationIncarnationId;
-    QString m_createRequestId;
+    struct PendingCreate {
+        QString name;
+        QString sessionId;
+        QString incarnationId;
+    };
+    QHash<QString, PendingCreate> m_pendingCreates;
+    QStringList m_pendingCreateOrder;
+    QString m_lastCreateRequestId;
+    QHash<QString, QTimer*> m_closeTimers;
+    struct PendingInactiveCleanup {
+        QString sessionId;
+        QString incarnationId;
+    };
+    QQueue<PendingInactiveCleanup> m_inactiveCleanupQueue;
+    QSet<QString> m_inactiveCleanupIds;
+    QHash<QString, QTimer*> m_inactiveCleanupTimers;
+    qint64 m_closeTimeoutMs = 30'000;
     QString m_hiddenRequestId;
     QString m_accountUserId;
     quint64 m_accountEpoch = 0;
@@ -225,6 +248,14 @@ private:
         const QString& sessionId,
         const QString& incarnationId);
     [[nodiscard]] bool hasPendingLifecycle(const QString& sessionId) const;
+    void clearCloseTimeout(const QString& requestId);
+    void enqueueInactiveCleanup(
+        const QString& sessionId,
+        const QString& incarnationId);
+    void pumpInactiveCleanup();
+    void clearInactiveCleanupTracking(
+        const QString& requestId,
+        const QString& sessionId);
     void activateAccount(QString userId, quint64 epoch);
     void applySessionEvent(const QJsonObject& object);
     void reconcilePendingFromCatalog();

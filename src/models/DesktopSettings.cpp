@@ -82,6 +82,40 @@ bool validValues(const DesktopSettings::Values& values)
         && validDirectoryValue(values.lastWorkingDirectory);
 }
 
+DesktopSettings::Values normalized(DesktopSettings::Values values)
+{
+    const auto defaults = DesktopSettings::defaultValues();
+    values.fontFamily = values.fontFamily.trimmed();
+    if (!validFamily(values.fontFamily)) {
+        values.fontFamily = defaults.fontFamily;
+    }
+    values.fontSize = std::clamp(
+        values.fontSize,
+        DesktopSettings::minimumFontSize(),
+        DesktopSettings::maximumFontSize());
+    if (!std::isfinite(values.lineHeight)) {
+        values.lineHeight = defaults.lineHeight;
+    } else {
+        values.lineHeight = std::clamp(
+            values.lineHeight,
+            DesktopSettings::minimumLineHeight(),
+            DesktopSettings::maximumLineHeight());
+    }
+    values.scrollbackLines = std::clamp(
+        values.scrollbackLines,
+        DesktopSettings::minimumScrollbackLines(),
+        DesktopSettings::maximumScrollbackLines());
+    if (values.lastWorkingDirectory) {
+        *values.lastWorkingDirectory =
+            values.lastWorkingDirectory->trimmed();
+        if (values.lastWorkingDirectory->isEmpty()
+            || !validDirectoryValue(values.lastWorkingDirectory)) {
+            values.lastWorkingDirectory.reset();
+        }
+    }
+    return values;
+}
+
 QByteArray encode(const DesktopSettings::Values& values)
 {
     QJsonObject terminal {
@@ -169,17 +203,7 @@ std::optional<DesktopSettings::Values> decode(const QByteArray& json)
             ? std::optional<QString> {directoryValue.toString()}
             : std::nullopt,
     };
-    if (!validValues(values)) {
-        return std::nullopt;
-    }
-    values.fontFamily = values.fontFamily.trimmed();
-    if (values.lastWorkingDirectory) {
-        *values.lastWorkingDirectory = values.lastWorkingDirectory->trimmed();
-        if (values.lastWorkingDirectory->isEmpty()) {
-            values.lastWorkingDirectory.reset();
-        }
-    }
-    return values;
+    return normalized(std::move(values));
 }
 
 bool exactVariantType(const QVariant& value, const QMetaType type)
@@ -289,10 +313,13 @@ bool DesktopSettings::apply(
     const QString& lastWorkingDirectory)
 {
     const auto directory = lastWorkingDirectory.trimmed();
-    const Values candidate {
+    Values candidate {
         .fontFamily = fontFamily.trimmed(),
         .fontSize = fontSize,
-        .cursorStyle = static_cast<CursorStyle>(cursorStyle),
+        .cursorStyle = cursorStyle >= static_cast<int>(CursorStyle::Block)
+                && cursorStyle <= static_cast<int>(CursorStyle::Underline)
+            ? static_cast<CursorStyle>(cursorStyle)
+            : CursorStyle::Block,
         .lineHeight = lineHeight,
         .scrollbackLines = scrollbackLines,
         .cursorBlink = cursorBlink,
@@ -301,14 +328,7 @@ bool DesktopSettings::apply(
             ? std::nullopt
             : std::optional<QString> {directory},
     };
-    if (cursorStyle < static_cast<int>(CursorStyle::Block)
-        || cursorStyle > static_cast<int>(CursorStyle::Underline)
-        || !validValues(candidate)) {
-        setError(QStringLiteral(
-            "Settings were not saved because one or more values are invalid."));
-        return false;
-    }
-    return commit(candidate);
+    return commit(normalized(std::move(candidate)));
 }
 
 bool DesktopSettings::reset()
@@ -339,97 +359,86 @@ void DesktopSettings::load()
     m_values = defaultValues();
     const auto structured = m_settings->value(QString::fromLatin1(settingsKey));
     if (structured.isValid()) {
-        if (!exactVariantType(structured, QMetaType::fromType<QByteArray>())) {
-            setError(QStringLiteral(
-                "Saved desktop settings have an invalid type. Defaults are in use."));
-            return;
+        if (exactVariantType(
+                structured,
+                QMetaType::fromType<QByteArray>())) {
+            const auto decoded = decode(structured.toByteArray());
+            if (decoded) {
+                m_values = *decoded;
+                if (encode(m_values) != structured.toByteArray()) {
+                    (void)persist(m_values);
+                }
+                return;
+            }
         }
-        const auto decoded = decode(structured.toByteArray());
-        if (!decoded) {
-            setError(QStringLiteral(
-                "Saved desktop settings are malformed. Defaults are in use."));
-            return;
-        }
-        m_values = *decoded;
-        return;
     }
 
     const auto hasLegacy = std::ranges::any_of(
         legacyKeys,
         [this](const QString& key) { return m_settings->contains(key); });
     if (!hasLegacy) {
+        if (structured.isValid()) {
+            (void)persist(m_values);
+        }
         return;
     }
 
     auto migrated = defaultValues();
     const auto readString = [this](const QString& key, QString& destination) {
         if (!m_settings->contains(key)) {
-            return true;
+            return;
         }
         const auto value = m_settings->value(key);
-        if (!exactVariantType(value, QMetaType::fromType<QString>())) {
-            return false;
+        if (exactVariantType(value, QMetaType::fromType<QString>())) {
+            destination = value.toString();
         }
-        destination = value.toString();
-        return true;
     };
     const auto readInt = [this](const QString& key, int& destination) {
         if (!m_settings->contains(key)) {
-            return true;
+            return;
         }
         const auto value = m_settings->value(key);
-        if (!exactVariantType(value, QMetaType::fromType<int>())) {
-            return false;
+        if (exactVariantType(value, QMetaType::fromType<int>())) {
+            destination = value.toInt();
         }
-        destination = value.toInt();
-        return true;
     };
     const auto readDouble = [this](const QString& key, double& destination) {
         if (!m_settings->contains(key)) {
-            return true;
+            return;
         }
         const auto value = m_settings->value(key);
-        if (!exactVariantType(value, QMetaType::fromType<double>())) {
-            return false;
+        if (exactVariantType(value, QMetaType::fromType<double>())) {
+            destination = value.toDouble();
         }
-        destination = value.toDouble();
-        return true;
     };
     const auto readBool = [this](const QString& key, bool& destination) {
         if (!m_settings->contains(key)) {
-            return true;
+            return;
         }
         const auto value = m_settings->value(key);
-        if (!exactVariantType(value, QMetaType::fromType<bool>())) {
-            return false;
+        if (exactVariantType(value, QMetaType::fromType<bool>())) {
+            destination = value.toBool();
         }
-        destination = value.toBool();
-        return true;
     };
 
     QString cursor = cursorName(migrated.cursorStyle);
     QString directory;
     bool cursorBlinkDefaultApplied = false;
-    const auto valid = readString(QStringLiteral("term.fontFamily"), migrated.fontFamily)
-        && readString(QStringLiteral("term.cursorStyle"), cursor)
-        && readInt(QStringLiteral("term.fontSize"), migrated.fontSize)
-        && readDouble(QStringLiteral("term.lineHeight"), migrated.lineHeight)
-        && readInt(QStringLiteral("term.scrollbackLines"), migrated.scrollbackLines)
-        && readBool(QStringLiteral("term.cursorBlink"), migrated.cursorBlink)
-        && readBool(
-            QStringLiteral("term.cursorBlinkEfficientDefaultApplied"),
-            cursorBlinkDefaultApplied)
-        && readBool(
-            QStringLiteral("claude.toolApprovalAlerts"),
-            migrated.toolApprovalAlerts)
-        && readString(QStringLiteral("session.lastWorkingDir"), directory);
+    readString(QStringLiteral("term.fontFamily"), migrated.fontFamily);
+    readString(QStringLiteral("term.cursorStyle"), cursor);
+    readInt(QStringLiteral("term.fontSize"), migrated.fontSize);
+    readDouble(QStringLiteral("term.lineHeight"), migrated.lineHeight);
+    readInt(QStringLiteral("term.scrollbackLines"), migrated.scrollbackLines);
+    readBool(QStringLiteral("term.cursorBlink"), migrated.cursorBlink);
+    readBool(
+        QStringLiteral("term.cursorBlinkEfficientDefaultApplied"),
+        cursorBlinkDefaultApplied);
+    readBool(
+        QStringLiteral("claude.toolApprovalAlerts"),
+        migrated.toolApprovalAlerts);
+    readString(QStringLiteral("session.lastWorkingDir"), directory);
     const auto parsedCursor = cursorFromName(cursor);
-    if (!valid || !parsedCursor) {
-        setError(QStringLiteral(
-            "Legacy desktop settings are malformed. Defaults are in use."));
-        return;
-    }
-    migrated.cursorStyle = *parsedCursor;
+    migrated.cursorStyle = parsedCursor.value_or(CursorStyle::Block);
     if (!cursorBlinkDefaultApplied) {
         migrated.cursorBlink = false;
     }
@@ -437,12 +446,7 @@ void DesktopSettings::load()
     if (!directory.isEmpty()) {
         migrated.lastWorkingDirectory = directory;
     }
-    migrated.fontFamily = migrated.fontFamily.trimmed();
-    if (!validValues(migrated)) {
-        setError(QStringLiteral(
-            "Legacy desktop settings are outside supported ranges. Defaults are in use."));
-        return;
-    }
+    migrated = normalized(std::move(migrated));
     if (!persist(migrated)) {
         return;
     }

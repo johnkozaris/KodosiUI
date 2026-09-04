@@ -9,11 +9,21 @@ KButton {
 
     text: ""
     iconName: glyph
-    iconColor: enabled ? glyphColor : KodosiTheme.disabled
+    iconColor: !enabled
+        ? KodosiTheme.disabled
+        : checked
+          ? KodosiTheme.accent
+          : hovered
+            ? KodosiTheme.textPrimary
+            : glyphColor
     variant: "quiet"
     compact: true
     implicitWidth: size
     implicitHeight: size
-    leftPadding: 7
-    rightPadding: 7
+    leftPadding: Math.max(0, (size - 15) / 2)
+    rightPadding: leftPadding
+    topPadding: Math.max(0, (size - 15) / 2)
+    bottomPadding: topPadding
+
+    background: Item {}
 }

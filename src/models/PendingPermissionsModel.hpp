@@ -107,6 +107,7 @@ public:
         const QString& identityToken) const;
     Q_INVOKABLE [[nodiscard]] QVariantMap presentationForSession(
         const QString& sessionId) const;
+    Q_INVOKABLE [[nodiscard]] QVariantMap topPresentation() const;
     Q_INVOKABLE [[nodiscard]] bool approve(const QString& identityToken);
     Q_INVOKABLE [[nodiscard]] bool deny(
         const QString& identityToken,

@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QJsonObject>
 #include <QString>
+#include <QSet>
 
 namespace kodosi {
 
@@ -24,6 +25,8 @@ public:
     [[nodiscard]] QString lastError() const;
     [[nodiscard]] QString lastOperation() const;
     [[nodiscard]] QString lastUserCode() const;
+    Q_INVOKABLE [[nodiscard]] bool approvalPending(
+        const QString& userCode) const;
 
     Q_INVOKABLE [[nodiscard]] bool refresh();
     Q_INVOKABLE [[nodiscard]] bool revoke(const QString& deviceId);
@@ -41,6 +44,7 @@ private:
     QString m_lastError;
     QString m_lastOperation;
     QString m_lastUserCode;
+    QSet<QString> m_pendingApprovals;
 
     [[nodiscard]] bool send(QJsonObject command);
 };

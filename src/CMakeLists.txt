@@ -313,7 +313,6 @@ qt_add_qml_module(kodosi-qt
         qml/Theme/KodosiTheme.qml
         qml/Workbench/SessionSidebar.qml
         qml/Workbench/ResumeAgentWorkModal.qml
-        qml/Workbench/DesktopFileErrorBanner.qml
         qml/Workbench/TerminalDivider.qml
         qml/Workbench/TerminalStage.qml
         qml/Workbench/TerminalTile.qml

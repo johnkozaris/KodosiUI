@@ -5,7 +5,6 @@
 #include <QByteArray>
 #include <QObject>
 #include <QString>
-#include <QTimer>
 #include <QUrl>
 
 namespace kodosi {
@@ -19,7 +18,6 @@ class AuthActions final : public QObject {
 public:
     explicit AuthActions(
         CommandDispatcher& dispatcher,
-        qint64 operationTimeoutMs = 30'000,
         QObject* parent = nullptr);
 
     [[nodiscard]] bool busy() const noexcept;
@@ -27,6 +25,7 @@ public:
     [[nodiscard]] QString failedOperation() const;
 
     Q_INVOKABLE [[nodiscard]] bool beginSignIn();
+    Q_INVOKABLE [[nodiscard]] bool useAnotherAccount();
     Q_INVOKABLE [[nodiscard]] bool signOut();
     Q_INVOKABLE [[nodiscard]] bool refresh();
     Q_INVOKABLE [[nodiscard]] bool resetIdentity();
@@ -44,11 +43,10 @@ signals:
 
 private:
     CommandDispatcher& m_dispatcher;
-    QTimer m_operationTimer;
     QString m_lastError;
     QString m_failedOperation;
-    qint64 m_operationTimeoutMs;
     bool m_busy = false;
+    bool m_switchAccountPending = false;
 
     [[nodiscard]] bool send(const char* type);
     [[nodiscard]] bool begin(const char* type);

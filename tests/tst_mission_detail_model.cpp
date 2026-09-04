@@ -236,6 +236,11 @@ void MissionDetailModelTest::hydratesSelectedMissionWithExactTokens()
     QVERIFY(!membersCommand.isEmpty());
     QVERIFY(!chatCommand.isEmpty());
     QVERIFY(!taskCommand.isEmpty());
+    QVERIFY(detail.membersLoading());
+    QVERIFY(detail.chatLoading());
+    QVERIFY(detail.tasksLoading());
+    QVERIFY(!detail.chatReady());
+    QVERIFY(!detail.tasksReady());
 
     detail.ingestRoomEvent(envelope({
         {QStringLiteral("type"), QStringLiteral("room.members")},
@@ -284,6 +289,10 @@ void MissionDetailModelTest::hydratesSelectedMissionWithExactTokens()
     QCOMPARE(detail.messages()->rowCount(), 1);
     QCOMPARE(detail.tasks()->rowCount(), 1);
     QVERIFY(!detail.loading());
+    QVERIFY(detail.chatReady());
+    QVERIFY(detail.tasksReady());
+    QVERIFY(!detail.chatStaleDataVisible());
+    QVERIFY(!detail.tasksStaleDataVisible());
 }
 
 void MissionDetailModelTest::rejectsLateMissionAndHydrationResponses()
@@ -1125,6 +1134,12 @@ void MissionDetailModelTest::pagesMissionAttentionBeyondBoundedWindow()
             kodosi::MissionScopedAttentionModel::TitleRole)
             .toString(),
         QStringLiteral("Tool 65 approval"));
+    QCOMPARE(
+        scoped->data(
+            scoped->index(0),
+            kodosi::MissionScopedAttentionModel::ActionNameRole)
+            .toString(),
+        QStringLiteral("review"));
     QVERIFY(!scoped->canLoadMore());
     QVERIFY(scoped->canLoadPrevious());
     QVERIFY(scoped->loadPrevious());

@@ -10,31 +10,15 @@ Item {
     objectName: "sidebar.sessions"
     readonly property bool modalOpen:
         shareDialog.opened
-        || deleteConfirmation.visible
         || leaveConfirmation.visible
-        || revokeConfirmation.visible
     Accessible.id: objectName
     Accessible.role: Accessible.Pane
     Accessible.name: qsTr("Sessions")
 
     property string selectedSessionId
-    property bool createOpen: false
     property bool hiddenOpen: false
     property int desktopRequestSerial: 0
     property string directoryPickerRequestId
-    property string desktopFileRequestId
-    property string desktopFileError
-    onCreateOpenChanged: {
-        if (createOpen) {
-            desktopFileError = ""
-            createDirectory.text =
-                Models.SessionActions.defaultWorkingDirectory
-        } else if (directoryPickerRequestId.length > 0) {
-            Models.DesktopFiles.cancelDirectory(
-                directoryPickerRequestId,
-                Models.DesktopFiles.NewSessionWorkingDirectory)
-        }
-    }
     property string shareSessionId
     property string shareSessionName
     signal sessionSelectionRequested(string sessionId, bool openRemote)
@@ -64,42 +48,23 @@ Item {
             return
         shareSessionId = sessionId
         shareSessionName = sessionName
-        accessHandle.clear()
-        Models.SessionAccess.inspect(sessionId)
         shareDialog.open()
     }
 
     function closeConflictingOverlays() {
-        createOpen = false
         hiddenOpen = false
         shareDialog.close()
-        Models.SessionActions.cancelDeleteConfirmation()
         Models.SessionAccess.cancelLeaveConfirmation()
-        Models.SessionAccess.cancelRevokeConfirmation()
     }
 
-    function nextDesktopRequestId(suffix) {
+    function chooseSessionFolder() {
         desktopRequestSerial += 1
-        return "sidebar." + suffix + "." + desktopRequestSerial
-    }
-
-    function browseCreateDirectory() {
-        const requestId = nextDesktopRequestId("create.directory")
-        directoryPickerRequestId = requestId
-        desktopFileError = ""
+        directoryPickerRequestId =
+            "sidebar.create.directory." + desktopRequestSerial
         Models.DesktopFiles.requestDirectory(
-            requestId,
+            directoryPickerRequestId,
             Models.DesktopFiles.NewSessionWorkingDirectory,
-            createDirectory.text)
-    }
-
-    function openSessionProject(sessionId) {
-        const requestId = nextDesktopRequestId("session.project")
-        desktopFileRequestId = requestId
-        Models.DesktopFiles.openSessionProject(
-            sessionId,
-            requestId,
-            Models.DesktopFiles.SessionProject)
+            Models.SessionActions.defaultWorkingDirectory)
     }
 
     Component.onDestruction: {
@@ -107,17 +72,6 @@ Item {
             Models.DesktopFiles.cancelDirectory(
                 directoryPickerRequestId,
                 Models.DesktopFiles.NewSessionWorkingDirectory)
-        }
-    }
-
-    Connections {
-        target: Models.SessionActions
-
-        function onSessionCreated() {
-            root.createOpen = false
-            createName.clear()
-            createDirectory.text =
-                Models.SessionActions.defaultWorkingDirectory
         }
     }
 
@@ -131,14 +85,6 @@ Item {
     }
 
     Connections {
-        target: Models.SessionAccess
-
-        function onPresentationContextChanged() {
-            accessHandle.clear()
-        }
-    }
-
-    Connections {
         target: Models.DesktopFiles
 
         function onDirectoryPicked(requestId, purpose, canonicalDirectory) {
@@ -148,8 +94,7 @@ Item {
                             .NewSessionWorkingDirectory)
                 return
             root.directoryPickerRequestId = ""
-            createDirectory.text = canonicalDirectory
-            root.desktopFileError = ""
+            Models.SessionActions.createInDirectory(canonicalDirectory)
         }
 
         function onDirectoryPickCancelled(requestId, purpose) {
@@ -161,25 +106,12 @@ Item {
             root.directoryPickerRequestId = ""
         }
 
-        function onPathOpened(requestId, purpose) {
-            if (requestId === root.desktopFileRequestId
-                    && purpose === Models.DesktopFiles.SessionProject) {
-                root.desktopFileRequestId = ""
-                root.desktopFileError = ""
-            }
-        }
-
-        function onOperationFailed(requestId, purpose, errorCode, message) {
+        function onOperationFailed(requestId, purpose) {
             if (requestId === root.directoryPickerRequestId
                     && purpose
                         === Models.DesktopFiles
-                            .NewSessionWorkingDirectory) {
+                            .NewSessionWorkingDirectory)
                 root.directoryPickerRequestId = ""
-                root.desktopFileError = message
-            } else if (requestId === root.desktopFileRequestId
-                    && purpose === Models.DesktopFiles.SessionProject) {
-                root.desktopFileRequestId = ""
-            }
         }
     }
 
@@ -194,51 +126,63 @@ Item {
 
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: 52
+            Layout.preferredHeight: 94
 
-            RowLayout {
+            ColumnLayout {
                 anchors.fill: parent
                 anchors.leftMargin: KodosiTheme.spacing5
-                anchors.rightMargin: KodosiTheme.spacing3
+                anchors.rightMargin: KodosiTheme.spacing5
+                anchors.topMargin: KodosiTheme.spacing5
+                anchors.bottomMargin: KodosiTheme.spacing3
                 spacing: KodosiTheme.spacing2
 
-                PlainLabel {
+                Rectangle {
                     Layout.fillWidth: true
-                    text: qsTr("Sessions")
-                    color: KodosiTheme.textPrimary
-                    font.pixelSize: 13
-                    font.weight: Font.DemiBold
-                }
+                    Layout.preferredHeight: 34
+                    radius: KodosiTheme.radiusSmall
+                    color: KodosiTheme.accent
 
-                KIconButton {
-                    objectName: "sidebar.session.hidden"
-                    Accessible.id: objectName
-                    visible: Models.SessionActions.hiddenSessions.count > 0
-                    glyph: "eye"
-                    Accessible.name: qsTr("Hidden sessions")
-                    onClicked: {
-                        root.hiddenOpen = !root.hiddenOpen
-                        if (root.hiddenOpen)
-                            Models.SessionActions.refreshHidden()
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 0
+
+                        KButton {
+                            id: newSessionButton
+                            objectName: "sidebar.session.new"
+                            Accessible.id: objectName
+                            Layout.fillWidth: true
+                            implicitHeight: 34
+                            text: qsTr("New Session")
+                            iconName: "plus"
+                            variant: "primary"
+                            background: Item {}
+                            Accessible.name: qsTr("New Session")
+                            onClicked: Models.SessionActions.createDefault()
+                        }
+
+                        KIconButton {
+                            objectName: "sidebar.session.chooseFolder"
+                            Accessible.id: objectName
+                            glyph: "folder-plus"
+                            glyphColor: KodosiTheme.accentForeground
+                            size: 34
+                            Accessible.name: qsTr("New Session in Folder")
+                            enabled: root.directoryPickerRequestId.length === 0
+                                && !Models.DesktopFiles.busy
+                            onClicked: root.chooseSessionFolder()
+                        }
                     }
                 }
 
-                KIconButton {
+                KButton {
                     objectName: "sidebar.session.resumeAgentWork"
                     Accessible.id: objectName
-                    glyph: "history"
-                    Accessible.name: qsTr("Resume Agent Work")
+                    Layout.fillWidth: true
+                    implicitHeight: 34
+                    text: qsTr("Resume Agent Work")
+                    iconName: "history"
+                    Accessible.name: text
                     onClicked: root.resumeAgentWorkRequested()
-                }
-
-                KIconButton {
-                    id: newSessionButton
-                    objectName: "sidebar.session.new"
-                    Accessible.id: objectName
-                    glyph: "plus"
-                    Accessible.name: qsTr("Create session")
-                    enabled: !Models.SessionActions.creating
-                    onClicked: root.createOpen = !root.createOpen
                 }
             }
 
@@ -251,142 +195,28 @@ Item {
             }
         }
 
-        Rectangle {
-            visible: root.createOpen || Models.SessionActions.creating
+        KButton {
+            objectName: "sidebar.session.hidden"
+            Accessible.id: objectName
+            visible: Models.SessionActions.hiddenSessions.count > 0
             Layout.fillWidth: true
-            implicitHeight: visible ? createForm.implicitHeight + 20 : 0
-            color: KodosiTheme.surfaceElevated
-
-            ColumnLayout {
-                id: createForm
-                anchors.fill: parent
-                anchors.margins: 10
-                spacing: 6
-
-                KTextField {
-                    id: createName
-                    objectName: "session.create.name"
-                    Accessible.id: objectName
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("Session name")
-                    Accessible.name: placeholderText
-                    enabled: !Models.SessionActions.creating
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: KodosiTheme.spacing2
-
-                    KTextField {
-                        id: createDirectory
-                        objectName: "session.create.directory"
-                        Accessible.id: objectName
-                        Layout.fillWidth: true
-                        text: Models.SessionActions.defaultWorkingDirectory
-                        placeholderText: qsTr("Working directory")
-                        Accessible.name: placeholderText
-                        maximumLength: 4096
-                        enabled: !Models.SessionActions.creating
-                    }
-
-                    KButton {
-                        objectName: "session.create.directory.browse"
-                        Accessible.id: objectName
-                        text: qsTr("Browse")
-                        compact: true
-                        Accessible.name:
-                            qsTr("Browse for session working directory")
-                        enabled: !Models.SessionActions.creating
-                            && !Models.DesktopFiles.busy
-                        onClicked: root.browseCreateDirectory()
-                    }
-                }
-
-                RowLayout {
-                    KButton {
-                        objectName: "session.create.submit"
-                        Accessible.id: objectName
-                        text: Models.SessionActions.creating
-                            ? qsTr("Starting")
-                            : qsTr("Start")
-                        variant: "directional"
-                        iconName: "chevron-right"
-                        enabled: !Models.SessionActions.creating
-                            && createName.text.trim().length > 0
-                            && createDirectory.text.trim().length > 0
-                        Accessible.name: text
-                        onClicked: Models.SessionActions.create(
-                            createName.text,
-                            createDirectory.text)
-                    }
-
-                    KButton {
-                        objectName: "session.create.cancel"
-                        Accessible.id: objectName
-                        text: qsTr("Cancel")
-                        variant: "quiet"
-                        enabled: !Models.SessionActions.creating
-                        Accessible.name: text
-                        onClicked: root.createOpen = false
-                    }
-                }
-
-                PlainLabel {
-                    visible: Models.SessionActions.lastError.length > 0
-                    Layout.fillWidth: true
-                    text: Models.SessionActions.lastError
-                    color: KodosiTheme.danger
-                    font.pixelSize: 9
-                    wrapMode: Text.Wrap
-                }
-
-                Rectangle {
-                    visible: root.desktopFileError.length > 0
-                    Layout.fillWidth: true
-                    implicitHeight: desktopFileErrorRow.implicitHeight + 12
-                    color: KodosiTheme.surfaceRaised
-                    radius: KodosiTheme.radiusSmall
-
-                    RowLayout {
-                        id: desktopFileErrorRow
-                        anchors.fill: parent
-                        anchors.margins: 6
-                        spacing: KodosiTheme.spacing2
-
-                        PlainLabel {
-                            Layout.fillWidth: true
-                            text: root.desktopFileError
-                            color: KodosiTheme.danger
-                            font.pixelSize: 9
-                            wrapMode: Text.Wrap
-                            Accessible.name: text
-                        }
-
-                        KIconButton {
-                            objectName: "sidebar.desktopFile.error.dismiss"
-                            Accessible.id: objectName
-                            glyph: "close"
-                            size: 24
-                            Accessible.name:
-                                qsTr("Dismiss filesystem action error")
-                            onClicked: root.desktopFileError = ""
-                        }
-                    }
-                }
-            }
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: 1
-                color: KodosiTheme.seam
+            Layout.leftMargin: KodosiTheme.spacing5
+            Layout.rightMargin: KodosiTheme.spacing5
+            compact: true
+            variant: "quiet"
+            contentLeftAligned: true
+            iconName: "eye"
+            text: qsTr("Hidden sessions")
+            Accessible.name: text
+            onClicked: {
+                root.hiddenOpen = !root.hiddenOpen
+                if (root.hiddenOpen)
+                    Models.SessionActions.refreshHidden()
             }
         }
 
         PlainLabel {
             visible: Models.SessionActions.lastError.length > 0
-                && !root.createOpen
             Layout.fillWidth: true
             Layout.leftMargin: KodosiTheme.spacing5
             Layout.rightMargin: KodosiTheme.spacing5
@@ -394,6 +224,68 @@ Item {
             color: KodosiTheme.danger
             font.pixelSize: 9
             wrapMode: Text.Wrap
+        }
+
+        Repeater {
+            model: Models.SessionActions.pendingCreations
+
+            delegate: RowLayout {
+                id: pendingCreation
+                required property var modelData
+
+                Layout.fillWidth: true
+                Layout.leftMargin: KodosiTheme.spacing5
+                Layout.rightMargin: KodosiTheme.spacing5
+                spacing: KodosiTheme.spacing2
+
+                KBusyIndicator {
+                    implicitWidth: 16
+                    implicitHeight: 16
+                    running: true
+                }
+
+                PlainLabel {
+                    Layout.fillWidth: true
+                    text: pendingCreation.modelData.name
+                    color: KodosiTheme.textSecondary
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                    Accessible.name:
+                        qsTr("Starting session %1").arg(
+                            pendingCreation.modelData.name)
+                }
+            }
+        }
+
+        RowLayout {
+            visible: Models.Sessions.count > 0
+                && Models.Sessions.authorityState
+                    !== Models.Sessions.Loaded
+            Layout.fillWidth: true
+            Layout.leftMargin: KodosiTheme.spacing5
+            Layout.rightMargin: KodosiTheme.spacing3
+            spacing: KodosiTheme.spacing2
+
+            PlainLabel {
+                Layout.fillWidth: true
+                text: Models.Sessions.authorityState
+                    === Models.Sessions.Loading
+                    ? qsTr("Refreshing sessions...")
+                    : qsTr("Sessions may be out of date.")
+                color: Models.Sessions.authorityState
+                    === Models.Sessions.Failed
+                    ? KodosiTheme.warning
+                    : KodosiTheme.textSecondary
+                font.pixelSize: 9
+            }
+
+            KButton {
+                visible: Models.Sessions.authorityState
+                    === Models.Sessions.Failed
+                text: qsTr("Retry")
+                compact: true
+                onClicked: Models.SessionActions.refresh()
+            }
         }
 
         Rectangle {
@@ -496,12 +388,9 @@ Item {
                 readonly property bool canRename:
                     Models.SessionActions.availabilityRevision >= 0
                     && Models.SessionActions.canRename(sessionId)
-                readonly property bool canReopen:
+                readonly property bool canClose:
                     Models.SessionActions.availabilityRevision >= 0
-                    && Models.SessionActions.canReopen(sessionId)
-                readonly property bool canDelete:
-                    Models.SessionActions.availabilityRevision >= 0
-                    && Models.SessionActions.canDelete(sessionId)
+                    && Models.SessionActions.canClose(sessionId)
                 readonly property bool canOpenRemote:
                     Models.SessionActions.availabilityRevision >= 0
                     && Models.SessionActions.canOpenRemote(sessionId)
@@ -539,12 +428,18 @@ Item {
                 Accessible.selected: selected
                 x: KodosiTheme.spacing3
                 width: ListView.view.width - KodosiTheme.spacing3 * 2
-                height: 46
-                leftPadding: KodosiTheme.spacing5
-                rightPadding: KodosiTheme.spacing4
+                height: 38
+                leftPadding: KodosiTheme.spacing3
+                rightPadding: KodosiTheme.spacing3
+                topPadding: 7
+                bottomPadding: 7
                 onClicked: root.activateDelegate(sessionRow)
 
                 function commitRename() {
+                    if (renameText.trim() === name) {
+                        renameOpen = false
+                        return
+                    }
                     if (Models.SessionActions.rename(
                             sessionId,
                             renameText)) {
@@ -558,6 +453,7 @@ Item {
                     Rectangle {
                         Layout.preferredWidth: 7
                         Layout.preferredHeight: 7
+                        Layout.alignment: Qt.AlignVCenter
                         radius: 4
                         color: sessionRow.needsAttention
                             ? KodosiTheme.warning
@@ -572,6 +468,7 @@ Item {
 
                     Item {
                         Layout.fillWidth: true
+                        Layout.fillHeight: true
 
                         PlainLabel {
                             visible: !sessionRow.renameOpen
@@ -602,42 +499,32 @@ Item {
                         }
                     }
 
-                    KButton {
+                    KIconButton {
+                        id: sessionActionsButton
                         objectName: "sidebar.session.actions."
                             + sessionRow.sessionId
                         Accessible.id: objectName
                         visible: sessionRow.canRename
-                            || sessionRow.canReopen
-                            || sessionRow.canDelete
+                            || sessionRow.canClose
                             || sessionRow.canHide
                             || sessionRow.canLeave
                             || sessionRow.leaveNeedsRetry
                             || sessionRow.canShare
-                            || sessionRow.selected
-                        text: ""
-                        iconName: "more"
-                        variant: "quiet"
+                        glyph: "more"
+                        size: 22
+                        opacity: sessionRow.hovered
+                            || sessionRow.activeFocus
+                            || activeFocus
+                            || sessionActionsMenu.opened
+                            ? 1
+                            : 0
+                        enabled: opacity > 0
+                        Layout.alignment: Qt.AlignVCenter
                         Accessible.name: qsTr("More session actions")
-                        implicitWidth: 30
                         onClicked: sessionActionsMenu.open()
 
                         KMenu {
                             id: sessionActionsMenu
-
-                            KMenuItem {
-                                objectName: "sidebar.session.openProject."
-                                    + sessionRow.sessionId
-                                Accessible.id: objectName
-                                Accessible.ignored: !visible
-                                visible: sessionRow.selected
-                                    && sessionActionsMenu.visible
-                                    && Models.DesktopFiles
-                                        .canOpenSessionProject(
-                                            sessionRow.sessionId)
-                                text: qsTr("Open Project")
-                                onTriggered: root.openSessionProject(
-                                    sessionRow.sessionId)
-                            }
 
                             KMenuItem {
                                 objectName:
@@ -664,16 +551,14 @@ Item {
                             }
 
                             KMenuItem {
-                                objectName: "sidebar.session.reopen."
+                                objectName: "sidebar.session.close."
                                     + sessionRow.sessionId
                                 Accessible.id: objectName
-                                text: qsTr("Reopen")
-                                enabled: sessionRow.canReopen
-                                onTriggered: {
-                                    root.selectDelegate(sessionRow)
-                                    Models.SessionActions.reopen(
+                                text: qsTr("Close Session...")
+                                enabled: sessionRow.canClose
+                                onTriggered: Models.SessionActions
+                                    .requestCloseConfirmation(
                                         sessionRow.sessionId)
-                                }
                             }
 
                             KMenuItem {
@@ -724,16 +609,6 @@ Item {
                                 }
                             }
 
-                            KMenuItem {
-                                objectName: "sidebar.session.delete."
-                                    + sessionRow.sessionId
-                                Accessible.id: objectName
-                                text: qsTr("Delete permanently...")
-                                enabled: sessionRow.canDelete
-                                onTriggered: Models.SessionActions
-                                    .requestDeleteConfirmation(
-                                        sessionRow.sessionId)
-                            }
                         }
                     }
                 }
@@ -751,9 +626,42 @@ Item {
             PlainLabel {
                 anchors.centerIn: parent
                 visible: Models.Sessions.count === 0
+                    && Models.Sessions.authorityState
+                        === Models.Sessions.Loaded
                 text: qsTr("No sessions yet")
                 color: KodosiTheme.textSecondary
                 font.pixelSize: 12
+            }
+
+            KBusyIndicator {
+                anchors.centerIn: parent
+                visible: Models.Sessions.count === 0
+                    && Models.Sessions.authorityState
+                        === Models.Sessions.Loading
+                running: visible
+            }
+
+            ColumnLayout {
+                anchors.centerIn: parent
+                visible: Models.Sessions.count === 0
+                    && Models.Sessions.authorityState
+                        === Models.Sessions.Failed
+                spacing: KodosiTheme.spacing2
+
+                PlainLabel {
+                    Layout.maximumWidth: 210
+                    text: Models.Sessions.authorityError
+                    color: KodosiTheme.danger
+                    wrapMode: Text.Wrap
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                KButton {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: qsTr("Retry")
+                    compact: true
+                    onClicked: Models.SessionActions.refresh()
+                }
             }
         }
 
@@ -786,13 +694,6 @@ Item {
         readonly property bool canChange:
             Models.SessionShareScope.stateRevision >= 0
             && Models.SessionShareScope.canChange(root.shareSessionId)
-        readonly property bool canManageAccess:
-            Models.SessionAccess.stateRevision >= 0
-            && Models.SessionAccess.canManage(root.shareSessionId)
-        readonly property string accessMutationPhase:
-            Models.SessionAccess.stateRevision >= 0
-            ? Models.SessionAccess.mutationPhase(root.shareSessionId)
-            : "idle"
 
         function scopeLabel(scope) {
             if (scope === "justMe")
@@ -806,22 +707,7 @@ Item {
             return qsTr("Unavailable")
         }
 
-        function accessLevelLabel(level) {
-            if (level === "view")
-                return qsTr("View")
-            if (level === "suggest")
-                return qsTr("Suggest")
-            if (level === "inject")
-                return qsTr("Inject")
-            if (level === "approve")
-                return qsTr("Approve")
-            return qsTr("Unknown")
-        }
-
         onClosed: {
-            accessHandle.clear()
-            Models.SessionAccess.cancelRevokeConfirmation()
-            Models.SessionAccess.clearInspection()
             root.shareSessionId = ""
             root.shareSessionName = ""
         }
@@ -963,322 +849,6 @@ Item {
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                visible: shareDialog.canManageAccess
-                    || Models.SessionAccess.loading
-                    || Models.SessionAccess.grants.count > 0
-                implicitHeight: accessLayout.implicitHeight
-                    + KodosiTheme.spacing4 * 2
-                radius: KodosiTheme.radiusSmall
-                color: KodosiTheme.surfaceElevated
-
-                ColumnLayout {
-                    id: accessLayout
-                    anchors.fill: parent
-                    anchors.margins: KodosiTheme.spacing4
-                    spacing: KodosiTheme.spacing3
-
-                    RowLayout {
-                        Layout.fillWidth: true
-
-                        PlainLabel {
-                            Layout.fillWidth: true
-                            text: qsTr("Explicit access")
-                            color: KodosiTheme.textPrimary
-                            font.weight: Font.DemiBold
-                        }
-
-                        KButton {
-                            objectName: "sidebar.share.access.refresh"
-                            Accessible.id: objectName
-                            text: qsTr("Refresh")
-                            Accessible.name: qsTr("Refresh access grants")
-                            enabled: !Models.SessionAccess.loading
-                            onClicked: Models.SessionAccess.refresh(
-                                root.shareSessionId)
-                        }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: KodosiTheme.spacing2
-
-                        KTextField {
-                            id: accessHandle
-                            objectName: "sidebar.share.access.handle"
-                            Accessible.id: objectName
-                            Layout.fillWidth: true
-                            placeholderText: qsTr("Friend handle")
-                            maximumLength: 128
-                            Accessible.name: qsTr("Friend handle")
-                        }
-
-                        KComboBox {
-                            id: accessLevel
-                            objectName: "sidebar.share.access.level"
-                            Accessible.id: objectName
-                            model: ["view", "suggest", "inject", "approve"]
-                            Accessible.name: qsTr("Access level")
-                            displayText: shareDialog.accessLevelLabel(
-                                currentText)
-                            delegate: KItemDelegate {
-                                required property string modelData
-                                objectName:
-                                    "sidebar.share.access.level.option."
-                                    + modelData
-                                Accessible.id: objectName
-                                width: accessLevel.width
-                                text: shareDialog.accessLevelLabel(modelData)
-                            }
-                        }
-
-                        KButton {
-                            objectName: "sidebar.share.access.grant"
-                            Accessible.id: objectName
-                            text: qsTr("Grant")
-                            Accessible.name: qsTr("Grant session access")
-                            enabled: shareDialog.canManageAccess
-                                && accessHandle.text.trim().length > 0
-                                && shareDialog.accessMutationPhase !== "pending"
-                                && shareDialog.accessMutationPhase !== "accepted"
-                                && shareDialog.accessMutationPhase
-                                    !== "acknowledging"
-                            onClicked: Models.SessionAccess.grant(
-                                root.shareSessionId,
-                                accessHandle.text,
-                                accessLevel.currentText)
-                        }
-                    }
-
-                    RowLayout {
-                        visible: Models.SessionAccess.loading
-                            || Models.SessionAccess.stale
-                        spacing: KodosiTheme.spacing2
-
-                        KBusyIndicator {
-                            visible: Models.SessionAccess.loading
-                            running: visible
-                            implicitWidth: 18
-                            implicitHeight: 18
-                        }
-
-                        PlainLabel {
-                            text: Models.SessionAccess.stale
-                                ? qsTr("Refreshing; showing stale grants...")
-                                : qsTr("Loading access grants...")
-                            color: KodosiTheme.textSecondary
-                            font.pixelSize: 10
-                        }
-                    }
-
-                    PlainLabel {
-                        Layout.fillWidth: true
-                        visible: Models.SessionAccess.error.length > 0
-                        text: Models.SessionAccess.error
-                        color: KodosiTheme.danger
-                        wrapMode: Text.Wrap
-                        font.pixelSize: 10
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        visible: shareDialog.accessMutationPhase !== "idle"
-                        spacing: KodosiTheme.spacing2
-
-                        KBusyIndicator {
-                            visible: shareDialog.accessMutationPhase
-                                !== "exhausted"
-                                && shareDialog.accessMutationPhase !== "error"
-                            running: visible
-                            implicitWidth: 18
-                            implicitHeight: 18
-                        }
-
-                        PlainLabel {
-                            Layout.fillWidth: true
-                            text: Models.SessionAccess.mutationMessage(
-                                root.shareSessionId).length > 0
-                                ? Models.SessionAccess.mutationMessage(
-                                    root.shareSessionId)
-                                : shareDialog.accessMutationPhase
-                                    === "reconciling"
-                                  ? qsTr(
-                                      "Access applied; waiting for the grant list...")
-                                  : qsTr("Checking the access change...")
-                            color: shareDialog.accessMutationPhase
-                                === "exhausted"
-                                || shareDialog.accessMutationPhase === "error"
-                                ? KodosiTheme.danger
-                                : KodosiTheme.textSecondary
-                            wrapMode: Text.Wrap
-                            font.pixelSize: 10
-                        }
-
-                        KButton {
-                            objectName: "sidebar.share.access.check"
-                            Accessible.id: objectName
-                            visible: shareDialog.accessMutationPhase
-                                === "exhausted"
-                            text: qsTr("Check")
-                            Accessible.name: qsTr(
-                                "Check latest access change outcome")
-                            onClicked:
-                                Models.SessionAccess.retryCurrentMutation(
-                                    root.shareSessionId)
-                        }
-                    }
-
-                    PlainLabel {
-                        Layout.fillWidth: true
-                        visible: !Models.SessionAccess.loading
-                            && Models.SessionAccess.grants.count === 0
-                            && Models.SessionAccess.error.length === 0
-                        text: qsTr("No one has explicit access.")
-                        color: KodosiTheme.textSecondary
-                        font.pixelSize: 10
-                    }
-
-                    ListView {
-                        id: accessGrantList
-                        objectName: "sidebar.share.access.grants"
-                        Accessible.id: objectName
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: Math.min(
-                            contentHeight,
-                            168)
-                        visible: Models.SessionAccess.grants.count > 0
-                        clip: true
-                        spacing: KodosiTheme.spacing2
-                        model: Models.SessionAccess.grants
-
-                        delegate: Rectangle {
-                            id: grantDelegate
-
-                            required property string handle
-                            required property string displayName
-                            required property string accessLevel
-                            required property string grantedAt
-                            required property string expiresAt
-
-                            readonly property string actorPhase:
-                                Models.SessionAccess.stateRevision >= 0
-                                ? Models.SessionAccess.actorMutationPhase(
-                                    root.shareSessionId,
-                                    handle)
-                                : "idle"
-                            readonly property string actorMessage:
-                                Models.SessionAccess.stateRevision >= 0
-                                ? Models.SessionAccess.actorMutationMessage(
-                                    root.shareSessionId,
-                                    handle)
-                                : ""
-
-                            width: ListView.view.width
-                            height: grantRow.implicitHeight
-                                + KodosiTheme.spacing2 * 2
-                            radius: KodosiTheme.radiusSmall
-                            color: KodosiTheme.surface
-
-                            RowLayout {
-                                id: grantRow
-                                anchors.fill: parent
-                                anchors.margins: KodosiTheme.spacing2
-                                spacing: KodosiTheme.spacing2
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 1
-
-                                    PlainLabel {
-                                        Layout.fillWidth: true
-                                        text: grantDelegate.displayName.length > 0
-                                            ? grantDelegate.displayName
-                                            : "@" + grantDelegate.handle
-                                        color: KodosiTheme.textPrimary
-                                        elide: Text.ElideRight
-                                        font.pixelSize: 11
-                                    }
-
-                                    PlainLabel {
-                                        Layout.fillWidth: true
-                                        text: grantDelegate.displayName.length > 0
-                                            ? "@" + grantDelegate.handle
-                                            : ""
-                                        visible: text.length > 0
-                                        color: KodosiTheme.textSecondary
-                                        font.pixelSize: 9
-                                    }
-
-                                    PlainLabel {
-                                        Layout.fillWidth: true
-                                        text: grantDelegate.actorPhase === "idle"
-                                            ? (grantDelegate.expiresAt.length > 0
-                                                ? qsTr("Expires %1").arg(
-                                                    grantDelegate.expiresAt)
-                                                : qsTr("No expiry"))
-                                            : grantDelegate.actorMessage.length > 0
-                                              ? grantDelegate.actorMessage
-                                              : qsTr("Updating access...")
-                                        color: grantDelegate.actorPhase
-                                            === "exhausted"
-                                            || grantDelegate.actorPhase
-                                                === "error"
-                                            ? KodosiTheme.danger
-                                            : KodosiTheme.textSecondary
-                                        wrapMode: Text.Wrap
-                                        font.pixelSize: 9
-                                    }
-                                }
-
-                                PlainLabel {
-                                    text: shareDialog.accessLevelLabel(
-                                        grantDelegate.accessLevel)
-                                    color: KodosiTheme.textSecondary
-                                    font.pixelSize: 10
-                                }
-
-                                KButton {
-                                    objectName:
-                                        "sidebar.share.access.revoke."
-                                        + grantDelegate.handle
-                                    Accessible.id: objectName
-                                    text: qsTr("Revoke")
-                                    Accessible.name: qsTr(
-                                        "Revoke access for %1").arg(
-                                            grantDelegate.displayName.length > 0
-                                            ? grantDelegate.displayName
-                                            : grantDelegate.handle)
-                                    enabled: shareDialog.canManageAccess
-                                        && grantDelegate.actorPhase === "idle"
-                                    onClicked:
-                                        Models.SessionAccess
-                                            .requestRevokeConfirmation(
-                                                root.shareSessionId,
-                                                grantDelegate.handle)
-                                }
-
-                                KButton {
-                                    objectName:
-                                        "sidebar.share.access.check."
-                                        + grantDelegate.handle
-                                    Accessible.id: objectName
-                                    visible: grantDelegate.actorPhase
-                                        === "exhausted"
-                                    text: qsTr("Check")
-                                    Accessible.name: qsTr(
-                                        "Check access change outcome")
-                                    onClicked:
-                                        Models.SessionAccess.retryMutation(
-                                            root.shareSessionId,
-                                            grantDelegate.handle)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             RowLayout {
                 Item { Layout.fillWidth: true }
 
@@ -1288,55 +858,6 @@ Item {
                     text: qsTr("Close")
                     Accessible.name: qsTr("Close sharing")
                     onClicked: shareDialog.close()
-                }
-            }
-        }
-    }
-
-    KDialog {
-        id: deleteConfirmation
-        objectName: "sidebar.session.delete.confirmation"
-        anchors.centerIn: parent
-        width: 380
-        modal: true
-        visible:
-            Models.SessionActions.deleteConfirmationSessionId.length > 0
-        title: qsTr("Delete this session permanently?")
-        closePolicy: Popup.NoAutoClose
-
-        contentItem: ColumnLayout {
-            objectName: "sidebar.session.delete.confirmation"
-            Accessible.id: objectName
-            spacing: KodosiTheme.spacing4
-
-            PlainLabel {
-                Layout.fillWidth: true
-                text: qsTr(
-                    "Its local history and recovery record will be removed. This cannot be undone.")
-                color: KodosiTheme.textSecondary
-                wrapMode: Text.Wrap
-            }
-
-            RowLayout {
-                Item { Layout.fillWidth: true }
-
-                KButton {
-                    objectName: "sidebar.session.delete.cancel"
-                    Accessible.id: objectName
-                    text: qsTr("Cancel")
-                    Accessible.name: text
-                    onClicked:
-                        Models.SessionActions.cancelDeleteConfirmation()
-                }
-
-                KButton {
-                    objectName: "sidebar.session.delete.confirm"
-                    Accessible.id: objectName
-                    text: qsTr("Delete permanently")
-                    variant: "danger"
-                    Accessible.name: text
-                    onClicked: Models.SessionActions.confirmDelete(
-                        Models.SessionActions.deleteConfirmationSessionId)
                 }
             }
         }
@@ -1386,57 +907,6 @@ Item {
                     Accessible.name: text
                     onClicked: Models.SessionAccess.confirmLeave(
                         Models.SessionAccess.leaveConfirmationSessionId)
-                }
-            }
-        }
-    }
-
-    KDialog {
-        id: revokeConfirmation
-        objectName: "sidebar.share.access.revoke.confirmation"
-        anchors.centerIn: parent
-        width: 380
-        modal: true
-        visible:
-            Models.SessionAccess.revokeConfirmationSessionId.length > 0
-        title: qsTr("Revoke access for @%1?").arg(
-            Models.SessionAccess.revokeConfirmationHandle)
-        closePolicy: Popup.NoAutoClose
-
-        contentItem: ColumnLayout {
-            objectName: "sidebar.share.access.revoke.confirmation"
-            Accessible.id: objectName
-            spacing: KodosiTheme.spacing4
-
-            PlainLabel {
-                Layout.fillWidth: true
-                text: qsTr(
-                    "This friend will lose explicit access to the session.")
-                color: KodosiTheme.textSecondary
-                wrapMode: Text.Wrap
-            }
-
-            RowLayout {
-                Item { Layout.fillWidth: true }
-
-                KButton {
-                    objectName: "sidebar.share.access.revoke.cancel"
-                    Accessible.id: objectName
-                    text: qsTr("Cancel")
-                    Accessible.name: text
-                    onClicked:
-                        Models.SessionAccess.cancelRevokeConfirmation()
-                }
-
-                KButton {
-                    objectName: "sidebar.share.access.revoke.confirm"
-                    Accessible.id: objectName
-                    text: qsTr("Revoke access")
-                    variant: "danger"
-                    Accessible.name: text
-                    onClicked: Models.SessionAccess.confirmRevoke(
-                        Models.SessionAccess.revokeConfirmationSessionId,
-                        Models.SessionAccess.revokeConfirmationHandle)
                 }
             }
         }

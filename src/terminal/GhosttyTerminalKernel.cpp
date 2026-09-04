@@ -96,6 +96,34 @@ public:
     GhosttyKeyEvent value = nullptr;
 };
 
+class MouseEncoderHandle final {
+public:
+    MouseEncoderHandle() = default;
+    ~MouseEncoderHandle()
+    {
+        ghostty_mouse_encoder_free(value);
+    }
+
+    MouseEncoderHandle(const MouseEncoderHandle&) = delete;
+    MouseEncoderHandle& operator=(const MouseEncoderHandle&) = delete;
+
+    GhosttyMouseEncoder value = nullptr;
+};
+
+class MouseEventHandle final {
+public:
+    MouseEventHandle() = default;
+    ~MouseEventHandle()
+    {
+        ghostty_mouse_event_free(value);
+    }
+
+    MouseEventHandle(const MouseEventHandle&) = delete;
+    MouseEventHandle& operator=(const MouseEventHandle&) = delete;
+
+    GhosttyMouseEvent value = nullptr;
+};
+
 class TrackedGridRefHandle final {
 public:
     TrackedGridRefHandle() = default;
@@ -274,6 +302,39 @@ GhosttyMods ghosttyModifiers(const TerminalModifiers modifiers)
         result |= GHOSTTY_MODS_SUPER;
     }
     return result;
+}
+
+GhosttyMouseAction ghosttyMouseAction(const TerminalMouseAction action)
+{
+    switch (action) {
+    case TerminalMouseAction::Press:
+        return GHOSTTY_MOUSE_ACTION_PRESS;
+    case TerminalMouseAction::Release:
+        return GHOSTTY_MOUSE_ACTION_RELEASE;
+    case TerminalMouseAction::Motion:
+        return GHOSTTY_MOUSE_ACTION_MOTION;
+    }
+    return GHOSTTY_MOUSE_ACTION_MOTION;
+}
+
+std::optional<GhosttyMouseButton> ghosttyMouseButton(
+    const TerminalMouseButton button)
+{
+    switch (button) {
+    case TerminalMouseButton::None:
+        return std::nullopt;
+    case TerminalMouseButton::Left:
+        return GHOSTTY_MOUSE_BUTTON_LEFT;
+    case TerminalMouseButton::Right:
+        return GHOSTTY_MOUSE_BUTTON_RIGHT;
+    case TerminalMouseButton::Middle:
+        return GHOSTTY_MOUSE_BUTTON_MIDDLE;
+    case TerminalMouseButton::WheelUp:
+        return GHOSTTY_MOUSE_BUTTON_FOUR;
+    case TerminalMouseButton::WheelDown:
+        return GHOSTTY_MOUSE_BUTTON_FIVE;
+    }
+    return std::nullopt;
 }
 
 std::expected<QString, GhosttyTerminalKernel::Failure> readGrapheme(
@@ -640,6 +701,7 @@ public:
     TerminalHandle terminal;
     RenderStateHandle renderState;
     KeyEncoderHandle keyEncoder;
+    MouseEncoderHandle mouseEncoder;
     TrackedGridRefHandle selectionAnchor;
     TrackedGridRefHandle selectionEndpoint;
     TerminalSubscription subscription;
@@ -756,10 +818,17 @@ GhosttyTerminalKernel::Result GhosttyTerminalKernel::installCheckpoint(
     if (result != GHOSTTY_SUCCESS || candidateKeyEncoder.value == nullptr) {
         return std::unexpected(ghosttyFailure(QStringLiteral("key encoder creation"), result));
     }
+    MouseEncoderHandle candidateMouseEncoder;
+    result = ghostty_mouse_encoder_new(nullptr, &candidateMouseEncoder.value);
+    if (result != GHOSTTY_SUCCESS || candidateMouseEncoder.value == nullptr) {
+        return std::unexpected(
+            ghosttyFailure(QStringLiteral("mouse encoder creation"), result));
+    }
 
     std::swap(m_impl->terminal.value, candidateTerminal.value);
     std::swap(m_impl->renderState.value, candidateRenderState.value);
     std::swap(m_impl->keyEncoder.value, candidateKeyEncoder.value);
+    std::swap(m_impl->mouseEncoder.value, candidateMouseEncoder.value);
     m_impl->selectionAnchor.reset();
     m_impl->selectionEndpoint.reset();
     m_impl->subscription = checkpoint.subscription;
@@ -1057,6 +1126,119 @@ GhosttyTerminalKernel::encodePaste(
     if (result != GHOSTTY_SUCCESS
         || written > static_cast<std::size_t>(encoded.size())) {
         return std::unexpected(ghosttyFailure(QStringLiteral("paste encoding"), result));
+    }
+    encoded.resize(static_cast<qsizetype>(written));
+    return encoded;
+}
+
+std::expected<QByteArray, GhosttyTerminalKernel::Failure>
+GhosttyTerminalKernel::encodeMouse(
+    const TerminalSubscription& subscription,
+    TerminalMouseEvent mouseEvent)
+{
+    std::scoped_lock lock(m_impl->mutex);
+    if (!m_impl->admitted || m_impl->failed) {
+        return std::unexpected(Failure {
+            Failure::Code::MissingCheckpoint,
+            QStringLiteral("Terminal mouse input requires an admitted semantic checkpoint."),
+        });
+    }
+    if (!sameSubscription(subscription, m_impl->subscription)) {
+        return std::unexpected(Failure {
+            Failure::Code::StaleSubscription,
+            QStringLiteral("Terminal mouse input belongs to a stale subscription."),
+        });
+    }
+    if (m_impl->mouseEncoder.value == nullptr
+        || mouseEvent.screenWidth == 0 || mouseEvent.screenHeight == 0
+        || mouseEvent.cellWidth == 0 || mouseEvent.cellHeight == 0) {
+        return std::unexpected(Failure {
+            Failure::Code::ResourceLimit,
+            QStringLiteral("Terminal mouse geometry is unavailable."),
+        });
+    }
+
+    ghostty_mouse_encoder_setopt_from_terminal(
+        m_impl->mouseEncoder.value,
+        m_impl->terminal.value);
+    const GhosttyMouseEncoderSize size {
+        .size = sizeof(GhosttyMouseEncoderSize),
+        .screen_width = mouseEvent.screenWidth,
+        .screen_height = mouseEvent.screenHeight,
+        .cell_width = mouseEvent.cellWidth,
+        .cell_height = mouseEvent.cellHeight,
+        .padding_top = 0,
+        .padding_bottom = 0,
+        .padding_right = 0,
+        .padding_left = 0,
+    };
+    ghostty_mouse_encoder_setopt(
+        m_impl->mouseEncoder.value,
+        GHOSTTY_MOUSE_ENCODER_OPT_SIZE,
+        &size);
+    ghostty_mouse_encoder_setopt(
+        m_impl->mouseEncoder.value,
+        GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED,
+        &mouseEvent.anyButtonPressed);
+    const bool trackLastCell = true;
+    ghostty_mouse_encoder_setopt(
+        m_impl->mouseEncoder.value,
+        GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL,
+        &trackLastCell);
+
+    MouseEventHandle event;
+    auto result = ghostty_mouse_event_new(nullptr, &event.value);
+    if (result != GHOSTTY_SUCCESS || event.value == nullptr) {
+        return std::unexpected(
+            ghosttyFailure(QStringLiteral("mouse event creation"), result));
+    }
+    ghostty_mouse_event_set_action(
+        event.value,
+        ghosttyMouseAction(mouseEvent.action));
+    if (const auto button = ghosttyMouseButton(mouseEvent.button)) {
+        ghostty_mouse_event_set_button(event.value, *button);
+    } else {
+        ghostty_mouse_event_clear_button(event.value);
+    }
+    ghostty_mouse_event_set_mods(
+        event.value,
+        ghosttyModifiers(mouseEvent.modifiers));
+    ghostty_mouse_event_set_position(
+        event.value,
+        {
+            .x = mouseEvent.x,
+            .y = mouseEvent.y,
+        });
+
+    std::size_t required = 0;
+    result = ghostty_mouse_encoder_encode(
+        m_impl->mouseEncoder.value,
+        event.value,
+        nullptr,
+        0,
+        &required);
+    if (result == GHOSTTY_SUCCESS && required == 0) {
+        return QByteArray {};
+    }
+    if (result != GHOSTTY_OUT_OF_SPACE
+        || required > static_cast<std::size_t>(KODOSI_MAX_FRAME_BYTES)
+        || required > static_cast<std::size_t>(
+            std::numeric_limits<qsizetype>::max())) {
+        return std::unexpected(
+            ghosttyFailure(QStringLiteral("mouse encoding size"), result));
+    }
+    QByteArray encoded(static_cast<qsizetype>(required), Qt::Uninitialized);
+    std::size_t written = 0;
+    result = ghostty_mouse_encoder_encode(
+        m_impl->mouseEncoder.value,
+        event.value,
+        encoded.data(),
+        static_cast<std::size_t>(encoded.size()),
+        &written);
+    if (result != GHOSTTY_SUCCESS
+        || written > static_cast<std::size_t>(encoded.size())) {
+        return std::unexpected(
+            ghosttyFailure(QStringLiteral("mouse encoding"), result));
     }
     encoded.resize(static_cast<qsizetype>(written));
     return encoded;

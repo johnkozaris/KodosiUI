@@ -52,8 +52,8 @@ class DesktopSettingsTest final : public QObject {
 
 private slots:
     void defaultsMatchSwiftParity();
-    void malformedStructuredValueFailsClosed();
-    void outOfRangeValueFailsClosedWithoutPartialLoading();
+    void malformedStructuredValueRecoversDefaults();
+    void outOfRangeValueIsNormalized();
     void migratesLegacyValuesTransactionally();
     void applyIsAtomicAndResetPersistsDefaults();
     void workingDirectoryFallsBackWhenPersistedPathIsStale();
@@ -77,7 +77,7 @@ void DesktopSettingsTest::defaultsMatchSwiftParity()
     QVERIFY(settings.settingsError().isEmpty());
 }
 
-void DesktopSettingsTest::malformedStructuredValueFailsClosed()
+void DesktopSettingsTest::malformedStructuredValueRecoversDefaults()
 {
     QTemporaryDir directory(
         QDir::current().filePath(QStringLiteral("desktop-settings-malformed-XXXXXX")));
@@ -94,10 +94,10 @@ void DesktopSettingsTest::malformedStructuredValueFailsClosed()
     QCOMPARE(settings.fontFamily(), QStringLiteral("JetBrains Mono"));
     QCOMPARE(settings.fontSize(), 14);
     QCOMPARE(settings.scrollbackLines(), 10'000);
-    QVERIFY(!settings.settingsError().isEmpty());
+    QVERIFY(settings.settingsError().isEmpty());
 }
 
-void DesktopSettingsTest::outOfRangeValueFailsClosedWithoutPartialLoading()
+void DesktopSettingsTest::outOfRangeValueIsNormalized()
 {
     QTemporaryDir directory(
         QDir::current().filePath(QStringLiteral("desktop-settings-range-XXXXXX")));
@@ -111,10 +111,10 @@ void DesktopSettingsTest::outOfRangeValueFailsClosedWithoutPartialLoading()
     }
 
     kodosi::DesktopSettings settings(settingsFor(directory));
-    QCOMPARE(settings.fontSize(), 14);
-    QCOMPARE(settings.lineHeight(), 1.1);
-    QCOMPARE(settings.scrollbackLines(), 10'000);
-    QVERIFY(!settings.settingsError().isEmpty());
+    QCOMPARE(settings.fontSize(), 32);
+    QCOMPARE(settings.lineHeight(), 1.4);
+    QCOMPARE(settings.scrollbackLines(), 20'000);
+    QVERIFY(settings.settingsError().isEmpty());
 }
 
 void DesktopSettingsTest::migratesLegacyValuesTransactionally()
@@ -179,7 +179,7 @@ void DesktopSettingsTest::applyIsAtomicAndResetPersistsDefaults()
     QCOMPARE(settings.fontSize(), 20);
     QCOMPARE(settings.scrollbackLines(), 30'000);
 
-    QVERIFY(!settings.apply(
+    QVERIFY(settings.apply(
         QStringLiteral(""),
         40,
         99,
@@ -188,24 +188,28 @@ void DesktopSettingsTest::applyIsAtomicAndResetPersistsDefaults()
         false,
         true,
         QStringLiteral("/ignored")));
-    QCOMPARE(changed.count(), 1);
-    QCOMPARE(settings.fontFamily(), QStringLiteral("Iosevka"));
-    QCOMPARE(settings.fontSize(), 20);
-    QCOMPARE(settings.scrollbackLines(), 30'000);
-
-    kodosi::DesktopSettings reloaded(settingsFor(directory));
-    QCOMPARE(reloaded.fontFamily(), QStringLiteral("Iosevka"));
-    QCOMPARE(reloaded.fontSize(), 20);
-    QCOMPARE(reloaded.scrollbackLines(), 30'000);
-
-    QVERIFY(settings.resetTerminal());
     QCOMPARE(changed.count(), 2);
     QCOMPARE(settings.fontFamily(), QStringLiteral("JetBrains Mono"));
-    QVERIFY(!settings.toolApprovalAlerts());
-    QCOMPARE(settings.lastWorkingDirectory(), directory.path());
+    QCOMPARE(settings.fontSize(), 32);
+    QCOMPARE(
+        settings.cursorStyle(),
+        kodosi::DesktopSettings::CursorStyle::Block);
+    QCOMPARE(settings.lineHeight(), 2.0);
+    QCOMPARE(settings.scrollbackLines(), 100);
+
+    kodosi::DesktopSettings reloaded(settingsFor(directory));
+    QCOMPARE(reloaded.fontFamily(), QStringLiteral("JetBrains Mono"));
+    QCOMPARE(reloaded.fontSize(), 32);
+    QCOMPARE(reloaded.scrollbackLines(), 100);
+
+    QVERIFY(settings.resetTerminal());
+    QCOMPARE(changed.count(), 3);
+    QCOMPARE(settings.fontFamily(), QStringLiteral("JetBrains Mono"));
+    QVERIFY(settings.toolApprovalAlerts());
+    QCOMPARE(settings.lastWorkingDirectory(), QStringLiteral("/ignored"));
 
     QVERIFY(settings.reset());
-    QCOMPARE(changed.count(), 3);
+    QCOMPARE(changed.count(), 4);
     kodosi::DesktopSettings resetReloaded(settingsFor(directory));
     QCOMPARE(resetReloaded.fontFamily(), QStringLiteral("JetBrains Mono"));
     QCOMPARE(resetReloaded.fontSize(), 14);

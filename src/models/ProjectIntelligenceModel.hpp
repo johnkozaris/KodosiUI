@@ -182,7 +182,6 @@ public:
     Q_INVOKABLE [[nodiscard]] bool selectAgent(const QString& itemId);
     Q_INVOKABLE [[nodiscard]] bool openSelectedAgent();
     void installSyntheticFixture();
-    void installSyntheticEmptyFixture(bool archive);
 
 public slots:
     void ingestAuthEvent(QByteArray json);

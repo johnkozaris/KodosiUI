@@ -115,6 +115,7 @@ private slots:
     void rejectsUnsafeActivationTokensAndScopesOwnerHook();
     void rejectsMalformedAndOversizedFrames();
     void boundsIncompleteAcceptedClients();
+    void shortEndpointNamesFitPortableUnixSocketPaths();
     void removesOnlyUnlockedStaleEndpoint();
 };
 
@@ -798,6 +799,67 @@ void SingleInstanceTest::boundsIncompleteAcceptedClients()
     QTRY_COMPARE_WITH_TIMEOUT(owner.activeClientCount(), 0, 3000);
 }
 
+void SingleInstanceTest::shortEndpointNamesFitPortableUnixSocketPaths()
+{
+    QTemporaryDir directory(
+        QStringLiteral("/tmp/")
+        + QString(68, u'x')
+        + QStringLiteral("-XXXXXX"));
+    QVERIFY(directory.isValid());
+
+    kodosi::SingleInstanceGuard owner;
+    const auto ownerResult = owner.start(
+        directory.path(),
+        QStringLiteral("0123456789abcdef"),
+        routeActivation(
+            QStringLiteral("01900000-0000-7000-8000-000000000030")));
+    QCOMPARE(
+        ownerResult.state,
+        kodosi::SingleInstanceGuard::StartState::Owner);
+    const auto ready = owner.publishEndpoint();
+    QVERIFY2(
+        ready.state
+            == kodosi::SingleInstanceGuard::StartState::Owner,
+        qPrintable(ready.error));
+    const auto nativeEndpoint =
+        QFile::encodeName(owner.endpointPath());
+    sockaddr_un address {};
+    QVERIFY(nativeEndpoint.size()
+        < static_cast<qsizetype>(sizeof(address.sun_path)));
+
+    QTemporaryDir oversized(
+        QStringLiteral("/tmp/")
+        + QString(82, u'x')
+        + QStringLiteral("-XXXXXX"));
+    QVERIFY(oversized.isValid());
+    kodosi::SingleInstanceGuard rejected;
+    const auto rejectedResult = rejected.start(
+        oversized.path(),
+        QStringLiteral("0123456789abcdef"),
+        routeActivation(
+            QStringLiteral("01900000-0000-7000-8000-000000000031")));
+    QCOMPARE(
+        rejectedResult.state,
+        kodosi::SingleInstanceGuard::StartState::Failed);
+    QVERIFY(rejectedResult.error.contains(QStringLiteral("too long")));
+
+    QTemporaryDir multibyte(
+        QStringLiteral("/tmp/")
+        + QString(42, u'é')
+        + QStringLiteral("-XXXXXX"));
+    QVERIFY(multibyte.isValid());
+    kodosi::SingleInstanceGuard multibyteRejected;
+    const auto multibyteResult = multibyteRejected.start(
+        multibyte.path(),
+        QStringLiteral("0123456789abcdef"),
+        routeActivation(
+            QStringLiteral("01900000-0000-7000-8000-000000000032")));
+    QCOMPARE(
+        multibyteResult.state,
+        kodosi::SingleInstanceGuard::StartState::Failed);
+    QVERIFY(multibyteResult.error.contains(QStringLiteral("too long")));
+}
+
 void SingleInstanceTest::removesOnlyUnlockedStaleEndpoint()
 {
     QTemporaryDir directory(
@@ -808,9 +870,9 @@ void SingleInstanceTest::removesOnlyUnlockedStaleEndpoint()
         QFile::encodeName(directory.path()).constData(),
         0700) == 0);
     const auto endpoint = QDir(directory.path()).filePath(
-        QStringLiteral("kodosi-qt-stale.sock"));
+        QStringLiteral("stale.s"));
     const auto lockPath = QDir(directory.path()).filePath(
-        QStringLiteral("kodosi-qt-stale.lock"));
+        QStringLiteral("stale.l"));
     QFile lockFile(lockPath);
     QVERIFY(lockFile.open(QIODevice::WriteOnly));
     lockFile.close();

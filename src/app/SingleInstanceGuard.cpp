@@ -24,6 +24,7 @@
 #include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include <fcntl.h>
@@ -947,9 +948,20 @@ SingleInstanceGuard::StartResult SingleInstanceGuard::start(
         };
     }
     d->endpoint = QDir(runtimeDirectory).filePath(
-        QStringLiteral("kodosi-qt-%1.sock").arg(endpointNamespace));
+        QStringLiteral("%1.s").arg(endpointNamespace));
     const auto lockPath = QDir(runtimeDirectory).filePath(
-        QStringLiteral("kodosi-qt-%1.lock").arg(endpointNamespace));
+        QStringLiteral("%1.l").arg(endpointNamespace));
+    const auto nativeEndpoint = QFile::encodeName(d->endpoint);
+    sockaddr_un endpointAddress {};
+    if (nativeEndpoint.size()
+        >= static_cast<qsizetype>(sizeof(endpointAddress.sun_path))) {
+        d->endpoint.clear();
+        return {
+            .state = StartState::Failed,
+            .error = QStringLiteral(
+                "The Kodosi activation endpoint path is too long."),
+        };
+    }
     const auto nativeLock = QFile::encodeName(lockPath);
     d->lockDescriptor = ::open(
         nativeLock.constData(),

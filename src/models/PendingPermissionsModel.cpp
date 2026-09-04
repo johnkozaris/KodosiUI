@@ -260,13 +260,46 @@ QVariantMap PendingPermissionsModel::presentationForSession(
                         == DecisionState::DeliveryFailed);
         });
     if (actionable != m_requests.end()) {
-        return presentation(*actionable);
+        auto result = presentation(*actionable);
+        result.insert(
+            QStringLiteral("queuedCount"),
+            static_cast<int>(std::ranges::count(
+                m_requests,
+                sessionId,
+                &Request::sessionId))
+                - 1);
+        return result;
     }
     const auto found =
         std::ranges::find(m_requests, sessionId, &Request::sessionId);
-    return found == m_requests.end()
+    if (found == m_requests.end()) {
+        return {};
+    }
+    auto result = presentation(*found);
+    result.insert(
+        QStringLiteral("queuedCount"),
+        static_cast<int>(std::ranges::count(
+            m_requests,
+            sessionId,
+            &Request::sessionId))
+            - 1);
+    return result;
+}
+
+QVariantMap PendingPermissionsModel::topPresentation() const
+{
+    const auto actionable = std::ranges::find_if(
+        m_requests,
+        [](const Request& request) {
+            return request.authoritativePhase
+                    == AuthoritativePhase::Actionable
+                && (request.decisionState == DecisionState::Actionable
+                    || request.decisionState
+                        == DecisionState::DeliveryFailed);
+        });
+    return actionable == m_requests.end()
         ? QVariantMap {}
-        : presentation(*found);
+        : presentation(*actionable);
 }
 
 bool PendingPermissionsModel::refresh()
@@ -910,6 +943,7 @@ QVariantMap PendingPermissionsModel::presentation(const Request& request)
         {QStringLiteral("sessionId"), request.sessionId},
         {QStringLiteral("toolName"), request.toolName},
         {QStringLiteral("toolInputSummary"), request.toolInputSummary},
+        {QStringLiteral("deadline"), request.deadline},
         {QStringLiteral("risk"), request.risk},
         {QStringLiteral("decisionMessage"), request.decisionMessage},
         {QStringLiteral("actionable"), actionable},

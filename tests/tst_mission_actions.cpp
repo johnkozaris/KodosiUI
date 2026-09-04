@@ -67,6 +67,7 @@ private slots:
     void validatesUtf16CodeUnitLimits();
     void handlesEveryActionResultStatus();
     void validatesMissionInputs();
+    void preservesUnavailableRecipientsAndUsesTypedCandidates();
 };
 
 namespace {
@@ -773,6 +774,7 @@ void MissionActionsTest::receiptMutationsRequireBoundFingerprint()
     QCOMPARE(
         actions.ledgerOutcome(),
         kodosi::MissionActions::Outcome::AcceptedAwaitingProjection);
+    QVERIFY(!actions.ledgerCanCheck());
     QCOMPARE(
         std::ranges::count(
             dispatcher.commands,
@@ -1767,6 +1769,32 @@ void MissionActionsTest::taskActionsUseNativeRevisionsAndIncarnations()
 
     QVERIFY(actions.canActOnSelectedTasks());
     QCOMPARE(actions.assignmentOptions().size(), 2);
+    const auto transitionOptions =
+        actions.transitionOptionsForTask(QStringLiteral("task"));
+    QCOMPARE(transitionOptions.size(), 4);
+    QCOMPARE(
+        transitionOptions.at(0)
+            .toMap()
+            .value(QStringLiteral("status"))
+            .toString(),
+        QStringLiteral("Open"));
+    QCOMPARE(
+        transitionOptions.at(1)
+            .toMap()
+            .value(QStringLiteral("status"))
+            .toString(),
+        QStringLiteral("Review"));
+    QVERIFY(
+        transitionOptions.at(1)
+            .toMap()
+            .value(QStringLiteral("requiresEvidence"))
+            .toBool());
+    QCOMPARE(
+        transitionOptions.constLast()
+            .toMap()
+            .value(QStringLiteral("status"))
+            .toString(),
+        QStringLiteral("Archived"));
     QCOMPARE(
         actions.assignmentForTask(QStringLiteral("task")),
         QStringLiteral("local-agent"));
@@ -2368,8 +2396,11 @@ void MissionActionsTest::directedChatUsesOpaqueCurrentRecipientAuthority()
         sessions,
         QStringLiteral("replacement-backend-incarnation"),
         QStringLiteral("replacement-runtime-incarnation"));
-    QVERIFY(!actions.chatRecipientPresentationIds().contains(agent));
+    QVERIFY(actions.chatRecipientPresentationIds().contains(agent));
     QVERIFY(!detail.crew()->containsPresentationId(agent));
+    QVERIFY(actions.chatHasUnavailableRecipients());
+    QVERIFY(!actions.chatCanSubmit());
+    QVERIFY(actions.removeChatRecipient(agent));
 }
 
 void MissionActionsTest::taskDraftUsesExactAssignmentDueAndRevisionClearing()
@@ -2699,6 +2730,9 @@ void MissionActionsTest::directSuccessRequiresExactProjection()
     QCOMPARE(
         actions.taskCreateOutcome(),
         kodosi::MissionActions::Outcome::AcceptedAwaitingProjection);
+    QVERIFY(!actions.createMissionCanCheck());
+    QVERIFY(!actions.chatCanCheck());
+    QVERIFY(!actions.taskCreateCanCheck());
     QCOMPARE(created.count(), 0);
     QCOMPARE(chatted.count(), 0);
     QCOMPARE(tasked.count(), 0);
@@ -3221,6 +3255,74 @@ void MissionActionsTest::validatesMissionInputs()
         QStringLiteral("mission"),
         QString {},
         QString {}));
+}
+
+void MissionActionsTest::preservesUnavailableRecipientsAndUsesTypedCandidates()
+{
+    FakeMissionMutationDispatcher dispatcher;
+    kodosi::MissionDirectoryModel directory(dispatcher);
+    seed(directory);
+    kodosi::PeopleModel people;
+    seedPeople(people);
+    kodosi::SessionCatalogModel sessions;
+    seedSessions(sessions);
+    kodosi::MissionDetailModel detail(
+        dispatcher,
+        directory,
+        {
+            .people = &people,
+            .sessions = &sessions,
+        });
+    detail.ingestAuthEvent(auth());
+    seedMembers(dispatcher, detail);
+    kodosi::MissionActions actions(
+        dispatcher, directory, detail, people, sessions);
+    actions.ingestAuthEvent(auth());
+
+    const auto candidates = actions.inviteCandidates();
+    QCOMPARE(candidates.size(), 1);
+    const auto candidate = candidates.constFirst().toMap();
+    QVERIFY(candidate.value(QStringLiteral("candidateId"))
+        .toString()
+        .startsWith(QStringLiteral("invite-candidate-")));
+    QCOMPARE(
+        candidate.value(QStringLiteral("handle")).toString(),
+        QStringLiteral("alice"));
+    QVERIFY(actions.inviteFriendCandidate(
+        candidate.value(QStringLiteral("candidateId")).toString()));
+    QCOMPARE(
+        dispatcher.commands.back().value(QStringLiteral("type")).toString(),
+        QStringLiteral("room.invite"));
+    QCOMPARE(
+        dispatcher.commands.back()
+            .value(QStringLiteral("invitee_user_id"))
+            .toString(),
+        QStringLiteral("friend"));
+
+    const auto agent = crewPresentation(
+        detail,
+        kodosi::MissionCrewModel::Kind::Agent);
+    QVERIFY(!agent.isEmpty());
+    QVERIFY(actions.toggleChatRecipient(agent));
+    actions.setChatDraftBody(QStringLiteral("Keep this target"));
+    QVERIFY(actions.chatCanSubmit());
+
+    sessions.ingestSessionEvent(envelope({
+        {QStringLiteral("type"), QStringLiteral("session.list")},
+        {QStringLiteral("sessions"), QJsonArray {}},
+    }));
+
+    QCOMPARE(actions.chatRecipientPresentationIds(), QStringList {agent});
+    QCOMPARE(actions.chatUnavailableRecipients().size(), 1);
+    QVERIFY(actions.chatHasUnavailableRecipients());
+    QVERIFY(!actions.chatCanSubmit());
+    QVERIFY(!actions.sendChat());
+    QVERIFY(!actions.chatCanRetry());
+    QCOMPARE(actions.chatRecipientPresentationIds(), QStringList {agent});
+    QVERIFY(actions.removeChatRecipient(agent));
+    QVERIFY(!actions.chatHasUnavailableRecipients());
+    QVERIFY(actions.chatCanRetry());
+    QVERIFY(actions.chatCanSubmit());
 }
 
 QTEST_GUILESS_MAIN(MissionActionsTest)

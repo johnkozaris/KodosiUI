@@ -82,11 +82,22 @@ SessionActions::SessionActions(
     CommandDispatcher& dispatcher,
     SessionCatalogModel& sessions,
     QObject* parent)
+    : SessionActions(dispatcher, sessions, 30'000, parent)
+{
+}
+
+SessionActions::SessionActions(
+    CommandDispatcher& dispatcher,
+    SessionCatalogModel& sessions,
+    const qint64 closeTimeoutMs,
+    QObject* parent)
     : QObject(parent)
     , m_dispatcher(dispatcher)
     , m_sessions(sessions)
     , m_hiddenSessions(this)
+    , m_closeTimeoutMs(closeTimeoutMs)
 {
+    Q_ASSERT(closeTimeoutMs >= 0);
     m_hiddenRetryTimer.setSingleShot(true);
     connect(&m_hiddenRetryTimer, &QTimer::timeout, this, [this] {
         if (m_hiddenRefreshQueued) {
@@ -98,6 +109,13 @@ SessionActions::SessionActions(
     connect(&sessions, &QAbstractItemModel::rowsInserted, this, availabilityChanged);
     connect(&sessions, &QAbstractItemModel::rowsRemoved, this, availabilityChanged);
     connect(&sessions, &QAbstractItemModel::dataChanged, this, availabilityChanged);
+    connect(
+        &sessions,
+        &SessionCatalogModel::inactiveLocalObserved,
+        this,
+        [this](const QString& sessionId, const QString& incarnationId) {
+            enqueueInactiveCleanup(sessionId, incarnationId);
+        });
     connect(
         &sessions,
         &SessionCatalogModel::authoritativeSnapshotApplied,
@@ -156,23 +174,36 @@ QString SessionActions::closeConfirmationSessionId() const
     return m_closeConfirmationSessionId;
 }
 
-QString SessionActions::deleteConfirmationSessionId() const
-{
-    return m_deleteConfirmationSessionId;
-}
-
 bool SessionActions::creating() const noexcept
 {
-    return !m_createRequestId.isEmpty();
+    return !m_pendingCreates.isEmpty();
+}
+
+QVariantList SessionActions::pendingCreations() const
+{
+    QVariantList result;
+    result.reserve(m_pendingCreateOrder.size());
+    for (const auto& requestId : m_pendingCreateOrder) {
+        const auto found = m_pendingCreates.constFind(requestId);
+        if (found == m_pendingCreates.cend()) {
+            continue;
+        }
+        result.push_back(QVariantMap {
+            {QStringLiteral("requestId"), requestId},
+            {QStringLiteral("name"), found->name},
+        });
+    }
+    return result;
+}
+
+QString SessionActions::lastCreateRequestId() const
+{
+    return m_lastCreateRequestId;
 }
 
 int SessionActions::inactiveCleanupCount() const noexcept
 {
-    return static_cast<int>(std::ranges::count_if(
-        m_pendingReceipts,
-        [](const PendingReceipt& pending) {
-            return pending.operation == QStringLiteral("session.delete");
-        }));
+    return m_inactiveCleanupIds.size();
 }
 
 QString SessionActions::defaultWorkingDirectory() const
@@ -225,8 +256,12 @@ bool SessionActions::create(
     return dispatchCreate(name, workingDirectory, std::nullopt);
 }
 
+bool SessionActions::createInDirectory(const QString& workingDirectory)
+{
+    return create(generatedSessionName(), workingDirectory);
+}
+
 bool SessionActions::createResumed(
-    const QString& name,
     const QString& conversationPresentationId)
 {
     if (m_resumeResolver == nullptr
@@ -252,8 +287,16 @@ bool SessionActions::createResumed(
         emit stateChanged();
         return false;
     }
+    const auto providerName = target->provider == QStringLiteral("claude")
+        ? QStringLiteral("Claude")
+        : QStringLiteral("Copilot");
+    const auto title = target->title.trimmed();
+    const auto sessionName = title.isEmpty()
+        ? providerName + QLatin1Char(' ')
+            + target->nativeConversationId.left(8)
+        : providerName + QStringLiteral(": ") + title;
     return dispatchCreate(
-        name,
+        sessionName,
         target->workingDirectory,
         QJsonObject {
             {QStringLiteral("provider"), target->provider},
@@ -277,8 +320,9 @@ bool SessionActions::dispatchCreate(
     const auto nameBytes = trimmedName.toUtf8();
     const auto trimmedDirectory = workingDirectory.trimmed();
     const QFileInfo directory(trimmedDirectory);
-    if (!m_createRequestId.isEmpty()) {
-        m_lastError = QStringLiteral("A session is already being created.");
+    if (m_pendingCreates.size() >= 100) {
+        m_lastError =
+            QStringLiteral("Too many sessions are still starting.");
         emit stateChanged();
         return false;
     }
@@ -304,7 +348,13 @@ bool SessionActions::dispatchCreate(
     }
     const auto accepted = send(std::move(command));
     if (accepted) {
-        m_createRequestId = requestId;
+        m_lastCreateRequestId = requestId;
+        m_pendingCreates.insert(requestId, {
+            .name = trimmedName,
+            .sessionId = {},
+            .incarnationId = {},
+        });
+        m_pendingCreateOrder.push_back(requestId);
         m_pendingReceipts.insert(requestId, {
             .operation = QStringLiteral("session.create"),
             .sessionId = {},
@@ -318,6 +368,11 @@ bool SessionActions::dispatchCreate(
 bool SessionActions::createDefault()
 {
     return create(generatedSessionName(), defaultWorkingDirectory());
+}
+
+bool SessionActions::isCreatePending(const QString& requestId) const
+{
+    return m_pendingCreates.contains(requestId);
 }
 
 bool SessionActions::canInterrupt(const QString& sessionId) const
@@ -335,8 +390,15 @@ bool SessionActions::canInterrupt(const QString& sessionId) const
 bool SessionActions::canClose(const QString& sessionId) const
 {
     const auto context = m_sessions.actionContext(sessionId);
+    const auto closePending = std::ranges::any_of(
+        m_pendingReceipts,
+        [&](const PendingReceipt& pending) {
+            return pending.sessionId == sessionId
+                && pending.operation == QStringLiteral("session.close");
+        });
     return context && context->commandable
         && context->kind == QStringLiteral("local")
+        && !closePending
         && closeStatus(context->status);
 }
 
@@ -362,29 +424,6 @@ bool SessionActions::canRename(const QString& sessionId) const
         && !m_pendingRenames.contains(sessionId)
         && (context->kind == QStringLiteral("local")
             || (context->permissions & renamePermission) != 0);
-}
-
-bool SessionActions::canReopen(const QString& sessionId) const
-{
-    const auto context = m_sessions.actionContext(sessionId);
-    return context && !hasPendingLifecycle(sessionId)
-        && !m_pendingRenames.contains(sessionId)
-        && context->kind == QStringLiteral("local")
-        && ((context->status == QStringLiteral("stopped")
-                && context->recovery == QStringLiteral("recoverable"))
-            || (context->status == QStringLiteral("blocked")
-                && (context->recovery == QStringLiteral("recoverable")
-                    || context->recovery == QStringLiteral("crashed"))));
-}
-
-bool SessionActions::canDelete(const QString& sessionId) const
-{
-    const auto context = m_sessions.actionContext(sessionId);
-    return context && !hasPendingLifecycle(sessionId)
-        && !m_pendingRenames.contains(sessionId)
-        && context->kind == QStringLiteral("local")
-        && (!context->commandable
-            || context->status == QStringLiteral("stopped"));
 }
 
 bool SessionActions::canOpenRemote(const QString& sessionId) const
@@ -513,67 +552,6 @@ bool SessionActions::rename(
     bumpAvailability();
     emit stateChanged();
     return true;
-}
-
-bool SessionActions::reopen(const QString& sessionId)
-{
-    const auto context = m_sessions.actionContext(sessionId);
-    if (!context || !canReopen(sessionId)) {
-        m_lastError = QStringLiteral("That local session can no longer be reopened.");
-        emit stateChanged();
-        return false;
-    }
-    return dispatchLifecycle(
-        QStringLiteral("session.reopen"),
-        QStringLiteral("session.reopen"),
-        sessionId,
-        context->incarnationId);
-}
-
-bool SessionActions::requestDeleteConfirmation(const QString& sessionId)
-{
-    const auto context = m_sessions.actionContext(sessionId);
-    if (!context || !canDelete(sessionId)) {
-        m_lastError = QStringLiteral("That local session can no longer be deleted.");
-        emit stateChanged();
-        return false;
-    }
-    m_deleteConfirmationSessionId = sessionId;
-    m_deleteConfirmationIncarnationId = context->incarnationId;
-    emit stateChanged();
-    return true;
-}
-
-bool SessionActions::confirmDelete(const QString& sessionId)
-{
-    const auto context = m_sessions.actionContext(sessionId);
-    if (!context || sessionId != m_deleteConfirmationSessionId
-        || context->incarnationId != m_deleteConfirmationIncarnationId
-        || !canDelete(sessionId)) {
-        cancelDeleteConfirmation();
-        m_lastError =
-            QStringLiteral("The session changed before delete was confirmed.");
-        emit stateChanged();
-        return false;
-    }
-    const auto incarnationId = m_deleteConfirmationIncarnationId;
-    cancelDeleteConfirmation();
-    return dispatchLifecycle(
-        QStringLiteral("session.delete"),
-        QStringLiteral("session.delete"),
-        sessionId,
-        incarnationId);
-}
-
-void SessionActions::cancelDeleteConfirmation()
-{
-    if (m_deleteConfirmationSessionId.isEmpty()
-        && m_deleteConfirmationIncarnationId.isEmpty()) {
-        return;
-    }
-    m_deleteConfirmationSessionId.clear();
-    m_deleteConfirmationIncarnationId.clear();
-    emit stateChanged();
 }
 
 bool SessionActions::openRemote(const QString& sessionId)
@@ -743,6 +721,24 @@ bool SessionActions::dispatchClose(
             .sessionId = sessionId,
             .incarnationId = incarnationId,
         });
+        auto* timer = new QTimer(this);
+        timer->setSingleShot(true);
+        connect(timer, &QTimer::timeout, this, [this, requestId] {
+            const auto pending = m_pendingReceipts.find(requestId);
+            if (pending == m_pendingReceipts.end()
+                || pending->operation != QStringLiteral("session.close")) {
+                clearCloseTimeout(requestId);
+                return;
+            }
+            m_pendingReceipts.erase(pending);
+            clearCloseTimeout(requestId);
+            m_lastError = QStringLiteral(
+                "The session did not close. Try Close Session again.");
+            bumpAvailability();
+            emit stateChanged();
+        });
+        m_closeTimers.insert(requestId, timer);
+        timer->start(static_cast<int>(m_closeTimeoutMs));
         bumpAvailability();
     }
     return accepted;
@@ -885,9 +881,21 @@ void SessionActions::resetRuntimeAuthority()
     m_hiddenRetryTimer.stop();
     m_closeConfirmationSessionId.clear();
     m_closeConfirmationIncarnationId.clear();
-    m_deleteConfirmationSessionId.clear();
-    m_deleteConfirmationIncarnationId.clear();
-    m_createRequestId.clear();
+    m_pendingCreates.clear();
+    m_pendingCreateOrder.clear();
+    m_lastCreateRequestId.clear();
+    for (auto* timer : std::as_const(m_closeTimers)) {
+        timer->stop();
+        timer->deleteLater();
+    }
+    m_closeTimers.clear();
+    for (auto* timer : std::as_const(m_inactiveCleanupTimers)) {
+        timer->stop();
+        timer->deleteLater();
+    }
+    m_inactiveCleanupTimers.clear();
+    m_inactiveCleanupQueue.clear();
+    m_inactiveCleanupIds.clear();
     m_hiddenRequestId.clear();
     m_hiddenRefreshQueued = false;
     m_hiddenRetryAttempts = 0;
@@ -906,13 +914,21 @@ void SessionActions::activateAccount(QString userId, const quint64 epoch)
         return;
     }
     if (activation.changed) {
-        const auto createReceipt = m_createRequestId.isEmpty()
-            ? std::optional<PendingReceipt> {}
-            : std::optional<PendingReceipt> {
-                  m_pendingReceipts.value(m_createRequestId)};
-        m_pendingReceipts.clear();
-        if (createReceipt && !createReceipt->operation.isEmpty()) {
-            m_pendingReceipts.insert(m_createRequestId, *createReceipt);
+        for (auto pending = m_pendingReceipts.begin();
+             pending != m_pendingReceipts.end();) {
+            if (pending->operation != QStringLiteral("session.create")) {
+                clearCloseTimeout(pending.key());
+                pending = m_pendingReceipts.erase(pending);
+            } else {
+                ++pending;
+            }
+            for (auto* timer : std::as_const(m_inactiveCleanupTimers)) {
+                timer->stop();
+                timer->deleteLater();
+            }
+            m_inactiveCleanupTimers.clear();
+            m_inactiveCleanupQueue.clear();
+            m_inactiveCleanupIds.clear();
         }
         m_pendingModeIncarnations.clear();
         m_pendingRenames.clear();
@@ -923,8 +939,6 @@ void SessionActions::activateAccount(QString userId, const quint64 epoch)
         m_hiddenRetryTimer.stop();
         m_closeConfirmationSessionId.clear();
         m_closeConfirmationIncarnationId.clear();
-        m_deleteConfirmationSessionId.clear();
-        m_deleteConfirmationIncarnationId.clear();
         m_hiddenRequestId.clear();
         m_hiddenRefreshQueued = false;
         m_hiddenRetryAttempts = 0;
@@ -973,16 +987,26 @@ void SessionActions::applySessionEvent(const QJsonObject& object)
         const auto sessionId = object.value(QStringLiteral("sessionId"));
         const auto incarnation =
             object.value(QStringLiteral("runtimeIncarnationId"));
-        if (!requestId.isString() || requestId.toString() != m_createRequestId
+        if (!requestId.isString()
             || !sessionId.isString() || sessionId.toString().isEmpty()
             || !incarnation.isString() || incarnation.toString().isEmpty()) {
             return;
         }
-        m_pendingReceipts.remove(requestId.toString());
-        m_createRequestId.clear();
+        const auto id = requestId.toString();
+        auto pendingCreate = m_pendingCreates.find(id);
+        auto pending = m_pendingReceipts.find(id);
+        if (pendingCreate == m_pendingCreates.end()
+            || pending == m_pendingReceipts.end()
+            || pending->operation != QStringLiteral("session.create")) {
+            return;
+        }
+        pending->sessionId = sessionId.toString();
+        pending->incarnationId = incarnation.toString();
+        pendingCreate->sessionId = sessionId.toString();
+        pendingCreate->incarnationId = incarnation.toString();
         m_lastError.clear();
         emit stateChanged();
-        emit sessionCreated(sessionId.toString());
+        reconcilePendingFromCatalog();
         return;
     }
     if (type == QStringLiteral("session.interrupted")) {
@@ -1036,22 +1060,24 @@ void SessionActions::applySessionEvent(const QJsonObject& object)
         for (auto pending = m_pendingReceipts.begin();
              pending != m_pendingReceipts.end();) {
             if (pending->sessionId == sessionId) {
+                if (pending->operation == QStringLiteral("session.delete")) {
+                    clearInactiveCleanupTracking(
+                        pending.key(),
+                        pending->sessionId);
+                }
+                clearCloseTimeout(pending.key());
                 pending = m_pendingReceipts.erase(pending);
                 changed = true;
             } else {
                 ++pending;
             }
         }
-        if (m_deleteConfirmationSessionId == sessionId) {
-            m_deleteConfirmationSessionId.clear();
-            m_deleteConfirmationIncarnationId.clear();
-            changed = true;
-        }
         if (changed) {
             m_lastError.clear();
             bumpAvailability();
             emit stateChanged();
         }
+        pumpInactiveCleanup();
         return;
     }
     if (type != QStringLiteral("session.error")) {
@@ -1066,14 +1092,24 @@ void SessionActions::applySessionEvent(const QJsonObject& object)
         return;
     }
     bool correlated = false;
+    bool createFailed = false;
+    QString inactiveCleanupRequestId;
+    QString inactiveCleanupSessionId;
     if (requestId.isString()) {
         const auto pending = m_pendingReceipts.find(requestId.toString());
         if (pending != m_pendingReceipts.end()
             && pending->operation == operation.toString()
             && (!sessionId.isString()
                 || pending->sessionId == sessionId.toString())) {
+            if (pending->operation == QStringLiteral("session.delete")) {
+                inactiveCleanupRequestId = requestId.toString();
+                inactiveCleanupSessionId = pending->sessionId;
+            }
+            clearCloseTimeout(requestId.toString());
             m_pendingReceipts.erase(pending);
             correlated = true;
+            createFailed =
+                operation.toString() == QStringLiteral("session.create");
         }
         if (!correlated
             && operation.toString() == QStringLiteral("session.listHidden")
@@ -1114,8 +1150,16 @@ void SessionActions::applySessionEvent(const QJsonObject& object)
         correlated = true;
     }
     if (correlated) {
-        if (requestId.isString() && requestId.toString() == m_createRequestId) {
-            m_createRequestId.clear();
+        if (!inactiveCleanupRequestId.isEmpty()) {
+            clearInactiveCleanupTracking(
+                inactiveCleanupRequestId,
+                inactiveCleanupSessionId);
+            pumpInactiveCleanup();
+        }
+        if (createFailed) {
+            const auto id = requestId.toString();
+            m_pendingCreates.remove(id);
+            m_pendingCreateOrder.removeAll(id);
         }
         m_lastError = message.toString();
         bumpAvailability();
@@ -1127,6 +1171,30 @@ void SessionActions::reconcilePendingFromCatalog()
 {
     bool changed = false;
     QString lifecycleError;
+    QStringList createdSessions;
+    for (auto pending = m_pendingCreates.begin();
+         pending != m_pendingCreates.end();
+         ++pending) {
+        if (!pending->sessionId.isEmpty()) {
+            continue;
+        }
+        const auto projected = std::ranges::find(
+            m_sessions.m_sessions,
+            pending.key(),
+            &SessionCatalogModel::Session::createRequestId);
+        if (projected == m_sessions.m_sessions.end()
+            || projected->incarnationId.isEmpty()) {
+            continue;
+        }
+        pending->sessionId = projected->id;
+        pending->incarnationId = projected->incarnationId;
+        auto receipt = m_pendingReceipts.find(pending.key());
+        if (receipt != m_pendingReceipts.end()
+            && receipt->operation == QStringLiteral("session.create")) {
+            receipt->sessionId = projected->id;
+            receipt->incarnationId = projected->incarnationId;
+        }
+    }
     for (auto rename = m_pendingRenames.begin();
          rename != m_pendingRenames.end();) {
         const auto sessionId = rename.key();
@@ -1150,40 +1218,47 @@ void SessionActions::reconcilePendingFromCatalog()
 
     for (auto pending = m_pendingReceipts.begin();
          pending != m_pendingReceipts.end();) {
-        if (pending->operation == QStringLiteral("session.reopen")) {
-            const auto context = m_sessions.actionContext(pending->sessionId);
-            if (!context) {
-                lifecycleError =
-                    QStringLiteral("The session disappeared while reopening.");
-                pending = m_pendingReceipts.erase(pending);
-                changed = true;
+        if (pending->operation == QStringLiteral("session.create")) {
+            if (pending->sessionId.isEmpty()
+                || pending->incarnationId.isEmpty()) {
+                ++pending;
                 continue;
             }
-            if (context->incarnationId != pending->incarnationId) {
-                const auto sessionId = pending->sessionId;
-                const auto live =
-                    context->recovery == QStringLiteral("live")
-                    && (context->status == QStringLiteral("active")
-                        || context->status == QStringLiteral("waiting")
-                        || context->status == QStringLiteral("blocked")
-                        || context->status == QStringLiteral("reconnecting"));
-                pending = m_pendingReceipts.erase(pending);
-                changed = true;
-                if (live) {
-                    emit sessionReopened(sessionId);
-                } else {
-                    lifecycleError = QStringLiteral(
-                        "The session reopened but stopped before becoming ready.");
-                }
+            const auto context =
+                m_sessions.actionContext(pending->sessionId);
+            if (!context
+                || context->kind != QStringLiteral("local")
+                || context->incarnationId != pending->incarnationId) {
+                ++pending;
                 continue;
             }
-        } else if ((pending->operation == QStringLiteral("session.delete")
-                       || pending->operation == QStringLiteral("session.close"))
+            const auto requestId = pending.key();
+            createdSessions.push_back(pending->sessionId);
+            pending = m_pendingReceipts.erase(pending);
+            m_pendingCreates.remove(requestId);
+            m_pendingCreateOrder.removeAll(requestId);
+            changed = true;
+            emit sessionCreationResolved(
+                requestId,
+                createdSessions.constLast());
+            continue;
+        }
+        if (pending->operation == QStringLiteral("session.delete")
+            && !m_sessions.containsRuntimeSession(pending->sessionId)) {
+            clearInactiveCleanupTracking(
+                pending.key(),
+                pending->sessionId);
+            pending = m_pendingReceipts.erase(pending);
+            changed = true;
+            continue;
+        } else if (pending->operation == QStringLiteral("session.close")
             && !m_sessions.containsSession(pending->sessionId)) {
+            clearCloseTimeout(pending.key());
             pending = m_pendingReceipts.erase(pending);
             changed = true;
             continue;
         }
+
         ++pending;
     }
 
@@ -1216,6 +1291,102 @@ void SessionActions::reconcilePendingFromCatalog()
         bumpAvailability();
         emit stateChanged();
     }
+    pumpInactiveCleanup();
+    for (const auto& sessionId : std::as_const(createdSessions)) {
+        emit sessionCreated(sessionId);
+    }
+}
+
+void SessionActions::clearCloseTimeout(const QString& requestId)
+{
+    auto* timer = m_closeTimers.take(requestId);
+    if (timer == nullptr) {
+        return;
+    }
+    timer->stop();
+    timer->deleteLater();
+}
+
+void SessionActions::enqueueInactiveCleanup(
+    const QString& sessionId,
+    const QString& incarnationId)
+{
+    constexpr qsizetype maximumPendingCleanups = 5'000;
+    if (sessionId.isEmpty() || incarnationId.isEmpty()
+        || m_inactiveCleanupIds.contains(sessionId)
+        || m_inactiveCleanupIds.size() >= maximumPendingCleanups) {
+        return;
+    }
+    m_inactiveCleanupIds.insert(sessionId);
+    m_inactiveCleanupQueue.enqueue({
+        .sessionId = sessionId,
+        .incarnationId = incarnationId,
+    });
+    bumpAvailability();
+    pumpInactiveCleanup();
+}
+
+void SessionActions::pumpInactiveCleanup()
+{
+    constexpr qsizetype maximumConcurrentCleanups = 2;
+    while (m_inactiveCleanupTimers.size() < maximumConcurrentCleanups
+        && !m_inactiveCleanupQueue.isEmpty()) {
+        const auto cleanup = m_inactiveCleanupQueue.dequeue();
+        if (!m_inactiveCleanupIds.contains(cleanup.sessionId)
+            || !m_sessions.containsRuntimeSession(cleanup.sessionId)) {
+            m_inactiveCleanupIds.remove(cleanup.sessionId);
+            continue;
+        }
+        const auto requestId =
+            QUuid::createUuidV7().toString(QUuid::WithoutBraces);
+        const auto command = QJsonDocument(QJsonObject {
+            {QStringLiteral("type"), QStringLiteral("session.delete")},
+            {QStringLiteral("requestId"), requestId},
+            {QStringLiteral("sessionId"), cleanup.sessionId},
+            {QStringLiteral("expectedRuntimeIncarnationId"),
+             cleanup.incarnationId},
+        }).toJson(QJsonDocument::Compact);
+        if (!m_dispatcher.send(CommandLane::Sessions, command)) {
+            m_inactiveCleanupIds.remove(cleanup.sessionId);
+            continue;
+        }
+        m_pendingReceipts.insert(requestId, {
+            .operation = QStringLiteral("session.delete"),
+            .sessionId = cleanup.sessionId,
+            .incarnationId = cleanup.incarnationId,
+        });
+        auto* timer = new QTimer(this);
+        timer->setSingleShot(true);
+        connect(
+            timer,
+            &QTimer::timeout,
+            this,
+            [this, requestId, sessionId = cleanup.sessionId] {
+                const auto pending = m_pendingReceipts.find(requestId);
+                if (pending != m_pendingReceipts.end()
+                    && pending->operation
+                        == QStringLiteral("session.delete")) {
+                    m_pendingReceipts.erase(pending);
+                }
+                clearInactiveCleanupTracking(requestId, sessionId);
+                bumpAvailability();
+                pumpInactiveCleanup();
+            });
+        m_inactiveCleanupTimers.insert(requestId, timer);
+        timer->start(static_cast<int>(m_closeTimeoutMs));
+    }
+}
+
+void SessionActions::clearInactiveCleanupTracking(
+    const QString& requestId,
+    const QString& sessionId)
+{
+    auto* timer = m_inactiveCleanupTimers.take(requestId);
+    if (timer != nullptr) {
+        timer->stop();
+        timer->deleteLater();
+    }
+    m_inactiveCleanupIds.remove(sessionId);
 }
 
 void SessionActions::applyHiddenList(const QJsonObject& object)
@@ -1329,17 +1500,6 @@ void SessionActions::bumpAvailability()
             emit stateChanged();
         }
     }
-    if (!m_deleteConfirmationSessionId.isEmpty()) {
-        const auto context =
-            m_sessions.actionContext(m_deleteConfirmationSessionId);
-        if (!context
-            || context->incarnationId != m_deleteConfirmationIncarnationId
-            || !canDelete(m_deleteConfirmationSessionId)) {
-            m_deleteConfirmationSessionId.clear();
-            m_deleteConfirmationIncarnationId.clear();
-            emit stateChanged();
-        }
-    }
     ++m_availabilityRevision;
     emit availabilityChanged();
 }
@@ -1360,12 +1520,23 @@ bool SessionActions::closeStatus(const QString& status)
 QString SessionActions::generatedSessionName()
 {
     static constexpr std::array adjectives {
-        "Amber", "Brass", "Cedar", "Copper", "Dusk", "Ember",
-        "Fern", "Flint", "Juniper", "Moss", "Slate", "Willow",
+        "Amber", "Arctic", "Azure", "Brass", "Bronze", "Cedar", "Cobalt",
+        "Copper", "Coral", "Crimson", "Crystal", "Dusk", "Ember", "Fern",
+        "Flint", "Frost", "Golden", "Granite", "Hazel", "Indigo", "Iron",
+        "Ivory", "Jade", "Jasper", "Juniper", "Lapis", "Maple", "Marble",
+        "Misty", "Moss", "Nimble", "Obsidian", "Onyx", "Opal", "Pearl",
+        "Pine", "Quartz", "Raven", "Rosewood", "Ruby", "Rustic", "Sage",
+        "Sandy", "Scarlet", "Shadow", "Silver", "Slate", "Steel", "Stone",
+        "Swift", "Tawny", "Timber", "Topaz", "Verdant", "Violet", "Willow",
     };
     static constexpr std::array animals {
-        "Badger", "Crane", "Falcon", "Fox", "Heron", "Lark",
-        "Otter", "Owl", "Raven", "Sparrow", "Wolf", "Wren",
+        "Badger", "Bear", "Bobcat", "Cardinal", "Condor", "Cougar", "Crane",
+        "Crow", "Deer", "Eagle", "Elk", "Falcon", "Finch", "Fox", "Gecko",
+        "Goose", "Hawk", "Heron", "Ibis", "Jaguar", "Jay", "Kestrel",
+        "Lark", "Leopard", "Lynx", "Marten", "Merlin", "Moose", "Newt",
+        "Orca", "Osprey", "Otter", "Owl", "Panther", "Pelican", "Puma",
+        "Quail", "Raccoon", "Raven", "Robin", "Salmon", "Seal", "Sparrow",
+        "Stork", "Swan", "Tiger", "Viper", "Wolf", "Wren",
     };
     const auto adjective = adjectives.at(
         QRandomGenerator::global()->bounded(

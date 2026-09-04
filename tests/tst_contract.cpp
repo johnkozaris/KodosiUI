@@ -16,6 +16,7 @@ class ContractTest final : public QObject
 private slots:
     void dependencyBaselineIsCurrent();
     void desktopStateQmlContractIsNativeOwned();
+    void newSessionInteractionMatchesSwift();
     void shellAccountDeviceParityContract();
     void missionPresentationRecoveryContract();
     void desktopFileIntegrationContractIsNativeOwned();
@@ -173,11 +174,23 @@ void ContractTest::desktopStateQmlContractIsNativeOwned()
         tileQml.open(QIODevice::ReadOnly),
         qPrintable(tileQml.errorString()));
     const auto tileSource = tileQml.readAll();
-    QVERIFY(tileSource.contains("width < 340 ? 0"));
+    QVERIFY(tileSource.contains("width < 360 ? 0"));
     QVERIFY(tileSource.contains("width < 640 ? 1 : 2"));
     QVERIFY(tileSource.contains("visible: root.chromeTier >= 1"));
     QVERIFY(tileSource.contains(
         "Accessible.description: terminalAccessibilityStatus"));
+    QVERIFY(tileSource.contains(
+        "onOperationError: message =>"));
+    QVERIFY(tileSource.contains(
+        ".operationError.dismiss\""));
+    QVERIFY(tileSource.contains(
+        ".terminal.copy\""));
+    QVERIFY(tileSource.contains(
+        ".terminal.paste\""));
+    QVERIFY(tileSource.contains(
+        ".approval.approve\""));
+    QVERIFY(tileSource.contains(
+        ".approval.deny\""));
     QVERIFY(tileSource.contains(
         "qsTr(\"Connecting terminal\")"));
     QVERIFY(tileSource.contains(
@@ -241,18 +254,6 @@ void ContractTest::desktopStateQmlContractIsNativeOwned()
         compositionSource.count("desktopState.attachWindow("),
         1);
     QVERIFY(!compositionSource.contains("mainWindow->show()"));
-    QVERIFY(compositionSource.contains(
-        "argument.startsWith(QStringLiteral(\"--ui-probe-\"))"));
-    QVERIFY(compositionSource.contains(
-        "desktopStateSettings(!syntheticMode)"));
-    QVERIFY(compositionSource.contains(
-        "build/synthetic-roots/"));
-    QVERIFY(compositionSource.contains(
-        "removeSyntheticConfig"));
-    QVERIFY(compositionSource.contains(
-        "\"XDG_CONFIG_HOME\""));
-    QVERIFY(compositionSource.contains(
-        "\"XDG_STATE_HOME\""));
 
     QFile desktopStateCpp(
         QStringLiteral(
@@ -262,44 +263,41 @@ void ContractTest::desktopStateQmlContractIsNativeOwned()
         qPrintable(desktopStateCpp.errorString()));
     QVERIFY(desktopStateCpp.readAll().contains(
         "&QWindow::screenChanged"));
+}
 
-    QFile smokeScript(
-        QStringLiteral(KODOSI_SOURCE_DIR "/scripts/smoke-ui-probe.sh"));
-    QVERIFY2(
-        smokeScript.open(QIODevice::ReadOnly),
-        qPrintable(smokeScript.errorString()));
-    const auto smokeSource = smokeScript.readAll();
-    QVERIFY(smokeSource.contains(
-        "config_dir=\"$artifact_dir/xdg-config.$$\""));
-    QVERIFY(smokeSource.contains(
-        "data_root=\"$artifact_dir/kodosi-data.$$\""));
-    QVERIFY(smokeSource.contains(
-        "production_data_root=\"$artifact_dir/kodosi-production-data.$$\""));
-    QVERIFY(smokeSource.contains("mkdir -p \"$config_dir\""));
-    QVERIFY(smokeSource.contains("XDG_CONFIG_HOME=\"$config_dir\""));
-    QVERIFY(smokeSource.contains("KODOSI_DATA_ROOT=\"$data_root\""));
-    QVERIFY(smokeSource.contains(
-        "KODOSI_PRODUCTION_DATA_ROOT=\"$production_data_root\""));
-    QVERIFY(smokeSource.contains(
-        "rm -rf -- \"$config_dir\" \"$data_root\" \"$production_data_root\""));
-    QVERIFY(smokeSource.contains(
-        "--text \"Ready proof\""));
-    QVERIFY(smokeSource.contains(
-        ">\"$artifact_dir/tiling-ready-tree.json\""));
-    QVERIFY(smokeSource.contains(
-        "native terminal accessible text is empty"));
-    QVERIFY(smokeSource.contains(
-        "KODOSI_UI_PROBE_AGENT_PARITY_ONLY"));
-    QVERIFY(smokeSource.contains(
-        "--ui-probe-project-intel-empty"));
-    QVERIFY(smokeSource.contains(
-        "--ui-probe-project-intel-archive"));
-    QVERIFY(smokeSource.contains(
-        "panel.projectIntel.source.selected"));
-    QVERIFY(smokeSource.contains(
-        "panel.settings.autoMode.reload.cancel"));
-    QVERIFY(smokeSource.contains(
-        "agent-settings-external-stale.json"));
+void ContractTest::newSessionInteractionMatchesSwift()
+{
+    QFile sidebar(QStringLiteral(
+        KODOSI_SOURCE_DIR
+        "/src/qml/Workbench/SessionSidebar.qml"));
+    QVERIFY2(sidebar.open(QIODevice::ReadOnly), qPrintable(sidebar.errorString()));
+    const auto source = sidebar.readAll();
+
+    QVERIFY(source.contains(
+        "onClicked: Models.SessionActions.createDefault()"));
+    QVERIFY(source.contains(
+        "objectName: \"sidebar.session.chooseFolder\""));
+    QVERIFY(source.contains(
+        "Models.DesktopFiles.NewSessionWorkingDirectory"));
+    QVERIFY(source.contains(
+        "Models.SessionActions.createInDirectory(canonicalDirectory)"));
+    QVERIFY(source.contains(
+        "model: Models.SessionActions.pendingCreations"));
+    QVERIFY(!source.contains("property bool createOpen"));
+    QVERIFY(!source.contains("objectName: \"session.create.name\""));
+    QVERIFY(!source.contains("objectName: \"session.create.directory\""));
+    QVERIFY(!source.contains("objectName: \"session.create.submit\""));
+    QVERIFY(!source.contains("objectName: \"session.create.cancel\""));
+
+    QFile main(QStringLiteral(KODOSI_SOURCE_DIR "/src/qml/Main.qml"));
+    QVERIFY2(main.open(QIODevice::ReadOnly), qPrintable(main.errorString()));
+    const auto mainSource = main.readAll();
+    QVERIFY(mainSource.contains(
+        "onNewSessionRequested: window.createDefaultSession()"));
+    QVERIFY(!mainSource.contains("sessionSidebar.createOpen"));
+    QVERIFY(mainSource.contains("function onSessionCreated(sessionId)"));
+    QVERIFY(mainSource.contains(
+        "Models.DesktopState.selectSession(sessionId)"));
 }
 
 void ContractTest::shellAccountDeviceParityContract()
@@ -329,10 +327,11 @@ void ContractTest::shellAccountDeviceParityContract()
     QVERIFY(mainSource.contains("Models.SessionActions.createDefault()"));
     QVERIFY(mainSource.contains("KeyboardShortcutsOverlay"));
     QVERIFY(mainSource.contains("header.utility.menu"));
-    QVERIFY(!mainSource.contains("sequence: \"Ctrl+Shift+A\""));
-    QVERIFY(!mainSource.contains("sequence: \"Ctrl+Shift+X\""));
-    QVERIFY(!mainSource.contains("shortcut.approval.approve"));
-    QVERIFY(!mainSource.contains("shortcut.approval.deny"));
+    QVERIFY(mainSource.contains("sequence: \"Ctrl+Shift+A\""));
+    QVERIFY(mainSource.contains("sequence: \"Ctrl+Shift+X\""));
+    QVERIFY(mainSource.contains("shortcut.approval.approve"));
+    QVERIFY(mainSource.contains("shortcut.approval.deny"));
+    QVERIFY(mainSource.contains("sequence: \"Ctrl+Shift+R\""));
 
     QFile sidebar(QStringLiteral(
         KODOSI_SOURCE_DIR "/src/qml/Workbench/SessionSidebar.qml"));
@@ -340,9 +339,19 @@ void ContractTest::shellAccountDeviceParityContract()
     const auto sidebarSource = sidebar.readAll();
     QVERIFY(sidebarSource.contains("readonly property bool modalOpen:"));
     QVERIFY(sidebarSource.contains("shareDialog.opened"));
-    QVERIFY(sidebarSource.contains("deleteConfirmation.visible"));
     QVERIFY(sidebarSource.contains("leaveConfirmation.visible"));
-    QVERIFY(sidebarSource.contains("revokeConfirmation.visible"));
+    QVERIFY(!sidebarSource.contains("revokeConfirmation.visible"));
+
+    QFile agentIntel(QStringLiteral(
+        KODOSI_SOURCE_DIR "/src/qml/AgentIntel/AgentIntelDrawer.qml"));
+    QVERIFY2(
+        agentIntel.open(QIODevice::ReadOnly),
+        qPrintable(agentIntel.errorString()));
+    const auto agentIntelSource = agentIntel.readAll();
+    QVERIFY(agentIntelSource.contains(
+        "panel.agentIntel.access.revoke.confirmation"));
+    QVERIFY(agentIntelSource.contains(
+        "Models.People.friendPresentations"));
 
     QFile overlay(QStringLiteral(
         KODOSI_SOURCE_DIR
@@ -395,8 +404,9 @@ void ContractTest::shellAccountDeviceParityContract()
              QByteArrayLiteral("clears your local keypair"),
              QByteArrayLiteral("All linked devices unlink"),
              QByteArrayLiteral("friend trust pins are forgotten"),
+             QByteArrayLiteral("embedded: true"),
              QByteArrayLiteral(
-                 "\"panel.settings.account.signIn\""),
+                 "\"panel.settings.account.refreshSession\""),
              QByteArrayLiteral(
                  "selectedCategory !== \"agents\"\n"
                  "                && selectedCategory !== \"account\""),
@@ -429,6 +439,8 @@ void ContractTest::shellAccountDeviceParityContract()
         "visible: !root.identityReset"));
     QVERIFY(authOverlaySource.contains(
         "&& !accountRecoverySurfaceOpen"));
+    QVERIFY(authOverlaySource.contains(
+        "objectName: \"auth.use-another-account\""));
     QVERIFY(!authOverlaySource.contains(
         "Models.AuthActions.clearError()\n"
         "                            root.accountRecoveryRequested()"));
@@ -441,6 +453,11 @@ void ContractTest::shellAccountDeviceParityContract()
     const auto authBannerSource = authBanner.readAll();
     QVERIFY(authBannerSource.contains(
         "Models.AuthActions.failedOperation === \"identity.reset\""));
+    QVERIFY(authBannerSource.contains(
+        "Models.AuthState.recoveryRequired"));
+    QVERIFY(authBannerSource.contains(
+        "Models.AuthState.clearRecoveryMessage()"));
+    QVERIFY(authBannerSource.contains("qsTr(\"Review recovery\")"));
     QVERIFY(authBannerSource.contains("root.openAccountRequested()"));
     QVERIFY(authBannerSource.contains("Models.AuthActions.retry()"));
     QVERIFY(!authBannerSource.contains(
@@ -455,12 +472,6 @@ void ContractTest::shellAccountDeviceParityContract()
         "accessibleId: \"auth.gate.missions\""));
     QVERIFY(missionsSource.contains(
         "visible: Models.AuthState.signedIn"));
-
-    QFile smoke(QStringLiteral(
-        KODOSI_SOURCE_DIR "/scripts/smoke-ui-probe.sh"));
-    QVERIFY2(smoke.open(QIODevice::ReadOnly), qPrintable(smoke.errorString()));
-    QVERIFY(smoke.readAll().contains(
-        "id=panel.settings.account.signIn"));
 
     QFile devices(QStringLiteral(
         KODOSI_SOURCE_DIR "/src/qml/Devices/DevicesView.qml"));
@@ -477,6 +488,7 @@ void ContractTest::shellAccountDeviceParityContract()
              QByteArrayLiteral("\"devices.link.outcome.dismiss\""),
              QByteArrayLiteral("\"devices.error.retry\""),
              QByteArrayLiteral("\"devices.error.dismiss\""),
+             QByteArrayLiteral("Models.DeviceActions.approvalPending("),
              QByteArrayLiteral("\"devices.current.signer\""),
              QByteArrayLiteral("\"devices.current.issued\""),
              QByteArrayLiteral("Models.Devices.isCanonicalUserCode("),
@@ -496,7 +508,10 @@ void ContractTest::missionPresentationRecoveryContract()
         qPrintable(peopleView.errorString()));
     const auto peopleSource = peopleView.readAll();
     QVERIFY(peopleSource.contains(
-        "Models.MissionActions.hasCreateMissionDraft"));
+        "visible: root.selectedMissionId.length === 0"));
+    QVERIFY(!peopleSource.contains("objectName: \"missions.refresh\""));
+    QVERIFY(peopleSource.contains("objectName: \"missions.error.retry\""));
+    QVERIFY(peopleSource.contains("objectName: \"missions.create.discard\""));
     QVERIFY(peopleSource.contains(
         "discardCreateMission()"));
     QVERIFY(peopleSource.contains(
@@ -520,11 +535,9 @@ void ContractTest::missionPresentationRecoveryContract()
              QByteArrayLiteral("Models.MissionActions.submitTaskCreate()"),
              QByteArrayLiteral("Models.MissionActions.chatCanCheck"),
              QByteArrayLiteral("Models.MissionActions.checkChat()"),
-             QByteArrayLiteral("Models.MissionActions.retryChat()"),
              QByteArrayLiteral("Models.MissionActions.discardChat()"),
              QByteArrayLiteral("Models.MissionActions.taskCreateCanCheck"),
              QByteArrayLiteral("Models.MissionActions.checkTaskCreate()"),
-             QByteArrayLiteral("Models.MissionActions.retryTaskCreate()"),
              QByteArrayLiteral("Models.MissionActions.discardTaskCreate()"),
              QByteArrayLiteral("objectName: \"missions.focus.actions\""),
              QByteArrayLiteral("openFocusedFullTerminal()"),
@@ -534,6 +547,10 @@ void ContractTest::missionPresentationRecoveryContract()
          }) {
         QVERIFY2(detailSource.contains(contract), contract.constData());
     }
+    QVERIFY(!detailSource.contains(
+        "objectName: \"missions.chat.retry\""));
+    QVERIFY(!detailSource.contains(
+        "objectName: \"missions.task.retry\""));
     for (const auto removed : {
              QByteArrayLiteral("MissionAttentionStrip"),
              QByteArrayLiteral("MissionChatPane"),
@@ -635,19 +652,11 @@ void ContractTest::desktopFileIntegrationContractIsNativeOwned()
         "/src/qml/Workbench/SessionSidebar.qml"));
     QVERIFY2(sidebar.open(QIODevice::ReadOnly), qPrintable(sidebar.errorString()));
     const auto sidebarSource = sidebar.readAll();
-    QVERIFY(sidebarSource.contains(
-        "objectName: \"session.create.directory.browse\""));
-    QVERIFY(sidebarSource.contains(
-        "Models.DesktopFiles.NewSessionWorkingDirectory"));
-    QVERIFY(sidebarSource.contains(
-        "Models.DesktopFiles.cancelDirectory("));
-    QVERIFY(sidebarSource.contains("Component.onDestruction:"));
-    QVERIFY(sidebarSource.contains(
-        "requestId !== root.directoryPickerRequestId"));
-    QVERIFY(sidebarSource.contains(
-        "objectName: \"sidebar.session.openProject.\""));
-    QVERIFY(sidebarSource.contains(
-        "Models.DesktopFiles.openSessionProject("));
+    QVERIFY(!sidebarSource.contains("sidebar.session.openProject."));
+    QVERIFY(!sidebarSource.contains("sidebar.session.delete."));
+    QVERIFY(!sidebarSource.contains("sidebar.session.reopen."));
+    QVERIFY(!sidebarSource.contains("sidebar.share.access."));
+    QVERIFY(sidebarSource.contains("sidebar.session.close."));
     QVERIFY(!sidebarSource.contains("Models.DesktopFiles.openPath("));
 
     QFile settings(QStringLiteral(
@@ -658,6 +667,9 @@ void ContractTest::desktopFileIntegrationContractIsNativeOwned()
     QVERIFY(settingsSource.contains(
         "\"panel.settings.sessions.browse\""));
     QVERIFY(settingsSource.contains(
+        "\"panel.settings.sessions.clearFolder\""));
+    QVERIFY(settingsSource.contains("readOnly: true"));
+    QVERIFY(!settingsSource.contains(
         "\"panel.settings.sessions.openFolder\""));
     QVERIFY(settingsSource.contains(
         "Models.DesktopFiles.SettingsWorkingDirectory"));
@@ -672,28 +684,12 @@ void ContractTest::desktopFileIntegrationContractIsNativeOwned()
         "/src/qml/Workbench/TerminalTile.qml"));
     QVERIFY2(tile.open(QIODevice::ReadOnly), qPrintable(tile.errorString()));
     const auto tileSource = tile.readAll();
-    QVERIFY(tileSource.contains(".overflow.openProject"));
-    QVERIFY(tileSource.contains("canOpenSessionProject(root.sessionId)"));
-    QVERIFY(tileSource.contains("Models.DesktopFiles.TerminalProject"));
-    QVERIFY(tileSource.contains(
+    QVERIFY(!tileSource.contains(".overflow.openProject"));
+    QVERIFY(!tileSource.contains("canOpenSessionProject(root.sessionId)"));
+    QVERIFY(!tileSource.contains("Models.DesktopFiles.TerminalProject"));
+    QVERIFY(!tileSource.contains(
         "Models.DesktopFiles.openSessionProject("));
     QVERIFY(!tileSource.contains("Models.DesktopFiles.openPath("));
-
-    QFile banner(QStringLiteral(
-        KODOSI_SOURCE_DIR
-        "/src/qml/Workbench/DesktopFileErrorBanner.qml"));
-    QVERIFY2(banner.open(QIODevice::ReadOnly), qPrintable(banner.errorString()));
-    const auto bannerSource = banner.readAll();
-    QVERIFY(bannerSource.contains(
-        "objectName: \"banner.desktopFile.error\""));
-    QVERIFY(bannerSource.contains(
-        "objectName: \"banner.desktopFile.error.dismiss\""));
-    QVERIFY(bannerSource.contains(
-        "Models.DesktopFiles.SessionProject"));
-
-    QFile shell(QStringLiteral(KODOSI_SOURCE_DIR "/src/qml/Main.qml"));
-    QVERIFY2(shell.open(QIODevice::ReadOnly), qPrintable(shell.errorString()));
-    QVERIFY(shell.readAll().contains("DesktopFileErrorBanner"));
 
     QFile sourceCMake(QStringLiteral(
         KODOSI_SOURCE_DIR "/src/CMakeLists.txt"));
@@ -704,7 +700,7 @@ void ContractTest::desktopFileIntegrationContractIsNativeOwned()
     QVERIFY(sourceCMakeText.contains("Qt6::Widgets"));
     QVERIFY(sourceCMakeText.contains("QGtk3ThemePlugin"));
     QVERIFY(sourceCMakeText.contains("QXdgDesktopPortalThemePlugin"));
-    QVERIFY(sourceCMakeText.contains(
+    QVERIFY(!sourceCMakeText.contains(
         "qml/Workbench/DesktopFileErrorBanner.qml"));
 
     QFile rootCMake(QStringLiteral(KODOSI_SOURCE_DIR "/CMakeLists.txt"));
@@ -816,19 +812,16 @@ void ContractTest::projectIntelligenceQmlContractIsProductSafe()
         qPrintable(agentsSettings.errorString()));
     const auto agentsSource = agentsSettings.readAll();
     QVERIFY(!agentsSource.contains("Component.onCompleted"));
-    QVERIFY(agentsSource.contains(
-        "Models.ProjectIntelligence.refreshSources(true)"));
-    QVERIFY(agentsSource.contains(
-        "Models.AgentAutoModeRules.refresh(false)"));
+    QVERIFY(!agentsSource.contains(
+        "objectName: \"panel.settings.agents.workspace\""));
+    QVERIFY(!agentsSource.contains(
+        "objectName: \"panel.settings.agents.refresh\""));
     QVERIFY(agentsSource.contains(
         "Models.ExternalDiscovery.refresh(true)"));
-    QVERIFY(agentsSource.contains("Models.AgentGlobal.refresh()"));
-    QVERIFY(agentsSource.contains(
-        "Unsaved Auto Mode rule changes will be replaced"));
-    QVERIFY(agentsSource.contains(
+    QVERIFY(!agentsSource.contains(
         "objectName: \"panel.settings.autoMode.reload.confirm\""));
     QVERIFY(agentsSource.contains(
-        "autoModeReloadCancel.forceActiveFocus("));
+        "Models.AgentAutoModeRules.refresh(true)"));
     for (const auto copy : {
              QByteArrayLiteral("qsTr(\"Not refreshed\")"),
              QByteArrayLiteral("qsTr(\"Refreshing…\")"),
@@ -888,8 +881,10 @@ void ContractTest::projectIntelligenceQmlContractIsProductSafe()
     QVERIFY(settingsSource.contains(
         "releaseAgentsVisit(transferringProjectIntel)"));
     QVERIFY(settingsSource.contains("Layout.minimumHeight: 0"));
-    QVERIFY(settingsSource.contains("Layout.minimumHeight: 66"));
-    QVERIFY(settingsSource.contains("Layout.maximumHeight: 66"));
+    QVERIFY(settingsSource.contains(
+        "visible: root.selectedCategory === \"terminal\""));
+    QVERIFY(settingsSource.contains(
+        "Layout.minimumHeight: Layout.preferredHeight"));
 
     const auto scopePosition =
         agentsSource.indexOf("objectName: \"panel.settings.agents.scope\"");
@@ -898,16 +893,6 @@ void ContractTest::projectIntelligenceQmlContractIsProductSafe()
             "objectName: \"panel.settings.agents.integration\"");
     QVERIFY(scopePosition >= 0);
     QVERIFY(integrationPosition > scopePosition);
-
-    QFile smoke(
-        QStringLiteral(
-            KODOSI_SOURCE_DIR "/scripts/smoke-ui-probe.sh"));
-    QVERIFY2(smoke.open(QIODevice::ReadOnly), qPrintable(smoke.errorString()));
-    const auto smokeSource = smoke.readAll();
-    QVERIFY(smokeSource.contains("agent-settings-compact-scope.json"));
-    QVERIFY(smokeSource.contains("agent-settings-wide-scope.json"));
-    QVERIFY(smokeSource.contains(
-        "settings scroll viewport overlaps the 66px footer"));
 
     QFile projectModel(
         QStringLiteral(

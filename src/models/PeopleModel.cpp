@@ -52,6 +52,16 @@ QVariant PeopleModel::data(const QModelIndex& index, const int role) const
         return person.avatarUrl;
     case RelationshipRole:
         return QVariant::fromValue(person.relationship);
+    case RelationshipNameRole:
+        switch (person.relationship) {
+        case Relationship::Friend:
+            return QStringLiteral("friend");
+        case Relationship::IncomingRequest:
+            return QStringLiteral("incoming");
+        case Relationship::OutgoingRequest:
+            return QStringLiteral("outgoing");
+        }
+        return {};
     case CreatedAtRole:
         return person.createdAt;
     default:
@@ -67,6 +77,7 @@ QHash<int, QByteArray> PeopleModel::roleNames() const
         {DisplayNameRole, QByteArrayLiteral("displayName")},
         {AvatarUrlRole, QByteArrayLiteral("avatarUrl")},
         {RelationshipRole, QByteArrayLiteral("relationship")},
+        {RelationshipNameRole, QByteArrayLiteral("relationshipName")},
         {CreatedAtRole, QByteArrayLiteral("createdAt")},
     };
 }
@@ -87,9 +98,35 @@ int PeopleModel::incomingCount() const noexcept
         &Person::relationship));
 }
 
+int PeopleModel::outgoingCount() const noexcept
+{
+    return static_cast<int>(std::ranges::count(
+        m_people,
+        Relationship::OutgoingRequest,
+        &Person::relationship));
+}
+
 bool PeopleModel::ready() const noexcept
 {
     return m_ready;
+}
+
+QVariantList PeopleModel::friendPresentations() const
+{
+    QVariantList result;
+    for (const auto& person : m_people) {
+        if (person.relationship != Relationship::Friend) {
+            continue;
+        }
+        result.push_back(QVariantMap {
+            {QStringLiteral("handle"), person.handle},
+            {QStringLiteral("displayName"),
+             person.displayName.isEmpty()
+                 ? person.handle
+                 : person.displayName},
+        });
+    }
+    return result;
 }
 
 std::optional<PeopleModel::Relationship> PeopleModel::relationshipForHandle(

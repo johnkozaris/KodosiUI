@@ -11,21 +11,21 @@ Item {
     property string status
     property string mode
     property string terminalError
+    property string terminalOperationError
     property string kind
+    property double approvalNow: Date.now()
     property bool canRetainPresentation: false
     property bool isStageReady: false
     property bool focusedSizeAuthority: false
     property bool accessibilitySuppressed: false
-    property int desktopRequestSerial: 0
-    property string openProjectRequestId
-    property string openProjectError
     readonly property bool active:
         Models.DesktopState.selectedSessionId === sessionId
     readonly property bool focusMode:
         Models.DesktopState.stageLayoutMode
             === Models.DesktopState.Focus
     readonly property int chromeTier:
-        width < 340 ? 0 : width < 640 ? 1 : 2
+        width < 360 ? 0 : width < 640 ? 1 : 2
+    property var approval: ({})
     readonly property string projectLabel: {
         const normalized = project.replace(/\/+$/, "")
         const segments = normalized.split("/")
@@ -91,18 +91,6 @@ Item {
         }
     }
 
-    function openProject() {
-        desktopRequestSerial += 1
-        const requestId = "stage.tile." + sessionId
-            + ".openProject." + desktopRequestSerial
-        openProjectRequestId = requestId
-        openProjectError = ""
-        Models.DesktopFiles.openSessionProject(
-            sessionId,
-            requestId,
-            Models.DesktopFiles.TerminalProject)
-    }
-
     function refreshPresentation() {
         const presentation =
             Models.Sessions.presentationForSession(sessionId)
@@ -119,12 +107,28 @@ Item {
 
     function synchronizeTerminal() {
         terminalError = ""
+        terminalOperationError = ""
         if (sessionId.length === 0) {
             Models.TerminalSurfaces.detach(terminal)
             return
         }
         if (!Models.TerminalSurfaces.bind(terminal, sessionId))
             terminalError = qsTr("This session is no longer available.")
+    }
+
+    function refreshApproval() {
+        approval = Models.PendingPermissions.presentationForSession(sessionId)
+    }
+
+    function approvalCountdown() {
+        if (approval.deadline === undefined)
+            return ""
+        const remaining = Math.max(
+            0,
+            Math.ceil(
+                (new Date(approval.deadline).getTime() - approvalNow)
+                    / 1000))
+        return qsTr("%1s").arg(remaining)
     }
 
     function forceTerminalFocus() {
@@ -138,6 +142,7 @@ Item {
     }
     Component.onCompleted: {
         refreshPresentation()
+        refreshApproval()
         Qt.callLater(synchronizeTerminal)
     }
     Component.onDestruction: Models.TerminalSurfaces.detach(terminal)
@@ -158,6 +163,34 @@ Item {
         }
     }
 
+    Timer {
+        interval: 1000
+        repeat: true
+        running: root.approval.identityToken !== undefined
+            && root.chromeTier > 0
+        onTriggered: root.approvalNow = Date.now()
+    }
+
+    Connections {
+        target: Models.PendingPermissions
+
+        function onModelReset() {
+            root.refreshApproval()
+        }
+
+        function onRowsInserted() {
+            root.refreshApproval()
+        }
+
+        function onRowsRemoved() {
+            root.refreshApproval()
+        }
+
+        function onDataChanged() {
+            root.refreshApproval()
+        }
+    }
+
     Connections {
         target: Models.TerminalSurfaces
 
@@ -169,26 +202,6 @@ Item {
         function onAttachmentRejected(surface, rejectedSessionId, reason) {
             if (surface === terminal && rejectedSessionId === root.sessionId)
                 root.terminalError = reason
-        }
-    }
-
-    Connections {
-        target: Models.DesktopFiles
-
-        function onPathOpened(requestId, purpose) {
-            if (requestId === root.openProjectRequestId
-                    && purpose === Models.DesktopFiles.TerminalProject) {
-                root.openProjectRequestId = ""
-                root.openProjectError = ""
-            }
-        }
-
-        function onOperationFailed(requestId, purpose, errorCode, message) {
-            if (requestId === root.openProjectRequestId
-                    && purpose === Models.DesktopFiles.TerminalProject) {
-                root.openProjectRequestId = ""
-                root.openProjectError = message
-            }
         }
     }
 
@@ -331,19 +344,6 @@ Item {
                         KMenuItem {
                             objectName:
                                 "stage.tile." + root.sessionId
-                                + ".overflow.openProject"
-                            Accessible.id: objectName
-                            Accessible.ignored: !visible
-                            visible: overflowMenu.visible
-                                && Models.DesktopFiles
-                                    .canOpenSessionProject(root.sessionId)
-                            text: qsTr("Open Project")
-                            onTriggered: root.openProject()
-                        }
-
-                        KMenuItem {
-                            objectName:
-                                "stage.tile." + root.sessionId
                                 + ".overflow.focus"
                             Accessible.id: objectName
                             Accessible.ignored: !visible
@@ -450,42 +450,6 @@ Item {
             }
         }
 
-        Rectangle {
-            visible: root.openProjectError.length > 0
-            Layout.fillWidth: true
-            implicitHeight: openProjectErrorRow.implicitHeight + 10
-            color: KodosiTheme.surfaceRaised
-
-            RowLayout {
-                id: openProjectErrorRow
-                anchors.fill: parent
-                anchors.leftMargin: KodosiTheme.spacing3
-                anchors.rightMargin: KodosiTheme.spacing2
-                spacing: KodosiTheme.spacing2
-
-                PlainLabel {
-                    Layout.fillWidth: true
-                    text: root.openProjectError
-                    color: KodosiTheme.danger
-                    font.pixelSize: 9
-                    wrapMode: Text.Wrap
-                    Accessible.name: text
-                }
-
-                KIconButton {
-                    objectName: "stage.tile." + root.sessionId
-                        + ".openProject.error.dismiss"
-                    Accessible.id: objectName
-                    Accessible.ignored: !visible
-                    glyph: "close"
-                    size: 24
-                    Accessible.name:
-                        qsTr("Dismiss project open error")
-                    onClicked: root.openProjectError = ""
-                }
-            }
-        }
-
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -516,8 +480,74 @@ Item {
                 }
                 onTerminalError: message =>
                     root.terminalError = message
+                onOperationError: message =>
+                    root.terminalOperationError = message
+                onContextMenuRequested: (x, y) => {
+                    const point = terminal.mapToItem(root, x, y)
+                    terminalContextMenu.popup(point.x, point.y)
+                }
                 onTerminalClosed: root.terminalError =
                     qsTr("The terminal session has ended.")
+            }
+
+            KMenu {
+                id: terminalContextMenu
+
+                KMenuItem {
+                    objectName: "stage.tile." + root.sessionId
+                        + ".terminal.copy"
+                    Accessible.id: objectName
+                    text: qsTr("Copy")
+                    enabled: terminal.hasSelection
+                    onTriggered: terminal.copySelectionToClipboard()
+                }
+
+                KMenuItem {
+                    objectName: "stage.tile." + root.sessionId
+                        + ".terminal.paste"
+                    Accessible.id: objectName
+                    text: qsTr("Paste")
+                    visible: !terminal.readOnly
+                    enabled: visible
+                    onTriggered: terminal.pasteFromClipboard()
+                }
+            }
+
+            Rectangle {
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                visible: root.terminalOperationError.length > 0
+                implicitHeight: operationErrorRow.implicitHeight + 10
+                color: KodosiTheme.surfaceRaised
+                z: 3
+
+                RowLayout {
+                    id: operationErrorRow
+                    anchors.fill: parent
+                    anchors.leftMargin: KodosiTheme.spacing3
+                    anchors.rightMargin: KodosiTheme.spacing2
+                    spacing: KodosiTheme.spacing2
+
+                    PlainLabel {
+                        Layout.fillWidth: true
+                        text: root.terminalOperationError
+                        color: KodosiTheme.danger
+                        font.pixelSize: 9
+                        wrapMode: Text.Wrap
+                    }
+
+                    KIconButton {
+                        objectName: "stage.tile." + root.sessionId
+                            + ".operationError.dismiss"
+                        Accessible.id: objectName
+                        glyph: "close"
+                        size: 24
+                        Accessible.name:
+                            qsTr("Dismiss terminal operation error")
+                        onClicked: root.terminalOperationError = ""
+                    }
+                }
             }
 
             ColumnLayout {
@@ -610,6 +640,107 @@ Item {
                                 "This session is no longer available.")
                         }
                     }
+                }
+
+            }
+        }
+
+        Rectangle {
+            visible: root.approval.identityToken !== undefined
+            Layout.fillWidth: true
+            implicitHeight: approvalColumn.implicitHeight + 10
+            color: KodosiTheme.surfaceRaised
+
+            ColumnLayout {
+                id: approvalColumn
+                anchors.fill: parent
+                anchors.leftMargin: KodosiTheme.spacing3
+                anchors.rightMargin: KodosiTheme.spacing3
+                spacing: 2
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: KodosiTheme.spacing2
+
+                    Rectangle {
+                        Layout.preferredWidth: 7
+                        Layout.preferredHeight: 7
+                        radius: 4
+                        color: root.approval.risk === "destructive"
+                            || root.approval.risk === "credential"
+                            ? KodosiTheme.danger
+                            : root.approval.risk === "unknown"
+                              ? KodosiTheme.warning
+                              : KodosiTheme.accent
+                    }
+
+                    PlainLabel {
+                        Layout.fillWidth: true
+                        text: root.approval.toolName || qsTr("Tool approval")
+                        color: KodosiTheme.textPrimary
+                        font.pixelSize: 10
+                        font.weight: Font.DemiBold
+                        elide: Text.ElideRight
+                    }
+
+                    PlainLabel {
+                        visible: root.chromeTier >= 2
+                            && (root.approval.toolInputSummary || "").length > 0
+                        Layout.maximumWidth: 220
+                        text: root.approval.toolInputSummary || ""
+                        color: KodosiTheme.textSecondary
+                        font.pixelSize: 9
+                        elide: Text.ElideMiddle
+                    }
+
+                    PlainLabel {
+                        visible: (root.approval.queuedCount || 0) > 0
+                        text: "+" + root.approval.queuedCount
+                        color: KodosiTheme.textSecondary
+                        font.pixelSize: 9
+                    }
+
+                    PlainLabel {
+                        visible: root.chromeTier > 0
+                            && root.approvalCountdown().length > 0
+                        text: root.approvalCountdown()
+                        color: KodosiTheme.textSecondary
+                        font.pixelSize: 9
+                    }
+
+                    KButton {
+                        objectName: "stage.tile." + root.sessionId
+                            + ".approval.deny"
+                        Accessible.id: objectName
+                        text: qsTr("Deny")
+                        compact: true
+                        enabled: root.approval.actionable === true
+                        onClicked: Models.PendingPermissions.deny(
+                            root.approval.identityToken)
+                    }
+
+                    KButton {
+                        objectName: "stage.tile." + root.sessionId
+                            + ".approval.approve"
+                        Accessible.id: objectName
+                        text: qsTr("Approve")
+                        compact: true
+                        variant: "primary"
+                        enabled: root.approval.actionable === true
+                        onClicked: Models.PendingPermissions.approve(
+                            root.approval.identityToken)
+                    }
+                }
+
+                PlainLabel {
+                    visible: (root.approval.decisionMessage || "").length > 0
+                    Layout.fillWidth: true
+                    text: root.approval.decisionMessage || ""
+                    color: root.approval.actionable === true
+                        ? KodosiTheme.danger
+                        : KodosiTheme.textSecondary
+                    font.pixelSize: 9
+                    elide: Text.ElideRight
                 }
             }
         }

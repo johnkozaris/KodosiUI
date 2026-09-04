@@ -53,6 +53,10 @@ class MissionActions final : public QObject {
         quint64 assignmentRevision
         READ assignmentRevision
         NOTIFY assignmentChanged)
+    Q_PROPERTY(
+        QVariantList inviteCandidates
+        READ inviteCandidates
+        NOTIFY stateChanged)
 
     Q_PROPERTY(QString createMissionName READ createMissionName NOTIFY draftsChanged)
     Q_PROPERTY(QString createMissionSlug READ createMissionSlug NOTIFY draftsChanged)
@@ -75,6 +79,14 @@ class MissionActions final : public QObject {
     Q_PROPERTY(
         QString chatRecipientSummary
         READ chatRecipientSummary
+        NOTIFY draftsChanged)
+    Q_PROPERTY(
+        QVariantList chatUnavailableRecipients
+        READ chatUnavailableRecipients
+        NOTIFY draftsChanged)
+    Q_PROPERTY(
+        bool chatHasUnavailableRecipients
+        READ chatHasUnavailableRecipients
         NOTIFY draftsChanged)
     Q_PROPERTY(Outcome chatOutcome READ chatOutcome NOTIFY draftsChanged)
     Q_PROPERTY(QString chatError READ chatError NOTIFY draftsChanged)
@@ -151,6 +163,7 @@ public:
     [[nodiscard]] bool canActOnSelectedTasks() const;
     [[nodiscard]] QVariantList assignmentOptions() const;
     [[nodiscard]] quint64 assignmentRevision() const noexcept;
+    [[nodiscard]] QVariantList inviteCandidates() const;
 
     [[nodiscard]] QString createMissionName() const;
     [[nodiscard]] QString createMissionSlug() const;
@@ -165,6 +178,8 @@ public:
     [[nodiscard]] QString chatDraftBody() const;
     [[nodiscard]] QStringList chatRecipientPresentationIds() const;
     [[nodiscard]] QString chatRecipientSummary() const;
+    [[nodiscard]] QVariantList chatUnavailableRecipients() const;
+    [[nodiscard]] bool chatHasUnavailableRecipients() const;
     [[nodiscard]] Outcome chatOutcome() const;
     [[nodiscard]] QString chatError() const;
     [[nodiscard]] bool chatCanCheck() const;
@@ -230,6 +245,8 @@ public:
     Q_INVOKABLE [[nodiscard]] bool inviteFriend(
         const QString& missionId,
         const QString& handle);
+    Q_INVOKABLE [[nodiscard]] bool inviteFriendCandidate(
+        const QString& candidateId);
     Q_INVOKABLE [[nodiscard]] bool acceptInvitation(
         const QString& invitationId);
     Q_INVOKABLE [[nodiscard]] bool declineInvitation(
@@ -250,7 +267,14 @@ public:
         const QString& missionId,
         const QString& taskId,
         const QString& sessionId);
+    Q_INVOKABLE [[nodiscard]] bool assignTaskByPresentationId(
+        const QString& taskId,
+        const QString& presentationId);
     Q_INVOKABLE [[nodiscard]] QString assignmentForTask(
+        const QString& taskId) const;
+    Q_INVOKABLE [[nodiscard]] QString assignmentPresentationForTask(
+        const QString& taskId) const;
+    Q_INVOKABLE [[nodiscard]] QVariantList transitionOptionsForTask(
         const QString& taskId) const;
     Q_INVOKABLE [[nodiscard]] bool canRemoveMember(
         const QString& missionId,
@@ -299,6 +323,7 @@ private:
     struct ChatDraft {
         QString body;
         QSet<QString> recipientPresentationIds;
+        QHash<QString, QString> recipientLabels;
         QString submittedBody;
         QStringList submittedRecipientSessionIds;
         QStringList submittedRecipientUserIds;
@@ -394,6 +419,8 @@ private:
     QHash<QString, ChatDraft> m_chatDrafts;
     QHash<QString, TaskDraft> m_taskDrafts;
     QHash<QString, LedgerPresentation> m_ledgerPresentations;
+    mutable QHash<QString, QString> m_inviteCandidateTokensByUserId;
+    mutable QHash<QString, QString> m_inviteCandidateUserIdsByToken;
     QStringList m_chatDraftOrder;
     QStringList m_taskDraftOrder;
     CreateDraft m_createDraft;

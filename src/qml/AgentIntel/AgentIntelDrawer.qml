@@ -23,6 +23,13 @@ KPopover {
         && approval.identityToken !== undefined
         && (approvalIdentityToken.length === 0
             || approval.identityToken === approvalIdentityToken)
+    readonly property bool canManageAccess:
+        Models.SessionAccess.stateRevision >= 0
+        && Models.SessionAccess.canManage(sessionId)
+    readonly property string accessMutationPhase:
+        Models.SessionAccess.stateRevision >= 0
+        ? Models.SessionAccess.mutationPhase(sessionId)
+        : "idle"
     property int surfaceIndex: 0
 
     parent: Overlay.overlay
@@ -51,6 +58,8 @@ KPopover {
         Models.AgentConversation.close()
         refreshPresentation()
         Models.Steering.inspect(sessionId)
+        if (root.canManageAccess)
+            Models.SessionAccess.inspect(sessionId)
         open()
     }
 
@@ -109,6 +118,18 @@ KPopover {
         }
     }
 
+    function accessLevelLabel(level) {
+        if (level === "view")
+            return qsTr("View")
+        if (level === "suggest")
+            return qsTr("Suggest")
+        if (level === "inject")
+            return qsTr("Inject")
+        if (level === "approve")
+            return qsTr("Approve")
+        return qsTr("Unknown")
+    }
+
     onOpened: {
         refreshPresentation()
         Qt.callLater(function() {
@@ -129,6 +150,8 @@ KPopover {
         Models.AgentCustomAgents.close()
         Models.AgentMemory.close()
         Models.Steering.clearInspection()
+        Models.SessionAccess.cancelRevokeConfirmation()
+        Models.SessionAccess.clearInspection()
     }
 
     Connections {
@@ -521,11 +544,11 @@ KPopover {
                                             "panel.agentIntel.approval.allow."
                                             + root.approval.identityToken
                                         Accessible.id: objectName
-                                        text: qsTr("Allow")
+                                        text: qsTr("Approve")
                                         visible: root.approvalActionsAvailable
                                         enabled: root.approvalActionsAvailable
                                             && root.approval.actionable === true
-                                        Accessible.name: qsTr("Allow this tool request")
+                                        Accessible.name: qsTr("Approve this tool request")
                                         onClicked: {
                                             if (root.approvalActionsAvailable)
                                                 Models.PendingPermissions.approve(
@@ -534,6 +557,218 @@ KPopover {
                                     }
                                 }
 
+                            }
+                        }
+
+                        SurfaceCard {
+                            visible: root.sessionInfo.scope !== "justMe"
+                                && (root.canManageAccess
+                                    || Models.SessionAccess.loading
+                                    || Models.SessionAccess.grants.count > 0)
+                            Layout.fillWidth: true
+                            implicitHeight: accessColumn.implicitHeight + 24
+
+                            ColumnLayout {
+                                id: accessColumn
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: KodosiTheme.spacing3
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+
+                                    PlainLabel {
+                                        Layout.fillWidth: true
+                                        text: qsTr("Shared with")
+                                        color: KodosiTheme.textPrimary
+                                        font.weight: Font.DemiBold
+                                    }
+
+                                    KButton {
+                                        objectName:
+                                            "panel.agentIntel.access.refresh"
+                                        Accessible.id: objectName
+                                        text: qsTr("Refresh")
+                                        compact: true
+                                        enabled: !Models.SessionAccess.loading
+                                        onClicked: Models.SessionAccess.refresh(
+                                            root.sessionId)
+                                    }
+                                }
+
+                                RowLayout {
+                                    visible: root.canManageAccess
+                                        && Models.People.friendPresentations
+                                            .length > 0
+                                    Layout.fillWidth: true
+                                    spacing: KodosiTheme.spacing2
+
+                                    KComboBox {
+                                        id: accessFriend
+                                        objectName:
+                                            "panel.agentIntel.access.friend"
+                                        Accessible.id: objectName
+                                        Layout.fillWidth: true
+                                        model: Models.People.friendPresentations
+                                        textRole: "displayName"
+                                        valueRole: "handle"
+                                        Accessible.name:
+                                            qsTr("Friend to grant access")
+                                    }
+
+                                    KComboBox {
+                                        id: accessLevel
+                                        objectName:
+                                            "panel.agentIntel.access.level"
+                                        Accessible.id: objectName
+                                        model: [
+                                            "view",
+                                            "suggest",
+                                            "inject",
+                                            "approve"
+                                        ]
+                                        displayText: root.accessLevelLabel(
+                                            currentText)
+                                        Accessible.name: qsTr("Access level")
+                                    }
+
+                                    KButton {
+                                        objectName:
+                                            "panel.agentIntel.access.grant"
+                                        Accessible.id: objectName
+                                        text: qsTr("Grant")
+                                        compact: true
+                                        enabled: String(
+                                            accessFriend.currentValue)
+                                            .length > 0
+                                            && root.accessMutationPhase
+                                                === "idle"
+                                        onClicked: Models.SessionAccess.grant(
+                                            root.sessionId,
+                                            String(
+                                                accessFriend.currentValue),
+                                            accessLevel.currentText)
+                                    }
+                                }
+
+                                RowLayout {
+                                    visible: Models.SessionAccess.loading
+                                        || Models.SessionAccess.stale
+                                    spacing: KodosiTheme.spacing2
+
+                                    KBusyIndicator {
+                                        visible: Models.SessionAccess.loading
+                                        running: visible
+                                        implicitWidth: 18
+                                        implicitHeight: 18
+                                    }
+
+                                    PlainLabel {
+                                        text: Models.SessionAccess.stale
+                                            ? qsTr("Refreshing...")
+                                            : qsTr("Loading...")
+                                        color: KodosiTheme.textSecondary
+                                        font.pixelSize: 10
+                                    }
+                                }
+
+                                PlainLabel {
+                                    visible:
+                                        Models.SessionAccess.error.length > 0
+                                    Layout.fillWidth: true
+                                    text: Models.SessionAccess.error
+                                    color: KodosiTheme.danger
+                                    wrapMode: Text.Wrap
+                                }
+
+                                RowLayout {
+                                    visible:
+                                        root.accessMutationPhase === "exhausted"
+                                    Layout.fillWidth: true
+
+                                    PlainLabel {
+                                        Layout.fillWidth: true
+                                        text: Models.SessionAccess
+                                            .mutationMessage(root.sessionId)
+                                        color: KodosiTheme.danger
+                                        wrapMode: Text.Wrap
+                                    }
+
+                                    KButton {
+                                        objectName:
+                                            "panel.agentIntel.access.check"
+                                        Accessible.id: objectName
+                                        text: qsTr("Check outcome")
+                                        compact: true
+                                        onClicked: Models.SessionAccess
+                                            .retryCurrentMutation(
+                                                root.sessionId)
+                                    }
+                                }
+
+                                PlainLabel {
+                                    visible: !Models.SessionAccess.loading
+                                        && Models.SessionAccess.grants.count
+                                            === 0
+                                    text: qsTr("No one has explicit access.")
+                                    color: KodosiTheme.textSecondary
+                                    font.pixelSize: 10
+                                }
+
+                                ListView {
+                                    objectName:
+                                        "panel.agentIntel.access.grants"
+                                    Accessible.id: objectName
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: Math.min(
+                                        contentHeight,
+                                        168)
+                                    visible:
+                                        Models.SessionAccess.grants.count > 0
+                                    interactive: contentHeight > height
+                                    model: Models.SessionAccess.grants
+                                    spacing: KodosiTheme.spacing2
+
+                                    delegate: RowLayout {
+                                        id: accessGrant
+                                        required property string handle
+                                        required property string displayName
+                                        required property string accessLevel
+
+                                        width: ListView.view.width
+                                        spacing: KodosiTheme.spacing2
+
+                                        PlainLabel {
+                                            Layout.fillWidth: true
+                                            text: accessGrant.displayName.length > 0
+                                                ? accessGrant.displayName
+                                                : "@" + accessGrant.handle
+                                            color: KodosiTheme.textPrimary
+                                            elide: Text.ElideRight
+                                        }
+
+                                        PlainLabel {
+                                            text: root.accessLevelLabel(
+                                                accessGrant.accessLevel)
+                                            color: KodosiTheme.textSecondary
+                                            font.pixelSize: 9
+                                        }
+
+                                        KButton {
+                                            objectName:
+                                                "panel.agentIntel.access.revoke."
+                                                + accessGrant.handle
+                                            Accessible.id: objectName
+                                            text: qsTr("Revoke")
+                                            compact: true
+                                            enabled: root.canManageAccess
+                                            onClicked: Models.SessionAccess
+                                                .requestRevokeConfirmation(
+                                                    root.sessionId,
+                                                    accessGrant.handle)
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -561,6 +796,37 @@ KPopover {
                                         : (root.intel.sourceDetail || "")
                                     color: KodosiTheme.textSecondary
                                     wrapMode: Text.Wrap
+                                }
+                            }
+
+                            KDialog {
+                                objectName: "panel.agentIntel.access.revoke.confirmation"
+                                anchors.centerIn: parent
+                                width: 380
+                                visible:
+                                    Models.SessionAccess.revokeConfirmationSessionId.length > 0
+                                title: qsTr("Revoke access for @%1?").arg(
+                                    Models.SessionAccess.revokeConfirmationHandle)
+                                closePolicy: Popup.NoAutoClose
+
+                                footer: RowLayout {
+                                    spacing: KodosiTheme.spacing3
+
+                                    Item { Layout.fillWidth: true }
+
+                                    KButton {
+                                        text: qsTr("Cancel")
+                                        variant: "quiet"
+                                        onClicked: Models.SessionAccess.cancelRevokeConfirmation()
+                                    }
+
+                                    KButton {
+                                        text: qsTr("Revoke access")
+                                        variant: "danger"
+                                        onClicked: Models.SessionAccess.confirmRevoke(
+                                            Models.SessionAccess.revokeConfirmationSessionId,
+                                            Models.SessionAccess.revokeConfirmationHandle)
+                                    }
                                 }
                             }
                         }

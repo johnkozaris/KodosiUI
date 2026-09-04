@@ -91,6 +91,12 @@ public:
     [[nodiscard]] std::expected<QByteArray, GhosttyTerminalKernel::Failure> encodePaste(
         const TerminalSubscription& subscription,
         QByteArray text);
+    [[nodiscard]] std::expected<QByteArray, GhosttyTerminalKernel::Failure> encodeMouse(
+        const TerminalSurfaceIdentity& identity,
+        TerminalMouseEvent event);
+    [[nodiscard]] std::expected<QByteArray, GhosttyTerminalKernel::Failure> encodeMouse(
+        const TerminalSubscription& subscription,
+        TerminalMouseEvent event);
     [[nodiscard]] GhosttyTerminalKernel::Result scrollViewport(
         const TerminalSurfaceIdentity& identity,
         int rows);

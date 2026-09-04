@@ -22,6 +22,7 @@
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQuickWindow>
+#include <QRawFont>
 #include <QSignalSpy>
 #include <QTimer>
 #include <QUrl>
@@ -131,6 +132,11 @@ public slots:
     {
         values.append(url);
     }
+};
+
+class InspectableTerminalView final : public kodosi::TerminalView {
+public:
+    using TerminalView::inputMethodQuery;
 };
 
 class FakeRuntimeBridge final : public kodosi::RuntimeBridge {
@@ -307,8 +313,11 @@ private slots:
     void kernelAppliesNativeCursorDefaultsAndScrollback();
     void scrollbackReconfigurationPublishesReplacementFrame();
     void terminalViewOwnsValidatedDisplaySettings();
+    void terminalViewPrefersInstalledNerdFontFallback();
     void terminalViewOwnsExplicitSelectionAndPreeditPalette();
     void keyEncodingUsesRestoredTerminalModes();
+    void mouseEncodingUsesRestoredTerminalModes();
+    void terminalViewRoutesTrackedMouseToPty();
     void pasteEncodingUsesRestoredTerminalModes();
     void wheelScrollsGhosttyViewportWithoutChangingSequence();
     void selectionUsesGhosttyTrackedStateAndFormatting();
@@ -347,6 +356,39 @@ private slots:
 void TerminalKernelTest::initTestCase()
 {
     qRegisterMetaType<kodosi::TerminalView*>();
+}
+
+void TerminalKernelTest::terminalViewPrefersInstalledNerdFontFallback()
+{
+    const auto supportsTerminalSymbols = [](const QString& family) {
+        auto font = QFont(family);
+        font.setPixelSize(14);
+        font.setStyleStrategy(QFont::NoFontMerging);
+        const auto rawFont = QRawFont::fromFont(font);
+        return rawFont.isValid()
+            && rawFont.supportsCharacter(char32_t {0xE0B0})
+            && rawFont.supportsCharacter(char32_t {0xE0B6})
+            && rawFont.supportsCharacter(char32_t {0xF31B});
+    };
+
+    const QFontDatabase database;
+    const auto installed = database.families();
+    const auto available = std::ranges::any_of(
+        installed,
+        [&](const QString& family) {
+            return database.isFixedPitch(family)
+                && supportsTerminalSymbols(family);
+        });
+    if (!available) {
+        QSKIP("No installed fixed-pitch Nerd Font can exercise fallback selection.");
+    }
+
+    InspectableTerminalView view;
+    const auto font =
+        view.inputMethodQuery(Qt::ImFont).value<QFont>();
+    QVERIFY(std::ranges::any_of(
+        font.families(),
+        supportsTerminalSymbols));
 }
 
 void TerminalKernelTest::checkpointPrecedesContiguousRawData()
@@ -824,6 +866,109 @@ void TerminalKernelTest::keyEncodingUsesRestoredTerminalModes()
     QVERIFY(legacyRelease->isEmpty());
 }
 
+void TerminalKernelTest::mouseEncodingUsesRestoredTerminalModes()
+{
+    const kodosi::TerminalSubscription subscription {
+        QStringLiteral("session"),
+        QStringLiteral("subscription"),
+        1,
+    };
+    kodosi::GhosttyTerminalKernel kernel;
+    QVERIFY(kernel.installCheckpoint({
+        subscription,
+        1,
+        2,
+        12,
+        checkpointFor(
+            QByteArrayLiteral("\x1b[?1000h\x1b[?1006h"),
+            12,
+            2),
+    }));
+
+    const kodosi::TerminalMouseEvent press {
+        .action = kodosi::TerminalMouseAction::Press,
+        .button = kodosi::TerminalMouseButton::Left,
+        .modifiers = {},
+        .x = 4,
+        .y = 8,
+        .screenWidth = 96,
+        .screenHeight = 32,
+        .cellWidth = 8,
+        .cellHeight = 16,
+        .anyButtonPressed = true,
+    };
+    const auto encodedPress = kernel.encodeMouse(subscription, press);
+    QVERIFY(encodedPress);
+    QCOMPARE(*encodedPress, QByteArrayLiteral("\x1b[<0;1;1M"));
+
+    auto release = press;
+    release.action = kodosi::TerminalMouseAction::Release;
+    release.anyButtonPressed = false;
+    const auto encodedRelease = kernel.encodeMouse(subscription, release);
+    QVERIFY(encodedRelease);
+    QCOMPARE(*encodedRelease, QByteArrayLiteral("\x1b[<0;1;1m"));
+}
+
+void TerminalKernelTest::terminalViewRoutesTrackedMouseToPty()
+{
+    kodosi::TerminalSessionRegistry registry;
+    FakeTerminalDispatcher dispatcher;
+    kodosi::TerminalView view;
+    const kodosi::TerminalSubscription subscription {
+        QStringLiteral("mouse"),
+        QStringLiteral("mouse-subscription"),
+        1,
+    };
+    view.setWidth(400);
+    view.setHeight(160);
+    view.setTerminalCapabilities(true, true, true, true);
+    QVERIFY(view.attach(
+        registry,
+        dispatcher,
+        subscription,
+        QStringLiteral("mouse-incarnation")));
+    QVERIFY(registry.installSemanticCheckpoint({
+        subscription,
+        1,
+        4,
+        40,
+        checkpointFor(
+            QByteArrayLiteral("\x1b[?1000h\x1b[?1006h"),
+            40,
+            4),
+    }));
+    registry.receiveConnectResult({subscription, ffiOk});
+    QCoreApplication::processEvents();
+
+    const auto cell = kodosi::TerminalRasterizer::cellSize(
+        QFontDatabase::systemFont(QFontDatabase::FixedFont),
+        view.lineHeight());
+    const QPointF point(cell.width() * 0.5, cell.height() * 0.5);
+    QMouseEvent press(
+        QEvent::MouseButtonPress,
+        point,
+        point,
+        Qt::LeftButton,
+        Qt::LeftButton,
+        Qt::NoModifier);
+    QMouseEvent release(
+        QEvent::MouseButtonRelease,
+        point,
+        point,
+        Qt::LeftButton,
+        Qt::NoButton,
+        Qt::NoModifier);
+    QCoreApplication::sendEvent(&view, &press);
+    QCoreApplication::sendEvent(&view, &release);
+
+    QCOMPARE(
+        dispatcher.inputCommands,
+        QVector<QByteArray>({
+            QByteArrayLiteral("\x1b[<0;1;1M"),
+            QByteArrayLiteral("\x1b[<0;1;1m"),
+        }));
+}
+
 void TerminalKernelTest::pasteEncodingUsesRestoredTerminalModes()
 {
     const kodosi::TerminalSubscription subscription {
@@ -1247,7 +1392,7 @@ void TerminalKernelTest::terminalViewPastesClipboardThroughBoundedAuthority()
         dispatcher.inputIncarnations.constFirst(),
         QStringLiteral("paste-incarnation"));
 
-    QSignalSpy errors(&view, &kodosi::TerminalView::terminalError);
+    QSignalSpy errors(&view, &kodosi::TerminalView::operationError);
     clipboard->setText(
         QStringLiteral("first\nsecond"),
         QClipboard::Clipboard);
@@ -1783,7 +1928,7 @@ void TerminalKernelTest::terminalViewActivatesOnlySafeGhosttyLinks()
     };
     view.setWidth(400);
     view.setHeight(160);
-    view.setTerminalCapabilities(false, false, false, false);
+    view.setTerminalCapabilities(true, true, true, false);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -1842,6 +1987,13 @@ void TerminalKernelTest::terminalViewActivatesOnlySafeGhosttyLinks()
     QCOMPARE(
         capture.values.constFirst(),
         QUrl(QStringLiteral("https://example.com/safe")));
+
+    view.setTerminalCapabilities(false, false, false, false);
+    QCoreApplication::sendEvent(&view, &press);
+    QCoreApplication::sendEvent(&view, &release);
+    QTest::qWait(20);
+    QCOMPARE(capture.values.size(), 1);
+    view.setTerminalCapabilities(true, true, true, false);
 
     const QPointF filePoint(cell.width() * 6.5, cell.height() * 0.5);
     QHoverEvent unsafeHover(

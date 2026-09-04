@@ -24,6 +24,21 @@ void AuthStateTest::projectsAuthLifecycle()
     model.ingestAuthEvent(
         QByteArrayLiteral("{\"type\":\"auth.ready\",\"userId\":\"user-1\",\"accountEpoch\":7}"));
     QCOMPARE(model.identityHealth(), QStringLiteral("healthy"));
+    QVERIFY(!model.recoveryRequired());
+
+    model.ingestAuthEvent(QByteArrayLiteral(
+        "{\"type\":\"auth.identity_health\",\"state\":\"recoveryRequired\","
+        "\"message\":\"Review this device\"}"));
+    QVERIFY(model.recoveryRequired());
+    QCOMPARE(model.recoveryMessage(), QStringLiteral("Review this device"));
+    model.clearRecoveryMessage();
+    QVERIFY(model.recoveryRequired());
+    QVERIFY(model.recoveryMessage().isEmpty());
+
+    model.ingestAuthEvent(QByteArrayLiteral(
+        "{\"type\":\"auth.identity_health\",\"state\":\"futureHealth\"}"));
+    QVERIFY(model.recoveryRequired());
+    QVERIFY(!model.recoveryMessage().isEmpty());
 
     model.ingestAuthEvent(QByteArrayLiteral(
         "{\"type\":\"auth.device_code\",\"userCode\":\"ABCD-EFGH\","

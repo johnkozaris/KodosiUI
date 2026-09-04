@@ -31,6 +31,10 @@ KPopover {
             shortcuts: [
                 { keys: qsTr("Ctrl + S"), label: qsTr("New session") },
                 {
+                    keys: qsTr("Ctrl + Shift + R"),
+                    label: qsTr("Resume Agent Work")
+                },
+                {
                     keys: qsTr("Ctrl + I"),
                     label: qsTr("Agent Intelligence")
                 },
@@ -41,6 +45,14 @@ KPopover {
                 {
                     keys: qsTr("Ctrl + Shift + W"),
                     label: qsTr("Close selected session")
+                },
+                {
+                    keys: qsTr("Ctrl + Shift + A"),
+                    label: qsTr("Approve or review top request")
+                },
+                {
+                    keys: qsTr("Ctrl + Shift + X"),
+                    label: qsTr("Deny top request")
                 }
             ]
         },

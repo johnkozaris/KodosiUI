@@ -29,6 +29,7 @@ void PeopleModelTest::appliesAtomicAccountScopedSnapshot()
     QCOMPARE(model.rowCount(), 2);
     QCOMPARE(model.friendCount(), 1);
     QCOMPARE(model.incomingCount(), 1);
+    QCOMPARE(model.outgoingCount(), 0);
     QCOMPARE(
         model.data(model.index(0), kodosi::PeopleModel::DisplayNameRole).toString(),
         QStringLiteral("Alice"));
@@ -36,6 +37,10 @@ void PeopleModelTest::appliesAtomicAccountScopedSnapshot()
         model.data(model.index(1), kodosi::PeopleModel::RelationshipRole).value<
             kodosi::PeopleModel::Relationship>(),
         kodosi::PeopleModel::Relationship::IncomingRequest);
+    QCOMPARE(
+        model.data(model.index(1), kodosi::PeopleModel::RelationshipNameRole)
+            .toString(),
+        QStringLiteral("incoming"));
 }
 
 void PeopleModelTest::fencesStaleAndReplaysFutureAccountSnapshot()
@@ -55,6 +60,7 @@ void PeopleModelTest::fencesStaleAndReplaysFutureAccountSnapshot()
     QCOMPARE(model.rowCount(), 1);
     QCOMPARE(model.friendCount(), 0);
     QCOMPARE(model.incomingCount(), 0);
+    QCOMPARE(model.outgoingCount(), 1);
     model.ingestFriendsEvent(QByteArrayLiteral(
         "{\"authority\":\"accountContext\",\"accountUserId\":\"old\",\"accountEpoch\":1,"
         "\"type\":\"friends.snapshot\",\"friends\":[],\"incoming\":[],\"outgoing\":[]}"));

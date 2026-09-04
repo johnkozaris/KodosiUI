@@ -163,12 +163,24 @@ void PendingPermissionsModelTest::appliesCurrentIncarnationSnapshot()
         1,
         QStringLiteral("inc-1"));
 
+    auto secondRequest = request(
+        QStringLiteral("inc-1"),
+        8);
+    secondRequest.insert(
+        QStringLiteral("toolUseId"),
+        QStringLiteral("tool-2"));
+    secondRequest.insert(
+        QStringLiteral("createdAtMs"),
+        1'700'000'000'001.0);
     permissions.ingestAgentIntelEvent(snapshot(
         QStringLiteral("account"),
         1,
         1,
-        QJsonArray {request(QStringLiteral("inc-1"))}));
-    QCOMPARE(permissions.rowCount(), 1);
+        QJsonArray {
+            request(QStringLiteral("inc-1")),
+            secondRequest,
+        }));
+    QCOMPARE(permissions.rowCount(), 2);
     QCOMPARE(
         permissions.data(
             permissions.index(0),
@@ -179,6 +191,16 @@ void PendingPermissionsModelTest::appliesCurrentIncarnationSnapshot()
             permissions.index(0),
             kodosi::PendingPermissionsModel::ActionableRole)
             .toBool());
+    const auto sessionPresentation =
+        permissions.presentationForSession(QStringLiteral("session-1"));
+    QCOMPARE(
+        sessionPresentation.value(QStringLiteral("queuedCount")).toInt(),
+        1);
+    QVERIFY(
+        sessionPresentation.value(QStringLiteral("deadline")).toDateTime().isValid());
+    QCOMPARE(
+        permissions.topPresentation().value(QStringLiteral("identityToken")),
+        sessionPresentation.value(QStringLiteral("identityToken")));
     QCOMPARE(
         permissions.authorityState(),
         kodosi::PendingPermissionsModel::AuthorityState::Loaded);

@@ -719,18 +719,19 @@ void ProviderConversationsModelTest::qmlContractKeepsAuthorityNative()
              QByteArrayLiteral(
                  "objectName: \"resumeAgentWork.preview.empty\""),
              QByteArrayLiteral(
-                 "objectName: \"resumeAgentWork.sessionName\""),
-             QByteArrayLiteral(
                  "objectName: \"resumeAgentWork.creation.error\""),
              QByteArrayLiteral(
                  "objectName: \"resumeAgentWork.resume\""),
              QByteArrayLiteral(
-                 "closePolicy: Models.SessionActions.creating"),
+                 "closePolicy: root.resumePending"),
              QByteArrayLiteral("? Popup.NoAutoClose"),
-             QByteArrayLiteral("enabled: !Models.SessionActions.creating"),
              QByteArrayLiteral(
-                 "if (Models.SessionActions.creating)\n"
+                 "if (root.resumePending)\n"
                  "            return false"),
+             QByteArrayLiteral(
+                 "Models.SessionActions.lastCreateRequestId"),
+             QByteArrayLiteral(
+                 "Models.SessionActions.isCreatePending("),
              QByteArrayLiteral("interval: 120"),
              QByteArrayLiteral("Models.SessionActions.createResumed("),
              QByteArrayLiteral("readonly property bool compact:"),
@@ -740,6 +741,7 @@ void ProviderConversationsModelTest::qmlContractKeepsAuthorityNative()
     QVERIFY(!qml.contains("nativeConversationId"));
     QVERIFY(!qml.contains("agent.intel."));
     QVERIFY(!qml.contains("session.create"));
+    QVERIFY(!qml.contains("resumeAgentWork.sessionName"));
     QVERIFY(!qml.contains("/home/"));
     QVERIFY(!qml.contains("/Users/"));
 

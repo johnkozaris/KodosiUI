@@ -38,6 +38,7 @@ private slots:
     void refreshRequiresBothCurrentSnapshotHalves();
     void coalescesOverlappingRefreshes();
     void drainsFailedRefreshBeforeRetry();
+    void tracksUnreadChatWithoutInventingAuthority();
 };
 
 namespace {
@@ -316,6 +317,160 @@ void MissionDirectoryModelTest::retainsSafeStaleDirectoryDuringRecovery()
         model.authorityState(),
         kodosi::MissionDirectoryModel::AuthorityState::Recovering);
     QCOMPARE(model.rowCount(), 1);
+}
+
+void MissionDirectoryModelTest::tracksUnreadChatWithoutInventingAuthority()
+{
+    FakeMissionDispatcher dispatcher;
+    kodosi::MissionDirectoryModel model(dispatcher);
+    model.ingestAuthEvent(auth(QStringLiteral("me"), 1));
+    model.ingestRoomEvent(roomEvent(
+        QStringLiteral("me"),
+        1,
+        {
+            {QStringLiteral("type"), QStringLiteral("room.snapshot")},
+            {QStringLiteral("rooms"),
+             QJsonArray {
+                 QJsonObject {
+                     {QStringLiteral("id"), QStringLiteral("mission-1")},
+                     {QStringLiteral("name"), QStringLiteral("Launch")},
+                     {QStringLiteral("slug"), QStringLiteral("launch")},
+                     {QStringLiteral("ownerUserId"), QStringLiteral("me")},
+                     {QStringLiteral("rosterGeneration"), 4},
+                 },
+             }},
+        }));
+
+    model.ingestRoomEvent(roomEvent(
+        QStringLiteral("me"),
+        1,
+        {
+            {QStringLiteral("type"), QStringLiteral("room.chat.posted")},
+            {QStringLiteral("room_id"), QStringLiteral("mission-1")},
+            {QStringLiteral("message"),
+             QJsonObject {
+                 {QStringLiteral("id"), QStringLiteral("message-2")},
+                 {QStringLiteral("seq"), 2},
+                 {QStringLiteral("body"), QStringLiteral("Latest update")},
+             }},
+        }));
+    QCOMPARE(
+        model.data(
+            model.index(0),
+            kodosi::MissionDirectoryModel::UnreadCountRole)
+            .toInt(),
+        1);
+    QCOMPARE(
+        model.data(
+            model.index(0),
+            kodosi::MissionDirectoryModel::LatestMessageBodyRole)
+            .toString(),
+        QStringLiteral("Latest update"));
+    model.ingestRoomEvent(roomEvent(
+        QStringLiteral("me"),
+        1,
+        {
+            {QStringLiteral("type"), QStringLiteral("room.chat.posted")},
+            {QStringLiteral("room_id"), QStringLiteral("mission-1")},
+            {QStringLiteral("message"),
+             QJsonObject {
+                 {QStringLiteral("id"), QStringLiteral("message-2")},
+                 {QStringLiteral("seq"), 2},
+                 {QStringLiteral("body"), QStringLiteral("Duplicate")},
+             }},
+        }));
+    QCOMPARE(
+        model.data(
+            model.index(0),
+            kodosi::MissionDirectoryModel::UnreadCountRole)
+            .toInt(),
+        1);
+    QCOMPARE(
+        model.data(
+            model.index(0),
+            kodosi::MissionDirectoryModel::LatestMessageBodyRole)
+            .toString(),
+        QStringLiteral("Latest update"));
+
+    model.setMissionChatPinned(QStringLiteral("mission-1"), true);
+    QCOMPARE(
+        model.data(
+            model.index(0),
+            kodosi::MissionDirectoryModel::UnreadCountRole)
+            .toInt(),
+        0);
+    model.ingestRoomEvent(roomEvent(
+        QStringLiteral("me"),
+        1,
+        {
+            {QStringLiteral("type"), QStringLiteral("room.chat.posted")},
+            {QStringLiteral("room_id"), QStringLiteral("mission-1")},
+            {QStringLiteral("message"),
+             QJsonObject {
+                 {QStringLiteral("id"), QStringLiteral("message-3")},
+                 {QStringLiteral("seq"), 3},
+                 {QStringLiteral("body"), QStringLiteral("While pinned")},
+             }},
+        }));
+    QCOMPARE(
+        model.data(
+            model.index(0),
+            kodosi::MissionDirectoryModel::UnreadCountRole)
+            .toInt(),
+        0);
+
+    model.setMissionChatPinned(QStringLiteral("mission-1"), false);
+    model.ingestRoomEvent(roomEvent(
+        QStringLiteral("me"),
+        1,
+        {
+            {QStringLiteral("type"), QStringLiteral("room.chat.posted")},
+            {QStringLiteral("room_id"), QStringLiteral("mission-1")},
+            {QStringLiteral("message"),
+             QJsonObject {
+                 {QStringLiteral("id"), QStringLiteral("message-4")},
+                 {QStringLiteral("seq"), 4},
+                 {QStringLiteral("body"), QStringLiteral("After leaving")},
+             }},
+        }));
+    QCOMPARE(
+        model.data(
+            model.index(0),
+            kodosi::MissionDirectoryModel::UnreadCountRole)
+            .toInt(),
+        1);
+    model.ingestRoomEvent(roomEvent(
+        QStringLiteral("me"),
+        1,
+        {
+            {QStringLiteral("type"), QStringLiteral("room.chat.snapshot")},
+            {QStringLiteral("room_id"), QStringLiteral("mission-1")},
+            {QStringLiteral("messages"),
+             QJsonArray {
+                 QJsonObject {
+                     {QStringLiteral("id"), QStringLiteral("message-1")},
+                     {QStringLiteral("seq"), 1},
+                     {QStringLiteral("body"), QStringLiteral("First")},
+                 },
+                 QJsonObject {
+                     {QStringLiteral("id"), QStringLiteral("message-5")},
+                     {QStringLiteral("seq"), 5},
+                     {QStringLiteral("body"), QStringLiteral("Snapshot latest")},
+                 },
+             }},
+        }));
+    QCOMPARE(
+        model.data(
+            model.index(0),
+            kodosi::MissionDirectoryModel::UnreadCountRole)
+            .toInt(),
+        2);
+    QCOMPARE(
+        model.data(
+            model.index(0),
+            kodosi::MissionDirectoryModel::LatestMessageBodyRole)
+            .toString(),
+        QStringLiteral("Snapshot latest"));
 }
 
 void MissionDirectoryModelTest::refreshRequiresBothCurrentSnapshotHalves()

@@ -265,7 +265,7 @@ QString DesktopStateModel::lastError() const
 
 void DesktopStateModel::setActiveView(const int activeView)
 {
-    if (activeView < 0 || activeView > 2) {
+    if (activeView < 0 || activeView > 1) {
         setError(QStringLiteral(
             "Desktop state was not saved because the active view is invalid."));
         return;
@@ -398,12 +398,6 @@ bool DesktopStateModel::selectSession(const QString& sessionId)
             "The session could not be selected because it is no longer available."));
         return false;
     }
-    if (!m_state.stagedSessionIds.contains(sessionId)
-        && m_state.stagedSessionIds.size() >= maximumRestoredSessions) {
-        setError(QStringLiteral(
-            "Only six sessions can be staged at once. Unstage one before selecting another."));
-        return false;
-    }
     const auto previousSelected = m_state.selectedSessionId;
     const auto previousStaged = m_state.stagedSessionIds;
     const auto previousLayout = m_state.stageLayoutMode;
@@ -449,11 +443,6 @@ bool DesktopStateModel::stageSession(const QString& sessionId)
     }
     if (m_state.stagedSessionIds.contains(sessionId)) {
         return true;
-    }
-    if (m_state.stagedSessionIds.size() >= maximumRestoredSessions) {
-        setError(QStringLiteral(
-            "Only six sessions can be staged at once. Unstage one before adding another."));
-        return false;
     }
     m_state.stageStateEstablished = true;
     m_hadPersistedStageState = true;
@@ -1082,7 +1071,7 @@ std::optional<DesktopStateModel::DecodedState> DesktopStateModel::decodeV2(
 
     return DecodedState {
         .state = State {
-            .activeView = *activeView,
+            .activeView = *activeView == 2 ? 0 : *activeView,
             .sidebarOpen = sidebarOpen.toBool(),
             .selectedSessionId = sessionId,
             .stagedSessionIds = *stagedSessionIds,
@@ -1095,6 +1084,7 @@ std::optional<DesktopStateModel::DecodedState> DesktopStateModel::decodeV2(
             .maximized = maximized.toBool(),
         },
         .hadPersistedStageState = stateEstablished.toBool(),
+        .needsMigration = *activeView == 2,
     };
 }
 
@@ -1146,7 +1136,7 @@ std::optional<DesktopStateModel::DecodedState> DesktopStateModel::decodeV1(
     }
     return DecodedState {
         .state = State {
-            .activeView = *activeView,
+            .activeView = *activeView == 2 ? 0 : *activeView,
             .sidebarOpen = sidebarOpen.toBool(),
             .selectedSessionId = sessionId,
             .stagedSessionIds = staged,

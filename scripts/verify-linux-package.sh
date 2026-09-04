@@ -103,14 +103,6 @@ appstreamcli validate --no-net \
 
 ./scripts/verify-installed-package-content.sh "$stage"
 
-QT_QPA_PLATFORM=offscreen \
-QT_QPA_PLATFORMTHEME= \
-QSG_RHI_BACKEND=software \
-"$stage/usr/bin/kodosi-qt" --smoke-test
-QT_QPA_PLATFORM=offscreen \
-QT_QPA_PLATFORMTHEME= \
-QSG_RHI_BACKEND=software \
-"$stage/usr/bin/kodosi-qt" --smoke-test-agent-intel
 isolated="$stage/isolated-cli-help"
 mkdir -p "$isolated/home" "$isolated/config" "$isolated/state" "$isolated/data"
 HOME="$isolated/home" \

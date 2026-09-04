@@ -89,10 +89,18 @@ QVariant MissionInvitationsModel::data(const QModelIndex& index, const int role)
         return invitation.roomSlug;
     case DirectionRole:
         return QVariant::fromValue(invitation.direction);
+    case DirectionNameRole:
+        return invitation.direction == Direction::Incoming
+            ? QStringLiteral("incoming")
+            : QStringLiteral("outgoing");
     case CounterpartyHandleRole:
         return invitation.counterpartyHandle;
     case CounterpartyDisplayNameRole:
         return invitation.counterpartyDisplayName;
+    case CounterpartyLabelRole:
+        return !invitation.counterpartyDisplayName.isEmpty()
+            ? invitation.counterpartyDisplayName
+            : QStringLiteral("@") + invitation.counterpartyHandle;
     case StatusRole:
         return invitation.status;
     case CreatedAtRole:
@@ -110,8 +118,10 @@ QHash<int, QByteArray> MissionInvitationsModel::roleNames() const
         {RoomNameRole, QByteArrayLiteral("roomName")},
         {RoomSlugRole, QByteArrayLiteral("roomSlug")},
         {DirectionRole, QByteArrayLiteral("direction")},
+        {DirectionNameRole, QByteArrayLiteral("directionName")},
         {CounterpartyHandleRole, QByteArrayLiteral("counterpartyHandle")},
         {CounterpartyDisplayNameRole, QByteArrayLiteral("counterpartyDisplayName")},
+        {CounterpartyLabelRole, QByteArrayLiteral("counterpartyLabel")},
         {StatusRole, QByteArrayLiteral("status")},
         {CreatedAtRole, QByteArrayLiteral("createdAt")},
     };
@@ -174,6 +184,10 @@ QVariant MissionDirectoryModel::data(const QModelIndex& index, const int role) c
         return mission.name;
     case SlugRole:
         return mission.slug;
+    case UnreadCountRole:
+        return mission.unreadCount;
+    case LatestMessageBodyRole:
+        return mission.latestMessageBody;
     default:
         return {};
     }
@@ -185,6 +199,8 @@ QHash<int, QByteArray> MissionDirectoryModel::roleNames() const
         {MissionIdRole, QByteArrayLiteral("missionId")},
         {NameRole, QByteArrayLiteral("name")},
         {SlugRole, QByteArrayLiteral("slug")},
+        {UnreadCountRole, QByteArrayLiteral("unreadCount")},
+        {LatestMessageBodyRole, QByteArrayLiteral("latestMessageBody")},
     };
 }
 
@@ -284,6 +300,43 @@ bool MissionDirectoryModel::refresh()
         !roomsAccepted ? m_roomRefreshState : m_invitationRefreshState,
         QStringLiteral("The runtime did not accept the Mission refresh."));
     return false;
+}
+
+void MissionDirectoryModel::markMissionRead(const QString& missionId)
+{
+    const auto found = std::ranges::find(m_missions, missionId, &Mission::id);
+    if (found == m_missions.end()) {
+        return;
+    }
+    const auto latest = std::ranges::max_element(
+        found->messages,
+        {},
+        &ChatMessageSummary::sequence);
+    if (latest != found->messages.end()) {
+        found->lastReadSequence = std::max(
+            found->lastReadSequence,
+            latest->sequence);
+    }
+    const auto changed = found->unreadCount != 0;
+    recomputeChatSummary(*found);
+    if (!changed) {
+        return;
+    }
+    const auto row = static_cast<int>(std::distance(m_missions.begin(), found));
+    const auto modelIndex = index(row);
+    emit dataChanged(modelIndex, modelIndex, {UnreadCountRole});
+}
+
+void MissionDirectoryModel::setMissionChatPinned(
+    const QString& missionId,
+    const bool pinned)
+{
+    if (pinned) {
+        m_pinnedMissionId = missionId;
+        markMissionRead(missionId);
+    } else if (m_pinnedMissionId == missionId) {
+        m_pinnedMissionId.clear();
+    }
 }
 
 bool MissionDirectoryModel::containsMission(const QString& missionId) const
@@ -436,6 +489,14 @@ void MissionDirectoryModel::applyRoomEvent(const QJsonObject& object)
         emit decodeError(QStringLiteral("Mission event has no type."));
         return;
     }
+    if (*type == QStringLiteral("room.chat.posted")) {
+        applyChatSummary(object);
+        return;
+    }
+    if (*type == QStringLiteral("room.chat.snapshot")) {
+        applyChatSnapshot(object);
+        return;
+    }
     if (*type == QStringLiteral("room.snapshot")) {
         const auto values = object.value(QStringLiteral("rooms"));
         if (!values.isArray()) {
@@ -455,6 +516,7 @@ void MissionDirectoryModel::applyRoomEvent(const QJsonObject& object)
                     QStringLiteral("The Mission directory response was invalid."));
                 return;
             }
+
             auto mission = decodeMission(value.toObject());
             if (!mission || ids.contains(mission->id)) {
                 emit decodeError(QStringLiteral("Mission directory has an invalid row."));
@@ -533,6 +595,132 @@ void MissionDirectoryModel::applyRoomEvent(const QJsonObject& object)
     }
 }
 
+void MissionDirectoryModel::applyChatSummary(const QJsonObject& object)
+{
+    const auto roomId = requiredString(object, QStringLiteral("room_id"));
+    const auto message = object.value(QStringLiteral("message"));
+    if (!roomId || !message.isObject()) {
+        return;
+    }
+    const auto value = message.toObject();
+    const auto id = requiredString(value, QStringLiteral("id"));
+    const auto body = requiredString(value, QStringLiteral("body"));
+    const auto sequence =
+        exactSignedInteger(value.value(QStringLiteral("seq")));
+    if (!id || !body || !sequence || *sequence < 0) {
+        return;
+    }
+    const auto found = std::ranges::find(m_missions, *roomId, &Mission::id);
+    if (found == m_missions.end()) {
+        return;
+    }
+    const auto prior = found->messages.constFind(*id);
+    if (prior != found->messages.cend()
+        && prior->sequence >= *sequence) {
+        return;
+    }
+    found->messages.insert(*id, {
+        .body = *body,
+        .sequence = *sequence,
+    });
+    if (found->messages.size() > 1'000) {
+        const auto oldest = std::ranges::min_element(
+            found->messages,
+            {},
+            &ChatMessageSummary::sequence);
+        if (oldest != found->messages.end()) {
+            found->messages.erase(oldest);
+        }
+    }
+    if (m_pinnedMissionId == *roomId) {
+        found->lastReadSequence =
+            std::max(found->lastReadSequence, *sequence);
+    }
+    recomputeChatSummary(*found);
+    const auto row = static_cast<int>(std::distance(m_missions.begin(), found));
+    const auto modelIndex = index(row);
+    emit dataChanged(
+        modelIndex,
+        modelIndex,
+        {LatestMessageBodyRole, UnreadCountRole});
+}
+
+void MissionDirectoryModel::applyChatSnapshot(const QJsonObject& object)
+{
+    const auto roomId = requiredString(object, QStringLiteral("room_id"));
+    const auto values = object.value(QStringLiteral("messages"));
+    if (!roomId || !values.isArray()
+        || values.toArray().size() > 1'000) {
+        return;
+    }
+    const auto found = std::ranges::find(m_missions, *roomId, &Mission::id);
+    if (found == m_missions.end()) {
+        return;
+    }
+    auto messages = found->messages;
+    QSet<QString> ids;
+    for (const auto& entry : values.toArray()) {
+        if (!entry.isObject()) {
+            return;
+        }
+        const auto value = entry.toObject();
+        const auto id = requiredString(value, QStringLiteral("id"));
+        const auto body = requiredString(value, QStringLiteral("body"));
+        const auto sequence =
+            exactSignedInteger(value.value(QStringLiteral("seq")));
+        if (!id || !body || !sequence || *sequence < 0
+            || ids.contains(*id)) {
+            return;
+        }
+        ids.insert(*id);
+        const auto prior = messages.constFind(*id);
+        if (prior == messages.cend()
+            || prior->sequence <= *sequence) {
+            messages.insert(*id, {
+                .body = *body,
+                .sequence = *sequence,
+            });
+        }
+    }
+    found->messages = std::move(messages);
+    if (m_pinnedMissionId == *roomId) {
+        const auto latest = std::ranges::max_element(
+            found->messages,
+            {},
+            &ChatMessageSummary::sequence);
+        if (latest != found->messages.end()) {
+            found->lastReadSequence = std::max(
+                found->lastReadSequence,
+                latest->sequence);
+        }
+    }
+    recomputeChatSummary(*found);
+    const auto row = static_cast<int>(std::distance(m_missions.begin(), found));
+    const auto modelIndex = index(row);
+    emit dataChanged(
+        modelIndex,
+        modelIndex,
+        {LatestMessageBodyRole, UnreadCountRole});
+}
+
+void MissionDirectoryModel::recomputeChatSummary(Mission& mission)
+{
+    const auto latest = std::ranges::max_element(
+        mission.messages,
+        {},
+        &ChatMessageSummary::sequence);
+    mission.latestMessageBody =
+        latest == mission.messages.end() ? QString {} : latest->body;
+    const auto unread = std::ranges::count_if(
+        mission.messages,
+        [&](const ChatMessageSummary& message) {
+            return message.sequence > mission.lastReadSequence;
+        });
+    mission.unreadCount = static_cast<int>(std::min<qsizetype>(
+        unread,
+        std::numeric_limits<int>::max()));
+}
+
 void MissionDirectoryModel::clearAccountState()
 {
     m_authenticated = false;
@@ -544,6 +732,7 @@ void MissionDirectoryModel::clearAccountState()
     m_roomRefreshState = RefreshHalfState::Idle;
     m_invitationRefreshState = RefreshHalfState::Idle;
     m_lastError.clear();
+    m_pinnedMissionId.clear();
     m_authorityState = AuthorityState::Loading;
     replaceMissions({});
     m_invitations.replace({});
@@ -606,6 +795,18 @@ void MissionDirectoryModel::setAuthorityState(
 
 void MissionDirectoryModel::replaceMissions(QVector<Mission> missions)
 {
+    for (auto& mission : missions) {
+        const auto prior = std::ranges::find(
+            m_missions,
+            mission.id,
+            &Mission::id);
+        if (prior != m_missions.end()) {
+            mission.latestMessageBody = prior->latestMessageBody;
+            mission.messages = prior->messages;
+            mission.lastReadSequence = prior->lastReadSequence;
+            mission.unreadCount = prior->unreadCount;
+        }
+    }
     std::ranges::sort(missions, {}, &Mission::name);
     beginResetModel();
     const auto changed = m_missions.size() != missions.size();
@@ -646,7 +847,11 @@ MissionDirectoryModel::decodeMission(const QJsonObject& object)
         .name = *name,
         .slug = *slug,
         .ownerUserId = *owner,
+        .latestMessageBody = {},
         .rosterGeneration = *generation,
+        .messages = {},
+        .lastReadSequence = 0,
+        .unreadCount = 0,
     };
 }
 

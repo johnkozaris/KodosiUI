@@ -334,7 +334,7 @@ bool SessionAccess::canLeave(const QString& sessionId) const
             || context->accessState == QStringLiteral("failed"));
     return m_authenticated && context
         && context->kind == QStringLiteral("remote")
-        && !context->owner.isEmpty() && context->commandable
+        && !context->owner.isEmpty()
         && !context->incarnationId.isEmpty() && !blocked
         && !hasPendingLeave(sessionId);
 }

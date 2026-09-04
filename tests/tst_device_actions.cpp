@@ -105,6 +105,15 @@ void DeviceActionsTest::normalizesLinkCodesAndStartsSelfLink()
     QCOMPARE(
         dispatcher.commands.back().value(QStringLiteral("userCode")).toString(),
         QStringLiteral("BCDF-GHJK"));
+    QVERIFY(actions.approvalPending(QStringLiteral("BCDF-GHJK")));
+    const auto commandCount = dispatcher.commands.size();
+    QVERIFY(!actions.approveLink(QStringLiteral("bcdf-ghjk")));
+    QCOMPARE(dispatcher.commands.size(), commandCount);
+    devices.ingestDevicesEvent(QByteArrayLiteral(
+        "{\"authority\":\"accountContext\",\"accountUserId\":\"me\","
+        "\"accountEpoch\":1,\"type\":\"devices.link.resolved\","
+        "\"userCode\":\"BCDF-GHJK\",\"outcome\":\"approved\"}"));
+    QVERIFY(!actions.approvalPending(QStringLiteral("BCDF-GHJK")));
     QVERIFY(!actions.approveLink(QStringLiteral("ABCD-EFGH")));
     QVERIFY(!actions.startSelfLink());
 

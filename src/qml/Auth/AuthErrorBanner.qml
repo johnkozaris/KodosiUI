@@ -9,16 +9,22 @@ Rectangle {
 
     readonly property bool identityResetError:
         Models.AuthActions.failedOperation === "identity.reset"
+    readonly property bool recoveryNotice:
+        Models.AuthState.recoveryRequired
+        && Models.AuthState.recoveryMessage.length > 0
 
     objectName: "auth.error.banner"
     Accessible.id: objectName
     visible: Models.AuthState.signedIn
-        && Models.AuthActions.lastError.length > 0
+        && (root.recoveryNotice
+            || Models.AuthActions.lastError.length > 0)
     implicitHeight: visible ? 38 : 0
     color: KodosiTheme.surfaceElevated
 
     Accessible.name: qsTr("Authentication error")
-    Accessible.description: Models.AuthActions.lastError
+    Accessible.description: root.recoveryNotice
+        ? Models.AuthState.recoveryMessage
+        : Models.AuthActions.lastError
 
     RowLayout {
         anchors.fill: parent
@@ -35,7 +41,9 @@ Rectangle {
 
         PlainLabel {
             Layout.fillWidth: true
-            text: Models.AuthActions.lastError
+            text: root.recoveryNotice
+                ? Models.AuthState.recoveryMessage
+                : Models.AuthActions.lastError
             color: KodosiTheme.textPrimary
             font.pixelSize: 11
             elide: Text.ElideRight
@@ -44,12 +52,15 @@ Rectangle {
         KButton {
             objectName: "auth.error.retry"
             Accessible.id: objectName
-            text: root.identityResetError
-                ? qsTr("Review")
+            text: root.recoveryNotice || root.identityResetError
+                ? qsTr("Review recovery")
                 : qsTr("Retry")
             Accessible.name: text
             onClicked: {
-                if (root.identityResetError) {
+                if (root.recoveryNotice) {
+                    Models.AuthState.clearRecoveryMessage()
+                    root.openAccountRequested()
+                } else if (root.identityResetError) {
                     root.openAccountRequested()
                 } else {
                     Models.AuthActions.retry()
@@ -62,7 +73,12 @@ Rectangle {
             Accessible.id: objectName
             text: qsTr("Dismiss")
             Accessible.name: text
-            onClicked: Models.AuthActions.clearError()
+            onClicked: {
+                if (root.recoveryNotice)
+                    Models.AuthState.clearRecoveryMessage()
+                else
+                    Models.AuthActions.clearError()
+            }
         }
     }
 

@@ -6,12 +6,21 @@ import Kodosi.Models 1.0 as Models
 
 Item {
     id: root
-    objectName: "surface.devices"
+    property bool embedded: false
+
+    objectName: embedded
+        ? "panel.settings.account.devices"
+        : "surface.devices"
     Accessible.id: objectName
     Accessible.role: Accessible.Pane
     Accessible.name: qsTr("Account and Devices")
 
     signal signInRequested()
+    implicitHeight: embedded
+        ? (Models.AuthState.signedIn
+            ? deviceContent.implicitHeight
+            : 260)
+        : 0
 
     function formattedExpiry(value) {
         const expiry = new Date(value)
@@ -50,8 +59,21 @@ Item {
             && Models.DeviceActions.lastUserCode.length > 0)
         || Models.DeviceActions.lastOperation === "link.startSelf"
 
+    Connections {
+        target: Models.Devices
+
+        function onStateChanged() {
+            if (Models.Devices.lastResolvedUserCode.length > 0
+                    && Models.Devices.lastResolvedUserCode
+                        === Models.Devices.normalizeUserCode(
+                            linkCode.text))
+                linkCode.clear()
+        }
+    }
+
     Rectangle {
         anchors.fill: parent
+        visible: !root.embedded
         color: KodosiTheme.canvas
     }
 
@@ -72,10 +94,15 @@ Item {
         contentWidth: availableWidth
 
         ColumnLayout {
+            id: deviceContent
             width: parent.width
             spacing: KodosiTheme.spacing5
 
-            Item { Layout.preferredHeight: KodosiTheme.spacing5 }
+            Item {
+                Layout.preferredHeight: root.embedded
+                    ? 0
+                    : KodosiTheme.spacing5
+            }
 
             RowLayout {
                 Layout.fillWidth: true
@@ -280,6 +307,10 @@ Item {
                                         + incoming.userCode + ".approve"
                                     Accessible.id: objectName
                                     text:
+                                        Models.DeviceActions.approvalPending(
+                                            incoming.userCode)
+                                        ? qsTr("Approving")
+                                        :
                                         Models.DeviceActions.lastOperation
                                             === "link.approve"
                                         && Models.DeviceActions.lastUserCode
@@ -293,6 +324,9 @@ Item {
                                             === Models.Devices.Fresh
                                         && Models.Devices
                                             .localDeviceEnrolled
+                                        && !Models.DeviceActions
+                                            .approvalPending(
+                                                incoming.userCode)
                                     Accessible.name: text
                                     onClicked:
                                         Models.DeviceActions.approveLink(
@@ -526,9 +560,11 @@ Item {
                                 Models.Devices.normalizeUserCode(linkCode.text))
                                 && Models.Devices.inventoryState
                                     === Models.Devices.Fresh
+                                && !Models.DeviceActions.approvalPending(
+                                    Models.Devices.normalizeUserCode(
+                                        linkCode.text))
                             onClicked: {
-                                if (Models.DeviceActions.approveLink(linkCode.text))
-                                    linkCode.clear()
+                                Models.DeviceActions.approveLink(linkCode.text)
                             }
                         }
                     }

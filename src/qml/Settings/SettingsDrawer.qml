@@ -9,7 +9,6 @@ KPopover {
     id: root
     objectName: "panel.settings"
 
-    signal openDevicesRequested()
     signal openAgentIntelRequested()
     signal openDiagnosticsRequested()
     signal openProjectIntelRequested(string sourceId)
@@ -19,7 +18,6 @@ KPopover {
     property bool agentIntelAvailable: false
     property int desktopRequestSerial: 0
     property string directoryPickerRequestId
-    property string openPathRequestId
     property string desktopFileError
     property bool transferringProjectIntel: false
     property bool agentsVisitActive: false
@@ -109,6 +107,9 @@ KPopover {
             return
         agentsVisitActive = true
         Models.ProjectIntelligence.refreshSources(false)
+        if (Models.DesktopState.selectedSessionId.length > 0)
+            Models.ProjectIntelligence.selectSourceForSession(
+                Models.DesktopState.selectedSessionId)
         Models.AgentAutoModeRules.refresh(false)
         Models.ExternalDiscovery.refresh(false)
         Models.AgentGlobal.refresh()
@@ -160,11 +161,9 @@ KPopover {
         resetTerminalDraft()
         toolApprovalAlerts.checked =
             Models.DesktopSettings.toolApprovalAlerts
-        workingDirectory.text =
-            Models.DesktopSettings.lastWorkingDirectory
     }
 
-    function applyDraft() {
+    function applyTerminalDraft() {
         Models.DesktopSettings.apply(
             fontFamily.text,
             fontSize.value,
@@ -172,8 +171,20 @@ KPopover {
             lineHeight.value,
             scrollback.value,
             cursorBlink.checked,
-            toolApprovalAlerts.checked,
-            workingDirectory.text)
+            Models.DesktopSettings.toolApprovalAlerts,
+            Models.DesktopSettings.lastWorkingDirectory)
+    }
+
+    function persistNonTerminalSettings(alerts, directory) {
+        return Models.DesktopSettings.apply(
+            Models.DesktopSettings.fontFamily,
+            Models.DesktopSettings.fontSize,
+            Models.DesktopSettings.cursorStyle,
+            Models.DesktopSettings.lineHeight,
+            Models.DesktopSettings.scrollbackLines,
+            Models.DesktopSettings.cursorBlink,
+            alerts,
+            directory)
     }
 
     function nextDesktopRequestId(suffix) {
@@ -188,21 +199,7 @@ KPopover {
         Models.DesktopFiles.requestDirectory(
             requestId,
             Models.DesktopFiles.SettingsWorkingDirectory,
-            workingDirectory.text.length > 0
-                ? workingDirectory.text
-                : Models.DesktopSettings.effectiveWorkingDirectory)
-    }
-
-    function openWorkingDirectory() {
-        const requestId = nextDesktopRequestId("sessions.openDirectory")
-        openPathRequestId = requestId
-        desktopFileError = ""
-        Models.DesktopFiles.openPath(
-            workingDirectory.text.length > 0
-                ? workingDirectory.text
-                : Models.DesktopSettings.effectiveWorkingDirectory,
-            requestId,
-            Models.DesktopFiles.SettingsOpenWorkingDirectory)
+            Models.DesktopSettings.effectiveWorkingDirectory)
     }
 
     onOpened: {
@@ -229,7 +226,6 @@ KPopover {
                 directoryPickerRequestId,
                 Models.DesktopFiles.SettingsWorkingDirectory)
         }
-        openPathRequestId = ""
         desktopFileError = ""
         releaseAgentsVisit(transferringProjectIntel)
         transferringProjectIntel = false
@@ -246,6 +242,17 @@ KPopover {
     }
 
     Connections {
+        target: Models.ProjectIntelligence
+
+        function onStateChanged() {
+            if (root.opened && root.selectedCategory === "agents"
+                    && Models.DesktopState.selectedSessionId.length > 0)
+                Models.ProjectIntelligence.selectSourceForSession(
+                    Models.DesktopState.selectedSessionId)
+        }
+    }
+
+    Connections {
         target: Models.DesktopFiles
 
         function onDirectoryPicked(requestId, purpose, canonicalDirectory) {
@@ -254,8 +261,11 @@ KPopover {
                         !== Models.DesktopFiles.SettingsWorkingDirectory)
                 return
             root.directoryPickerRequestId = ""
-            workingDirectory.text = canonicalDirectory
-            root.desktopFileError = ""
+            if (root.persistNonTerminalSettings(
+                    Models.DesktopSettings.toolApprovalAlerts,
+                    canonicalDirectory)) {
+                root.desktopFileError = ""
+            }
         }
 
         function onDirectoryPickCancelled(requestId, purpose) {
@@ -266,27 +276,11 @@ KPopover {
             root.directoryPickerRequestId = ""
         }
 
-        function onPathOpened(requestId, purpose) {
-            if (requestId === root.openPathRequestId
-                    && purpose
-                        === Models.DesktopFiles
-                            .SettingsOpenWorkingDirectory) {
-                root.openPathRequestId = ""
-                root.desktopFileError = ""
-            }
-        }
-
         function onOperationFailed(requestId, purpose, errorCode, message) {
             if (requestId === root.directoryPickerRequestId
                     && purpose
                         === Models.DesktopFiles.SettingsWorkingDirectory) {
                 root.directoryPickerRequestId = ""
-                root.desktopFileError = message
-            } else if (requestId === root.openPathRequestId
-                    && purpose
-                        === Models.DesktopFiles
-                            .SettingsOpenWorkingDirectory) {
-                root.openPathRequestId = ""
                 root.desktopFileError = message
             }
         }
@@ -655,9 +649,12 @@ KPopover {
                                     "panel.settings.sessions.workingDirectory"
                                 Accessible.id: objectName
                                 Layout.fillWidth: true
-                                maximumLength: 4096
-                                placeholderText: qsTr(
-                                    "Leave empty to use your home directory")
+                                readOnly: true
+                                text: Models.DesktopSettings
+                                    .lastWorkingDirectory.length > 0
+                                    ? Models.DesktopSettings
+                                        .lastWorkingDirectory
+                                    : qsTr("~/")
                                 Accessible.name:
                                     qsTr("Default working directory")
                             }
@@ -673,22 +670,21 @@ KPopover {
                                 onClicked: root.browseWorkingDirectory()
                             }
 
-                            KButton {
-                                objectName:
-                                    "panel.settings.sessions.openFolder"
-                                Accessible.id: objectName
-                                text: qsTr("Open Folder")
-                                Accessible.name:
-                                    qsTr("Open default working directory")
-                                onClicked: root.openWorkingDirectory()
-                            }
                         }
-                        PlainLabel {
-                            Layout.fillWidth: true
-                            text: qsTr("Kodosi uses this only while it remains a readable directory.")
-                            color: KodosiTheme.textSecondary
-                            font.pixelSize: 10
-                            wrapMode: Text.Wrap
+
+                        KButton {
+                            objectName:
+                                "panel.settings.sessions.clearFolder"
+                            Accessible.id: objectName
+                            text: qsTr("Clear remembered folder")
+                            enabled: Models.DesktopSettings
+                                .lastWorkingDirectory.length > 0
+                            onClicked: {
+                                root.persistNonTerminalSettings(
+                                    Models.DesktopSettings
+                                        .toolApprovalAlerts,
+                                    "")
+                            }
                         }
                     }
 
@@ -744,6 +740,14 @@ KPopover {
                             Accessible.id: objectName
                             text: qsTr("Tool approval alerts")
                             Accessible.name: text
+                            onToggled: {
+                                if (checked !== Models.DesktopSettings
+                                        .toolApprovalAlerts)
+                                    root.persistNonTerminalSettings(
+                                        checked,
+                                        Models.DesktopSettings
+                                            .lastWorkingDirectory)
+                            }
                         }
                     }
 
@@ -819,70 +823,24 @@ KPopover {
                         Layout.rightMargin: root.compact ? 18 : 28
                         spacing: 12
 
-                        Rectangle {
+                        DevicesView {
                             Layout.fillWidth: true
-                            implicitHeight: accountContent.implicitHeight
-                                + 28
-                            radius: KodosiTheme.radiusLarge
-                            color: KodosiTheme.surfaceRaised
-                            ColumnLayout {
-                                id: accountContent
-                                anchors.fill: parent
-                                anchors.margins: 14
-                                spacing: 8
-                                KIcon {
-                                    Layout.preferredWidth: 28
-                                    Layout.preferredHeight: 28
-                                    name: "devices"
-                                    color: KodosiTheme.accent
-                                }
-                                PlainLabel {
-                                    text: Models.AuthState.signedIn
-                                        ? qsTr("Account connected")
-                                        : qsTr("Local workspace")
-                                    color: KodosiTheme.textPrimary
-                                    font.pixelSize: 14
-                                    font.weight: Font.DemiBold
-                                }
-                                PlainLabel {
-                                    Layout.fillWidth: true
-                                    text: Models.AuthState.signedIn
-                                        ? qsTr("Manage device enrollment, integrations, trust pins, and account recovery on the dedicated Devices surface.")
-                                        : qsTr("Sign in to link devices, use Missions, and share supervision. Local My Agents stays available.")
-                                    color: KodosiTheme.textSecondary
-                                    font.pixelSize: 11
-                                    wrapMode: Text.Wrap
-                                }
-                                KButton {
-                                    visible: Models.AuthState.signedIn
-                                    objectName:
-                                        "panel.settings.account.openDevices"
-                                    Accessible.id: objectName
-                                    variant: "directional"
-                                    iconName: "chevron-right"
-                                    text: qsTr("Open Account & Devices")
-                                    Accessible.name: text
-                                    onClicked:
-                                        root.openDevicesRequested()
-                                }
-                                KButton {
-                                    visible: !Models.AuthState.signedIn
-                                    objectName:
-                                        "panel.settings.account.signIn"
-                                    Accessible.id: objectName
-                                    variant: "directional"
-                                    iconName: "chevron-right"
-                                    text: Models.AuthActions.busy
-                                        ? qsTr("Signing in")
-                                        : qsTr("Sign in to Kodosi")
-                                    enabled: !Models.AuthActions.busy
-                                    Accessible.name: text
-                                    onClicked: root.signInRequested()
-                                }
-                            }
+                            embedded: true
+                            onSignInRequested: root.signInRequested()
+                        }
+
+                        KButton {
+                            visible: Models.AuthState.signedIn
+                            objectName:
+                                "panel.settings.account.refreshSession"
+                            Accessible.id: objectName
+                            text: qsTr("Refresh session")
+                            enabled: !Models.AuthActions.busy
+                            onClicked: Models.AuthActions.refresh()
                         }
 
                         Rectangle {
+                            visible: Models.AuthState.signedIn
                             Layout.fillWidth: true
                             implicitHeight: dangerContent.implicitHeight + 28
                             radius: KodosiTheme.radiusLarge
@@ -1137,10 +1095,11 @@ KPopover {
             }
 
             Rectangle {
+                visible: root.selectedCategory === "terminal"
                 Layout.fillWidth: true
-                Layout.preferredHeight: 66
-                Layout.minimumHeight: 66
-                Layout.maximumHeight: 66
+                Layout.preferredHeight: visible ? 66 : 0
+                Layout.minimumHeight: Layout.preferredHeight
+                Layout.maximumHeight: Layout.preferredHeight
                 color: KodosiTheme.surfaceRaised
                 bottomRightRadius: KodosiTheme.radiusModal
 
@@ -1175,7 +1134,7 @@ KPopover {
                         text: qsTr("Apply & Save")
                         Accessible.name:
                             qsTr("Apply and save desktop settings")
-                        onClicked: root.applyDraft()
+                        onClicked: root.applyTerminalDraft()
                     }
                 }
 
