@@ -13,8 +13,10 @@ TextField {
     placeholderTextColor: KodosiTheme.placeholderText
     selectionColor: KodosiTheme.accent
     selectedTextColor: KodosiTheme.accentForeground
-    font.pixelSize: 12
+    font.pixelSize: KodosiTheme.fontBody
     selectByMouse: true
+
+    KFocusIndicator { active: root.activeFocus && root.enabled }
 
     background: Rectangle {
         color: KodosiTheme.input

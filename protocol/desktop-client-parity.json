@@ -2,20 +2,20 @@
   "schemaVersion": 1,
   "baseline": {
     "runtimeRepository": "johnkozaris/Kodosi",
-    "runtimeCommit": "b1970e5f103fad1a52f73d686ba2b5d98cb9ed4d",
+    "runtimeCommit": "a628cb339a5bedd97fa2e54d9432c3b38f6c43c1",
     "swiftRepository": "johnkozaris/kodosiSwift",
-    "swiftCommit": "66825e1f0816a794dc46fc6dd1d7c6cd04396a0d",
+    "swiftCommit": "3ad7aec8bc5dd343292f07c2796ef3e620abf05d",
     "ffiAbiVersion": 5,
-    "desktopProtocolVersion": 37
+    "desktopProtocolVersion": 38
   },
   "authorities": {
     "desktopRuntime": {
-      "path": "protocol/versions/v37.json",
-      "sha256": "a07322d89b07aee5cf3574f8f15a50cf157fb056386f861b98c472679b5b560a"
+      "path": "protocol/versions/v38.json",
+      "sha256": "f2e3b10667939bb4f958788136921367af8657d5b2f875987f4b9bd03e644a51"
     },
     "roomInput": {
       "path": "protocol/room-input-rules.json",
-      "sha256": "0e9142d57c99bc75d0dc993a6e4c53b6cd8c5f3cafede4c7bc8d37765687315c"
+      "sha256": "b0da42199d2405947848ffbdeb7200c15135e76e45c5a8c9c61aa8642d51ef34"
     },
     "sessionRelay": {
       "path": "protocol/session-relay-authority.json",
@@ -23,7 +23,7 @@
     },
     "backendApi": {
       "path": "protocol/backend-api-authority.json",
-      "sha256": "50e8187785773741fc36946a9b6b6438a6cd2990c951d39799c3aed54ce34e20"
+      "sha256": "97b0df8b4fc606162dcf099446557b93a46e3e2856d37b17c25524ee7832a798"
     },
     "userEvents": {
       "path": "protocol/user-events-authority.json",
@@ -35,7 +35,7 @@
     },
     "cryptoDomains": {
       "path": "protocol/crypto-domain-tags.json",
-      "sha256": "f54f986540ddb1d7c17fb66ab1d8301e41b66ed56300e96a3c5e551c25afa91a"
+      "sha256": "8e1dc9a24391bc9f65fa23f3a2c2078e4de3e3e3327dae5df10f91cd94bb8f61"
     }
   },
   "architecture": {

@@ -14,7 +14,7 @@ desktop integration.
 - CMake 4.4.3
 - C++23
 - Kodosi FFI ABI 5
-- Kodosi desktop protocol 37
+- Kodosi desktop protocol 38
 
 The exact source and protocol baselines are recorded in `dependencies.lock.json`
 and `protocol/desktop-client-parity.json`.
@@ -150,6 +150,16 @@ just configure
 just build
 just test
 ```
+
+Debug builds link the Rust debug profile; release builds retain the optimized release
+profile and strict source verification. For coordinated uncommitted runtime work, configure
+with `-DKODOSI_ALLOW_DIRTY_RUNTIME=ON`; that is a local development mode, never release provenance.
+
+Application shortcuts use Control+Shift on Linux so Control and Alt combinations remain
+available to the terminal. New Session is Ctrl+Shift+N, inspection Ctrl+Shift+I, sidebar
+Ctrl+Shift+B, and Settings Ctrl+Shift+comma. Escape belongs to the terminal while it has focus.
+Provider mode changes remain in the provider terminal until there is a confirmed mode-control
+API; the client does not infer Plan or Autopilot from injected keystrokes.
 
 ## Linux UI probe
 

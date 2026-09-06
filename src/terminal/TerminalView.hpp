@@ -56,6 +56,12 @@ class TerminalView : public QQuickItem {
     Q_PROPERTY(QColor selectionForeground READ selectionForeground WRITE setSelectionForeground NOTIFY selectionForegroundChanged)
     Q_PROPERTY(QColor preeditBackground READ preeditBackground WRITE setPreeditBackground NOTIFY preeditBackgroundChanged)
     Q_PROPERTY(QColor preeditForeground READ preeditForeground WRITE setPreeditForeground NOTIFY preeditForegroundChanged)
+    Q_PROPERTY(QString terminalTitle READ terminalTitle NOTIFY terminalTitleChanged)
+    Q_PROPERTY(bool fitToView READ fitToView WRITE setFitToView NOTIFY fitToViewChanged)
+    Q_PROPERTY(qreal viewportScale READ viewportScale NOTIFY viewportChanged)
+    Q_PROPERTY(qreal panX READ panX WRITE setPanX NOTIFY viewportChanged)
+    Q_PROPERTY(qreal panY READ panY WRITE setPanY NOTIFY viewportChanged)
+    Q_PROPERTY(QSizeF gridSize READ gridSize NOTIFY viewportChanged)
     Q_PROPERTY(bool terminalReady READ terminalReady NOTIFY terminalReadyChanged)
     Q_PROPERTY(bool canSendInput READ canSendInput NOTIFY capabilitiesChanged)
     Q_PROPERTY(bool canRetainFocus READ canRetainFocus NOTIFY capabilitiesChanged)
@@ -83,6 +89,16 @@ public:
     [[nodiscard]] QColor selectionForeground() const;
     [[nodiscard]] QColor preeditBackground() const;
     [[nodiscard]] QColor preeditForeground() const;
+    [[nodiscard]] QString terminalTitle() const { return m_terminalTitle; }
+    [[nodiscard]] bool fitToView() const noexcept { return m_fitToView; }
+    [[nodiscard]] qreal viewportScale() const;
+    [[nodiscard]] QSizeF gridSize() const;
+    [[nodiscard]] qreal panX() const noexcept { return m_pan.x(); }
+    [[nodiscard]] qreal panY() const noexcept { return m_pan.y(); }
+    void setFitToView(bool fit);
+    void setPanX(qreal value);
+    void setPanY(qreal value);
+    Q_INVOKABLE void revealCursor();
     [[nodiscard]] bool terminalReady() const noexcept;
     [[nodiscard]] bool canSendInput() const noexcept;
     [[nodiscard]] bool canRetainFocus() const noexcept;
@@ -134,6 +150,10 @@ signals:
     void selectionForegroundChanged();
     void preeditBackgroundChanged();
     void preeditForegroundChanged();
+    void fitToViewChanged();
+    void viewportChanged();
+    void terminalTitleChanged();
+    void terminalBell();
     void terminalReadyChanged();
     void capabilitiesChanged();
     void focusedSizeAuthorityChanged();
@@ -146,6 +166,7 @@ signals:
     void terminalClosed();
 
 protected:
+    bool event(QEvent* event) override;
     QSGNode* updatePaintNode(
         QSGNode* oldNode,
         UpdatePaintNodeData* updateData) override;
@@ -188,6 +209,12 @@ private:
         bool claim = false;
     };
 
+    bool m_fitToView = true;
+    QPointF m_pan;
+    [[nodiscard]] QPointF viewportOffset() const;
+    [[nodiscard]] QPointF gridPoint(const QPointF& point) const;
+    void updateViewport();
+    QString m_terminalTitle;
     QFont m_font;
     qreal m_lineHeight = 1.1;
     TerminalCursorStyle m_cursorStyle = TerminalCursorStyle::Block;
@@ -204,6 +231,7 @@ private:
     TerminalSubscription m_subscription;
     QString m_expectedRuntimeIncarnationId;
     qreal m_renderedDevicePixelRatio = 0.0;
+    qreal m_renderedViewportScale = 0.0;
     int m_renderedFontPixelSize = 0;
     QString m_preedit;
     QString m_renderedPreedit;

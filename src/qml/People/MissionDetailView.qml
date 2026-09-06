@@ -32,6 +32,10 @@ Rectangle {
     readonly property bool focused:
         Models.MissionDetail.selectedCrewPresentationId.length > 0
     readonly property bool focusVisible: page === 2 && focused
+    readonly property var steeringPresentation: {
+        const revision = Models.Steering.stateRevision
+        return Models.Steering.presentationForSession(focusSessionId)
+    }
     readonly property string focusSessionId:
         Models.MissionDetail.selectedTerminalSessionId
 
@@ -154,6 +158,13 @@ Rectangle {
 
     Connections {
         target: Models.MissionDetail
+
+        function onFocusPresentationChanged() {
+            if (!Models.MissionDetail.selectedCanInterrupt)
+                root.interruptArmed = false
+            if (!Models.MissionDetail.selectedCanSteer)
+                steerEditor.visible = false
+        }
 
         function onFocusChanged() {
             root.interruptArmed = false
@@ -383,7 +394,7 @@ Rectangle {
                                 Layout.fillWidth: true
                                 text: attentionCard.summary
                                 color: KodosiTheme.textSecondary
-                                font.pixelSize: 9
+                                font.pixelSize: KodosiTheme.fontCaption
                                 wrapMode: Text.Wrap
                             }
                         }
@@ -488,7 +499,7 @@ Rectangle {
                         Layout.fillWidth: true
                         text: qsTr("Refreshing; showing the last known conversation")
                         color: KodosiTheme.textSecondary
-                        font.pixelSize: 9
+                        font.pixelSize: KodosiTheme.fontCaption
                     }
                 }
 
@@ -543,7 +554,7 @@ Rectangle {
                             PlainLabel {
                                 text: message.authorDisplay
                                 color: KodosiTheme.textSecondary
-                                font.pixelSize: 9
+                                font.pixelSize: KodosiTheme.fontCaption
                                 font.weight: Font.DemiBold
                             }
 
@@ -559,7 +570,7 @@ Rectangle {
                                 visible: message.audienceSummary.length > 0
                                 text: message.audienceSummary
                                 color: KodosiTheme.textTertiary
-                                font.pixelSize: 9
+                                font.pixelSize: KodosiTheme.fontCaption
                             }
                         }
                     }
@@ -604,6 +615,14 @@ Rectangle {
                         anchors.fill: parent
                         anchors.margins: KodosiTheme.spacing2
                         spacing: 2
+
+                        PlainLabel {
+                            Layout.fillWidth: true
+                            text: qsTr("Targets receive the dispatch. Every Mission member can read it here.")
+                            color: KodosiTheme.textSecondary
+                            font.pixelSize: KodosiTheme.fontCaption
+                            wrapMode: Text.Wrap
+                        }
 
                         KButton {
                             objectName: "missions.chat.audience.broadcast"
@@ -736,13 +755,19 @@ Rectangle {
                         anchors.margins: KodosiTheme.spacing3
                         spacing: KodosiTheme.spacing2
 
-                        KIconButton {
+                        KButton {
                             objectName: "missions.chat.recipients"
                             Accessible.id: objectName
-                            glyph: "people"
+                            iconName: "people"
+                            text: Models.MissionActions.chatRecipientSummary.length > 0
+                                ? Models.MissionActions.chatRecipientSummary : qsTr("Mission")
+                            Layout.maximumWidth: 200
+                            compact: true
+                            variant: "quiet"
                             checkable: true
                             checked: root.recipientsOpen
-                            Accessible.name: qsTr("Choose recipients")
+                            Accessible.name: qsTr("Dispatch targets: %1").arg(text)
+                            Accessible.description: qsTr("Every Mission member can read this message.")
                             onClicked:
                                 root.recipientsOpen = !root.recipientsOpen
                         }
@@ -753,11 +778,7 @@ Rectangle {
                             Accessible.id: objectName
                             Layout.fillWidth: true
                             Layout.preferredHeight: 64
-                            placeholderText:
-                                Models.MissionActions.chatRecipientSummary
-                                .length > 0
-                                ? Models.MissionActions.chatRecipientSummary
-                                : qsTr("Message Mission")
+                            placeholderText: qsTr("Message Mission")
                             text: Models.MissionActions.chatDraftBody
                             maximumLength: 4000
                             wrapMode: TextEdit.Wrap
@@ -810,7 +831,7 @@ Rectangle {
                         visible: Models.MissionDetail.tasksStaleDataVisible
                         text: qsTr("Updating; showing last known tasks")
                         color: KodosiTheme.textSecondary
-                        font.pixelSize: 9
+                        font.pixelSize: KodosiTheme.fontCaption
                     }
 
                     Item { Layout.fillWidth: true }
@@ -938,26 +959,8 @@ Rectangle {
                                         .setTaskDraftHasDueAt(checked)
                             }
 
-                            KTextField {
-                                objectName: "missions.task.due.date"
-                                Accessible.id: objectName
-                                visible:
-                                    Models.MissionActions.taskDraftHasDueAt
+                            TaskDueDateField {
                                 Layout.preferredWidth: 120
-                                placeholderText: qsTr("YYYY-MM-DD")
-                                text: Models.MissionActions.taskDraftDueAt
-                                    ? Qt.formatDate(
-                                        Models.MissionActions.taskDraftDueAt,
-                                        "yyyy-MM-dd")
-                                    : ""
-                                Accessible.name: qsTr("Task due date")
-                                onEditingFinished: {
-                                    const parsed = new Date(
-                                        text + "T23:59:59")
-                                    if (!isNaN(parsed.getTime()))
-                                        Models.MissionActions
-                                            .setTaskDraftDueAt(parsed)
-                                }
                             }
                         }
 
@@ -966,9 +969,11 @@ Rectangle {
 
                             PlainLabel {
                                 Layout.fillWidth: true
-                                visible: Models.MissionActions
-                                    .taskCreateError.length > 0
-                                text: Models.MissionActions.taskCreateError
+                                visible: Models.MissionActions.taskDraftDueDateError.length > 0
+                                    || Models.MissionActions.taskCreateError.length > 0
+                                text: Models.MissionActions.taskDraftDueDateError.length > 0
+                                    ? Models.MissionActions.taskDraftDueDateError
+                                    : Models.MissionActions.taskCreateError
                                 color: KodosiTheme.danger
                                 wrapMode: Text.Wrap
                             }
@@ -1090,6 +1095,7 @@ Rectangle {
                         required property string status
                         required property string statusLabel
                         required property bool knownStatus
+                        required property bool contentUnavailable
                         required property string assignmentDisplay
                         required property date dueAt
                         required property string resultEvidence
@@ -1129,11 +1135,11 @@ Rectangle {
                                 }
 
                                 PlainLabel {
-                                    text: task.statusLabel
+                                    text: task.contentUnavailable ? qsTr("Unavailable on this device") : task.statusLabel
                                     color: task.knownStatus
                                         ? KodosiTheme.textSecondary
                                         : KodosiTheme.danger
-                                    font.pixelSize: 9
+                                    font.pixelSize: KodosiTheme.fontCaption
                                 }
                             }
 
@@ -1166,7 +1172,7 @@ Rectangle {
                             }
 
                             RowLayout {
-                                visible: task.knownStatus
+                                visible: task.knownStatus && !task.contentUnavailable
                                 Layout.fillWidth: true
                                 spacing: KodosiTheme.spacing2
 
@@ -1200,7 +1206,7 @@ Rectangle {
                                         && task.assignmentDisplay.length > 0
                                     text: task.assignmentDisplay
                                     color: KodosiTheme.textSecondary
-                                    font.pixelSize: 9
+                                    font.pixelSize: KodosiTheme.fontCaption
                                 }
 
                                 Item { Layout.fillWidth: true }
@@ -1217,12 +1223,12 @@ Rectangle {
                                     color: task.dueAt < new Date()
                                         ? KodosiTheme.danger
                                         : KodosiTheme.textSecondary
-                                    font.pixelSize: 9
+                                    font.pixelSize: KodosiTheme.fontCaption
                                 }
                             }
 
                             Flow {
-                                visible: task.knownStatus
+                                visible: task.knownStatus && !task.contentUnavailable
                                     && Models.MissionActions
                                         .canManageSelectedMission
                                 Layout.fillWidth: true
@@ -1351,7 +1357,7 @@ Rectangle {
                                     text: qsTr("@%1").arg(
                                         inviteCandidate.handle)
                                     color: KodosiTheme.textSecondary
-                                    font.pixelSize: 9
+                                    font.pixelSize: KodosiTheme.fontCaption
                                 }
                             }
 
@@ -1495,7 +1501,7 @@ Rectangle {
                             === "failed"
                             ? KodosiTheme.danger
                             : KodosiTheme.textSecondary
-                        font.pixelSize: 9
+                        font.pixelSize: KodosiTheme.fontCaption
                     }
 
                     KIconButton {
@@ -1521,6 +1527,9 @@ Rectangle {
                         objectName: "missions.focus.terminal.native"
                         Accessible.id: objectName
                         anchors.fill: parent
+                        anchors.topMargin: focusViewportControls.topInset
+                        anchors.rightMargin: focusViewportControls.scrollInset
+                        anchors.bottomMargin: focusViewportControls.scrollInset
                         fontFamily: Models.DesktopSettings.fontFamily
                         fontPixelSize: Models.DesktopSettings.fontSize
                         lineHeight: Models.DesktopSettings.lineHeight
@@ -1539,6 +1548,13 @@ Rectangle {
                             root.focusTerminalOperationError = message
                         onTerminalClosed: root.focusTerminalError =
                             qsTr("The terminal session has ended.")
+                    }
+
+                    TerminalViewportControls {
+                        id: focusViewportControls
+                        anchors.fill: parent
+                        terminalView: focusTerminal
+                        identifier: "missions.focus.viewport"
                     }
 
                     ColumnLayout {
@@ -1647,7 +1663,7 @@ Rectangle {
                                 Accessible.id: objectName
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 58
-                                text: Models.Steering.draftText
+                                text: root.steeringPresentation.draftText
                                 placeholderText:
                                     qsTr("Next instruction")
                                 maximumLength: 16384
@@ -1655,8 +1671,7 @@ Rectangle {
                                 onTextChanged: {
                                     if (activeFocus
                                             && text
-                                                !== Models.Steering
-                                                    .draftText)
+                                                !== root.steeringPresentation.draftText)
                                         Models.Steering.saveDraft(
                                             root.focusSessionId,
                                             text,
@@ -1669,7 +1684,7 @@ Rectangle {
                                                 === Qt.Key_Return
                                                 || event.key
                                                 === Qt.Key_Enter)) {
-                                        if (Models.Steering.canSend)
+                                        if (root.steeringPresentation.canSend)
                                             Models.MissionDetail.steerFocused(
                                                 text)
                                         event.accepted = true
@@ -1684,27 +1699,27 @@ Rectangle {
                                 text: qsTr("Steer")
                                 compact: true
                                 variant: "primary"
-                                enabled: Models.Steering.canSend
+                                enabled: root.steeringPresentation.canSend
                                 onClicked:
                                     Models.MissionDetail.steerFocused(
-                                        Models.Steering.draftText)
+                                        root.steeringPresentation.draftText)
                             }
                         }
 
                         RowLayout {
                             visible:
-                                Models.Steering.statusText.length > 0
-                                || Models.Steering.error.length > 0
-                                || Models.Steering.canRetry
-                                || Models.Steering.canCancel
+                                root.steeringPresentation.statusText.length > 0
+                                || root.steeringPresentation.error.length > 0
+                                || root.steeringPresentation.canRetry
+                                || root.steeringPresentation.canCancel
                             Layout.fillWidth: true
 
                             PlainLabel {
                                 Layout.fillWidth: true
-                                text: Models.Steering.error.length > 0
-                                    ? Models.Steering.error
-                                    : Models.Steering.statusText
-                                color: Models.Steering.error.length > 0
+                                text: root.steeringPresentation.error.length > 0
+                                    ? root.steeringPresentation.error
+                                    : root.steeringPresentation.statusText
+                                color: root.steeringPresentation.error.length > 0
                                     ? KodosiTheme.danger
                                     : KodosiTheme.textSecondary
                                 wrapMode: Text.Wrap
@@ -1714,7 +1729,7 @@ Rectangle {
                                 objectName:
                                     "missions.focus.steer.cancel"
                                 Accessible.id: objectName
-                                visible: Models.Steering.canCancel
+                                visible: root.steeringPresentation.canCancel
                                 text: qsTr("Cancel")
                                 compact: true
                                 onClicked: Models.Steering.cancel(
@@ -1725,7 +1740,7 @@ Rectangle {
                                 objectName:
                                     "missions.focus.steer.retry"
                                 Accessible.id: objectName
-                                visible: Models.Steering.canRetry
+                                visible: root.steeringPresentation.canRetry
                                 text: qsTr("Retry")
                                 compact: true
                                 onClicked: Models.Steering.retry(
@@ -1776,8 +1791,11 @@ Rectangle {
                         compact: true
                         checkable: true
                         checked: steerEditor.visible
-                        onClicked: steerEditor.visible =
-                            !steerEditor.visible
+                        onClicked: {
+                            if (!steerEditor.visible)
+                                Models.Steering.rehydrate(root.focusSessionId)
+                            steerEditor.visible = !steerEditor.visible
+                        }
                     }
 
                     Item { Layout.fillWidth: true }

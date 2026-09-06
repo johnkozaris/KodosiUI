@@ -9,7 +9,6 @@ Item {
     property string sessionName
     property string project
     property string status
-    property string mode
     property string terminalError
     property string terminalOperationError
     property string kind
@@ -73,15 +72,6 @@ Item {
     Accessible.selected: active
     Accessible.readOnly: terminal.readOnly
 
-    function cycleMode() {
-        const next = mode === "normal"
-            ? "plan"
-            : mode === "plan"
-              ? "autopilot"
-              : "normal"
-        Models.SessionActions.setMode(sessionId, next)
-    }
-
     function requestClose() {
         if (Models.SessionActions.closeConfirmationSessionId
                 !== sessionId) {
@@ -99,7 +89,6 @@ Item {
         sessionName = presentation.name
         project = presentation.project
         status = presentation.status
-        mode = presentation.mode
         kind = presentation.kind
         canRetainPresentation = presentation.canRetainPresentation
         isStageReady = presentation.isStageReady
@@ -206,26 +195,6 @@ Item {
     }
 
     Rectangle {
-        visible: root.active
-        x: 4
-        y: 6
-        width: Math.max(0, root.width - 8)
-        height: root.height
-        radius: KodosiTheme.radiusSmall
-        color: KodosiTheme.surfaceRaised
-    }
-
-    Rectangle {
-        visible: root.active
-        x: 2
-        y: 3
-        width: Math.max(0, root.width - 4)
-        height: root.height
-        radius: KodosiTheme.radiusSmall
-        color: KodosiTheme.surfaceRaised
-    }
-
-    Rectangle {
         anchors.fill: parent
         radius: KodosiTheme.radiusSmall
         color: KodosiTheme.surfaceElevated
@@ -239,11 +208,7 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 34
-            color: root.mode === "plan"
-                ? KodosiTheme.surfaceRaised
-                : root.mode === "autopilot"
-                  ? KodosiTheme.surfaceSelected
-                  : KodosiTheme.surfaceElevated
+            color: KodosiTheme.surface
 
             RowLayout {
                 anchors.fill: parent
@@ -283,7 +248,7 @@ Item {
                         ? root.sessionName
                         : qsTr("Session")
                     secondaryText: root.chromeTier === 2
-                        ? root.projectLabel
+                        ? (terminal.terminalTitle.length > 0 ? terminal.terminalTitle : root.projectLabel)
                         : ""
                     Accessible.name: qsTr("Select session %1").arg(
                         root.sessionName.length > 0
@@ -292,6 +257,30 @@ Item {
                     Accessible.selected: root.active
                     onClicked:
                         Models.DesktopState.selectSession(root.sessionId)
+                }
+
+                KIconButton {
+                    objectName: "stage.tile." + root.sessionId + ".inspect"
+                    Accessible.id: objectName
+                    Accessible.ignored: root.accessibilitySuppressed || !visible
+                    glyph: "intel"
+                    size: 28
+                    visible: root.chromeTier >= 1
+                    Accessible.name: qsTr("Inspect %1").arg(root.sessionName)
+                    onClicked: root.inspectSessionRequested(root.sessionId, root.sessionName)
+                }
+
+                KIconButton {
+                    objectName: "stage.tile." + root.sessionId + ".interrupt"
+                    Accessible.id: objectName
+                    Accessible.ignored: root.accessibilitySuppressed || !visible
+                    glyph: "interrupt"
+                    size: 28
+                    visible: root.chromeTier >= 1
+                        && Models.SessionActions.availabilityRevision >= 0
+                        && Models.SessionActions.canInterrupt(root.sessionId)
+                    Accessible.name: qsTr("Interrupt %1").arg(root.sessionName)
+                    onClicked: Models.SessionActions.interrupt(root.sessionId)
                 }
 
                 KIconButton {
@@ -321,7 +310,7 @@ Item {
                         && terminal.readOnly
                     text: qsTr("Read only")
                     color: KodosiTheme.textSecondary
-                    font.pixelSize: 9
+                    font.pixelSize: KodosiTheme.fontCaption
                     font.weight: Font.DemiBold
                 }
 
@@ -370,20 +359,6 @@ Item {
                             onTriggered: root.inspectSessionRequested(
                                 root.sessionId,
                                 root.sessionName)
-                        }
-
-                        KMenuItem {
-                            objectName:
-                                "stage.tile." + root.sessionId
-                                + ".overflow.mode"
-                            Accessible.id: objectName
-                            Accessible.ignored: !visible
-                            text: qsTr("Change mode")
-                            enabled:
-                                Models.SessionActions.availabilityRevision >= 0
-                                && Models.SessionActions.canSetMode(
-                                    root.sessionId)
-                            onTriggered: root.cycleMode()
                         }
 
                         KMenuItem {
@@ -462,6 +437,9 @@ Item {
                 Accessible.ignored:
                     root.accessibilitySuppressed || !visible
                 anchors.fill: parent
+                anchors.topMargin: viewportControls.topInset
+                anchors.rightMargin: viewportControls.scrollInset
+                anchors.bottomMargin: viewportControls.scrollInset
                 fontFamily: Models.DesktopSettings.fontFamily
                 fontPixelSize: Models.DesktopSettings.fontSize
                 lineHeight: Models.DesktopSettings.lineHeight
@@ -488,6 +466,13 @@ Item {
                 }
                 onTerminalClosed: root.terminalError =
                     qsTr("The terminal session has ended.")
+            }
+
+            TerminalViewportControls {
+                id: viewportControls
+                anchors.fill: parent
+                terminalView: terminal
+                identifier: "stage.tile." + root.sessionId + ".viewport"
             }
 
             KMenu {
@@ -533,7 +518,7 @@ Item {
                         Layout.fillWidth: true
                         text: root.terminalOperationError
                         color: KodosiTheme.danger
-                        font.pixelSize: 9
+                        font.pixelSize: KodosiTheme.fontCaption
                         wrapMode: Text.Wrap
                     }
 
@@ -689,7 +674,7 @@ Item {
                         Layout.maximumWidth: 220
                         text: root.approval.toolInputSummary || ""
                         color: KodosiTheme.textSecondary
-                        font.pixelSize: 9
+                        font.pixelSize: KodosiTheme.fontCaption
                         elide: Text.ElideMiddle
                     }
 
@@ -697,7 +682,7 @@ Item {
                         visible: (root.approval.queuedCount || 0) > 0
                         text: "+" + root.approval.queuedCount
                         color: KodosiTheme.textSecondary
-                        font.pixelSize: 9
+                        font.pixelSize: KodosiTheme.fontCaption
                     }
 
                     PlainLabel {
@@ -705,7 +690,7 @@ Item {
                             && root.approvalCountdown().length > 0
                         text: root.approvalCountdown()
                         color: KodosiTheme.textSecondary
-                        font.pixelSize: 9
+                        font.pixelSize: KodosiTheme.fontCaption
                     }
 
                     KButton {
@@ -723,12 +708,20 @@ Item {
                         objectName: "stage.tile." + root.sessionId
                             + ".approval.approve"
                         Accessible.id: objectName
-                        text: qsTr("Approve")
+                        text: root.chromeTier < 2
+                            || (root.approval.risk !== "safe" && root.approval.risk !== "network")
+                            ? qsTr("Review") : qsTr("Approve")
                         compact: true
                         variant: "primary"
                         enabled: root.approval.actionable === true
-                        onClicked: Models.PendingPermissions.approve(
-                            root.approval.identityToken)
+                        onClicked: {
+                            if (root.chromeTier < 2
+                                    || (root.approval.risk !== "safe"
+                                        && root.approval.risk !== "network"))
+                                root.inspectSessionRequested(root.sessionId, root.sessionName)
+                            else
+                                Models.PendingPermissions.approve(root.approval.identityToken)
+                        }
                     }
                 }
 
@@ -739,7 +732,7 @@ Item {
                     color: root.approval.actionable === true
                         ? KodosiTheme.danger
                         : KodosiTheme.textSecondary
-                    font.pixelSize: 9
+                    font.pixelSize: KodosiTheme.fontCaption
                     elide: Text.ElideRight
                 }
             }

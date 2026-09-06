@@ -66,7 +66,7 @@ for notice in "${notice_names[@]}"; do
         "$root/usr/share/doc/kodosi/ghostty/ThirdPartyNotices/licenses/$notice"
 done
 
-grep -Fq 'b1970e5f103fad1a52f73d686ba2b5d98cb9ed4d' \
+grep -Fq 'a628cb339a5bedd97fa2e54d9432c3b38f6c43c1' \
     "$root/usr/share/doc/kodosi/NATIVE-DESKTOP-INTEGRATION-NOTICE.txt"
 grep -Fq '20b965e6f88d6a8c81d33a671bfe9b90f296ba2b' \
     "$root/usr/share/doc/kodosi/NATIVE-DESKTOP-INTEGRATION-NOTICE.txt"

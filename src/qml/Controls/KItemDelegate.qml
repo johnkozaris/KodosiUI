@@ -8,6 +8,8 @@ ItemDelegate {
     leftPadding: 10
     rightPadding: 10
 
+    KFocusIndicator { active: root.activeFocus && root.enabled }
+
     background: Rectangle {
         color: root.down
             ? KodosiTheme.surfaceSelected

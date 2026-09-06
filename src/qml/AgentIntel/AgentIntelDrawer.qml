@@ -880,11 +880,6 @@ KPopover {
                                 text: root.intel.sourceKind || ""
                                 color: KodosiTheme.textPrimary
                             }
-                            PlainLabel { text: qsTr("Mode"); color: KodosiTheme.textSecondary }
-                            PlainLabel {
-                                text: root.sessionInfo.mode || ""
-                                color: KodosiTheme.textPrimary
-                            }
                         }
 
                         Rectangle {

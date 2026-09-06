@@ -60,6 +60,7 @@ public:
     [[nodiscard]] bool canRetry() const;
     [[nodiscard]] int retainedCount() const;
 
+    Q_INVOKABLE [[nodiscard]] QVariantMap presentationForSession(const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool inspect(const QString& sessionId);
     Q_INVOKABLE void clearInspection();
     Q_INVOKABLE [[nodiscard]] bool rehydrate(const QString& sessionId);
@@ -72,6 +73,9 @@ public:
     Q_INVOKABLE [[nodiscard]] bool retry(const QString& sessionId);
     Q_INVOKABLE void clearError(const QString& sessionId);
 
+    [[nodiscard]] bool canSendTo(const QString& sessionId) const;
+    [[nodiscard]] bool canCancelFor(const QString& sessionId) const;
+    [[nodiscard]] bool canRetryFor(const QString& sessionId) const;
     [[nodiscard]] int retainedRequestCount(const QString& sessionId) const;
     [[nodiscard]] int blockingRequestCount(const QString& sessionId) const;
 

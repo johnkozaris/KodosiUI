@@ -138,6 +138,10 @@ QtObject {
         : lightPlaceholderText
     readonly property color disabled: isDark ? darkDisabled : lightDisabled
 
+    readonly property int fontCaption: 11
+    readonly property int fontBody: 13
+    readonly property int fontTitle: 18
+
     readonly property int spacing1: 3
     readonly property int spacing2: 6
     readonly property int spacing3: 8

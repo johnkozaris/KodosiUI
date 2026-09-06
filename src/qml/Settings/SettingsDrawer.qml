@@ -310,7 +310,7 @@ KPopover {
         spacing: 0
 
         Rectangle {
-            Layout.preferredWidth: root.compact ? 160 : 190
+            Layout.preferredWidth: 208
             Layout.fillHeight: true
             color: KodosiTheme.surface
             topLeftRadius: KodosiTheme.radiusModal
@@ -484,7 +484,7 @@ KPopover {
                             PlainLabel {
                                 text: qsTr("FONT FAMILY")
                                 color: KodosiTheme.textSecondary
-                                font.pixelSize: 9
+                                font.pixelSize: KodosiTheme.fontCaption
                                 font.weight: Font.DemiBold
                                 font.letterSpacing: 1.0
                             }
@@ -505,7 +505,7 @@ KPopover {
                             PlainLabel {
                                 text: qsTr("CURSOR")
                                 color: KodosiTheme.textSecondary
-                                font.pixelSize: 9
+                                font.pixelSize: KodosiTheme.fontCaption
                                 font.weight: Font.DemiBold
                                 font.letterSpacing: 1.0
                             }
@@ -530,7 +530,7 @@ KPopover {
                             PlainLabel {
                                 text: qsTr("FONT SIZE · 8–32 PT")
                                 color: KodosiTheme.textSecondary
-                                font.pixelSize: 9
+                                font.pixelSize: KodosiTheme.fontCaption
                                 font.weight: Font.DemiBold
                                 font.letterSpacing: 1.0
                             }
@@ -556,7 +556,7 @@ KPopover {
                                     Layout.fillWidth: true
                                     text: qsTr("LINE HEIGHT · 0.8–2.0")
                                     color: KodosiTheme.textSecondary
-                                    font.pixelSize: 9
+                                    font.pixelSize: KodosiTheme.fontCaption
                                     font.weight: Font.DemiBold
                                     font.letterSpacing: 1.0
                                 }
@@ -593,7 +593,7 @@ KPopover {
                                 text: qsTr(
                                     "LINES OF HISTORY · 100–100,000")
                                 color: KodosiTheme.textSecondary
-                                font.pixelSize: 9
+                                font.pixelSize: KodosiTheme.fontCaption
                                 font.weight: Font.DemiBold
                                 font.letterSpacing: 1.0
                             }
@@ -635,7 +635,7 @@ KPopover {
                         PlainLabel {
                             text: qsTr("DEFAULT WORKING DIRECTORY")
                             color: KodosiTheme.textSecondary
-                            font.pixelSize: 9
+                            font.pixelSize: KodosiTheme.fontCaption
                             font.weight: Font.DemiBold
                             font.letterSpacing: 1.0
                         }

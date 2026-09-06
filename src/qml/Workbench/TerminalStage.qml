@@ -108,18 +108,6 @@ Item {
         })
     }
 
-    function setTerminalSubtreeAccessibility(item, ignored) {
-        if (!item)
-            return
-        const target = item
-        target.Accessible.ignored = Qt.binding(function() {
-            return ignored || !target.visible
-        })
-        const children = target.children || []
-        for (let index = 0; index < children.length; ++index)
-            setTerminalSubtreeAccessibility(children[index], ignored)
-    }
-
     onFocusModeChanged: {
         if (focusMode) {
             stageFlick.contentY = 0
@@ -306,7 +294,7 @@ Item {
                         Accessible.id: objectName
                         model: Models.TerminalTiling
 
-                        delegate: Loader {
+                        delegate: Models.AccessibilityScope {
                             id: layoutEntry
 
                             required property int entryType
@@ -327,27 +315,23 @@ Item {
                             width: layoutWidth
                             height: layoutHeight
                             visible: entryVisible
-                            Accessible.ignored: !entryVisible
-                            active: true
-                            onEntryVisibleChanged:
-                                root.setTerminalSubtreeAccessibility(
-                                    item,
-                                    !entryVisible)
-                            onLoaded: {
-                                if (entryType
-                                        === Models.TerminalTiling.Tile)
-                                    root.registerTerminalTile(item)
-                                root.setTerminalSubtreeAccessibility(
-                                    item,
-                                    !entryVisible)
-                                root.scheduleTerminalFocus()
+
+                            Loader {
+                                anchors.fill: parent
+                                active: true
+                                onLoaded: {
+                                    if (layoutEntry.entryType
+                                            === Models.TerminalTiling.Tile)
+                                        root.registerTerminalTile(item)
+                                    root.scheduleTerminalFocus()
+                                }
+                                Component.onDestruction:
+                                    root.unregisterTerminalTile(item)
+                                sourceComponent:
+                                    layoutEntry.entryType === Models.TerminalTiling.Tile
+                                    ? tileComponent
+                                    : dividerComponent
                             }
-                            Component.onDestruction:
-                                root.unregisterTerminalTile(item)
-                            sourceComponent:
-                                entryType === Models.TerminalTiling.Tile
-                                ? tileComponent
-                                : dividerComponent
 
                             Component {
                                 id: tileComponent

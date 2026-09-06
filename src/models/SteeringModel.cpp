@@ -326,16 +326,21 @@ bool SteeringModel::busy() const
 
 bool SteeringModel::canSend() const
 {
+    return canSendTo(m_selectedSessionId);
+}
+
+bool SteeringModel::canSendTo(const QString& sessionId) const
+{
     QString ignored;
-    const auto context = currentContext(m_selectedSessionId, ignored);
-    if (!context || blockingRequestCount(m_selectedSessionId) > 0) {
+    const auto context = currentContext(sessionId, ignored);
+    if (!context || blockingRequestCount(sessionId) > 0) {
         return false;
     }
-    const auto hydration = currentHydrationKey(m_selectedSessionId, ignored);
+    const auto hydration = currentHydrationKey(sessionId, ignored);
     if (!hydration || !m_hydratedAuthorities.contains(*hydration)) {
         return false;
     }
-    const auto draft = m_drafts.value(m_selectedSessionId);
+    const auto draft = m_drafts.value(sessionId);
     const auto payload = draft.text.trimmed();
     return effectiveMode(draft.mode, *context).has_value() && !payload.isEmpty()
         && payload.toUtf8().size() <= maximumSteerTextBytes;
@@ -343,7 +348,12 @@ bool SteeringModel::canSend() const
 
 bool SteeringModel::canCancel() const
 {
-    const auto* selected = selectedRequest(m_selectedSessionId);
+    return canCancelFor(m_selectedSessionId);
+}
+
+bool SteeringModel::canCancelFor(const QString& sessionId) const
+{
+    const auto* selected = selectedRequest(sessionId);
     return selected != nullptr && cancellable(*selected)
         && std::ranges::none_of(m_operations, [&](const Operation& operation) {
                return operation.kind == OperationKind::Cancel
@@ -355,7 +365,12 @@ bool SteeringModel::canCancel() const
 
 bool SteeringModel::canRetry() const
 {
-    const auto* selected = selectedRequest(m_selectedSessionId);
+    return canRetryFor(m_selectedSessionId);
+}
+
+bool SteeringModel::canRetryFor(const QString& sessionId) const
+{
+    const auto* selected = selectedRequest(sessionId);
     const auto exactQueryActive = selected != nullptr
         && std::ranges::any_of(m_operations, [&](const Operation& operation) {
                return operation.kind == OperationKind::QueryExact
@@ -363,7 +378,7 @@ bool SteeringModel::canRetry() const
                    && operation.deadlineMs > 0;
            });
     QString ignored;
-    const auto hydration = currentHydrationKey(m_selectedSessionId, ignored);
+    const auto hydration = currentHydrationKey(sessionId, ignored);
     return (selected != nullptr
                && (selected->state == State::Reconciling
                    || selected->state == State::DeliveryUnknown)
@@ -374,6 +389,19 @@ bool SteeringModel::canRetry() const
 int SteeringModel::retainedCount() const
 {
     return retainedRequestCount(m_selectedSessionId);
+}
+
+QVariantMap SteeringModel::presentationForSession(const QString& sessionId) const
+{
+    const auto* request = selectedRequest(sessionId);
+    return {
+        {QStringLiteral("draftText"), m_drafts.value(sessionId).text},
+        {QStringLiteral("statusText"), request == nullptr ? QString {} : stateMessage(*request)},
+        {QStringLiteral("error"), m_errors.value(sessionId)},
+        {QStringLiteral("canSend"), canSendTo(sessionId)},
+        {QStringLiteral("canCancel"), canCancelFor(sessionId)},
+        {QStringLiteral("canRetry"), canRetryFor(sessionId)},
+    };
 }
 
 bool SteeringModel::inspect(const QString& sessionId)

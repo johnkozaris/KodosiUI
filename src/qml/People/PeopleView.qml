@@ -162,11 +162,14 @@ Item {
                     }
                 }
 
-                KIconButton {
+                KButton {
                     objectName: "missions.create.open"
                     Accessible.id: objectName
-                    glyph: "plus"
-                    Accessible.name: qsTr("New Mission")
+                    iconName: "plus"
+                    text: qsTr("New Mission")
+                    compact: true
+                    variant: "primary"
+                    Accessible.name: text
                     onClicked: root.createOpen = !root.createOpen
                 }
             }
@@ -208,53 +211,6 @@ Item {
                                     || Models.MissionActions
                                         .createMissionCanRetry)
                                 root.submitCreate()
-                        }
-                    }
-
-                    RowLayout {
-                        visible: !root.createOpen
-                            && Models.MissionActions.hasCreateMissionDraft
-                        Layout.fillWidth: true
-                        Layout.leftMargin: KodosiTheme.spacing3
-                        Layout.rightMargin: KodosiTheme.spacing3
-                        Layout.topMargin: KodosiTheme.spacing2
-                        spacing: KodosiTheme.spacing2
-
-                        PlainLabel {
-                            Layout.fillWidth: true
-                            text: Models.MissionActions.createMissionError.length > 0
-                                ? Models.MissionActions.createMissionError
-                                : Models.MissionActions.createMissionOutcome
-                                    === Models.MissionActions.Pending
-                                    || Models.MissionActions.createMissionOutcome
-                                        === Models.MissionActions
-                                            .AcceptedAwaitingProjection
-                                    ? qsTr("Mission creation is still pending.")
-                                    : qsTr("Mission draft saved.")
-                            color: Models.MissionActions.createMissionError.length > 0
-                                ? KodosiTheme.danger
-                                : KodosiTheme.textSecondary
-                            wrapMode: Text.Wrap
-                        }
-
-                        KButton {
-                            objectName: "missions.create.resume"
-                            Accessible.id: objectName
-                            text: qsTr("Resume")
-                            compact: true
-                            onClicked: root.createOpen = true
-                        }
-
-                        KButton {
-                            objectName: "missions.create.persisted.discard"
-                            Accessible.id: objectName
-                            text: qsTr("Discard")
-                            compact: true
-                            variant: "dangerQuiet"
-                            enabled:
-                                Models.MissionActions.createMissionCanDiscard
-                            onClicked:
-                                Models.MissionActions.discardCreateMission()
                         }
                     }
 
@@ -326,6 +282,51 @@ Item {
                         onClicked:
                             Models.MissionActions.checkCreateMission()
                     }
+                }
+            }
+
+            RowLayout {
+                objectName: "missions.create.saved"
+                Accessible.id: objectName
+                visible: !root.createOpen && Models.MissionActions.hasCreateMissionDraft
+                Layout.fillWidth: true
+                Layout.margins: KodosiTheme.spacing3
+                spacing: KodosiTheme.spacing2
+
+                PlainLabel {
+                    Layout.fillWidth: true
+                    text: Models.MissionActions.createMissionError.length > 0
+                        ? Models.MissionActions.createMissionError
+                        : Models.MissionActions.createMissionCanCheck
+                            ? qsTr("Mission creation needs confirmation.")
+                            : qsTr("Mission draft saved.")
+                    color: Models.MissionActions.createMissionError.length > 0
+                        ? KodosiTheme.danger : KodosiTheme.textSecondary
+                    wrapMode: Text.Wrap
+                }
+                KButton {
+                    objectName: "missions.create.resume"
+                    Accessible.id: objectName
+                    text: qsTr("Resume")
+                    compact: true
+                    onClicked: root.createOpen = true
+                }
+                KButton {
+                    objectName: "missions.create.persisted.check"
+                    Accessible.id: objectName
+                    visible: Models.MissionActions.createMissionCanCheck
+                    text: qsTr("Check outcome")
+                    compact: true
+                    onClicked: Models.MissionActions.checkCreateMission()
+                }
+                KButton {
+                    objectName: "missions.create.persisted.discard"
+                    Accessible.id: objectName
+                    text: qsTr("Discard")
+                    compact: true
+                    variant: "quiet"
+                    enabled: Models.MissionActions.createMissionCanDiscard
+                    onClicked: Models.MissionActions.discardCreateMission()
                 }
             }
 
@@ -438,7 +439,7 @@ Item {
                                     .arg(invitationDelegate.roomSlug)
                                 : qsTr("Awaiting reply")
                             color: KodosiTheme.textSecondary
-                            font.pixelSize: 9
+                            font.pixelSize: KodosiTheme.fontCaption
                         }
                     }
 
@@ -541,7 +542,7 @@ Item {
                                     ? missionDelegate.latestMessageBody
                                     : missionDelegate.slug
                                 color: KodosiTheme.textSecondary
-                                font.pixelSize: 9
+                                font.pixelSize: KodosiTheme.fontCaption
                                 elide: Text.ElideRight
                             }
                         }
@@ -734,7 +735,7 @@ Item {
                                     : qsTr("@%1 · Awaiting").arg(
                                         personDelegate.handle)
                             color: KodosiTheme.textSecondary
-                            font.pixelSize: 9
+                            font.pixelSize: KodosiTheme.fontCaption
                         }
                     }
 

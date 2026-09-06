@@ -348,6 +348,8 @@ QVariant MissionTasksModel::data(const QModelIndex& index, const int role) const
         return task.updatedAt;
     case ResultRole:
         return task.result;
+    case ContentUnavailableRole:
+        return task.contentUnavailable;
     case KnownStatusRole:
         return task.knownStatus;
     case StatusLabelRole:
@@ -386,6 +388,7 @@ QHash<int, QByteArray> MissionTasksModel::roleNames() const
         {DueAtRole, QByteArrayLiteral("dueAt")},
         {UpdatedAtRole, QByteArrayLiteral("updatedAt")},
         {ResultRole, QByteArrayLiteral("result")},
+        {ContentUnavailableRole, QByteArrayLiteral("contentUnavailable")},
         {KnownStatusRole, QByteArrayLiteral("knownStatus")},
         {StatusLabelRole, QByteArrayLiteral("statusLabel")},
         {AssignmentDisplayRole, QByteArrayLiteral("assignmentDisplay")},
@@ -402,7 +405,7 @@ std::optional<MissionTasksModel::ActionContext>
 MissionTasksModel::actionContext(const QString& taskId) const
 {
     const auto found = std::ranges::find(m_tasks, taskId, &Task::id);
-    return found == m_tasks.end()
+    return found == m_tasks.end() || found->contentUnavailable
         ? std::nullopt
         : std::optional<ActionContext> {{
               .status = found->status,
@@ -533,6 +536,9 @@ void MissionCrewModel::replace(QVector<Entry> entries)
         return compared == 0 ? left.presentationId < right.presentationId
                              : compared < 0;
     });
+    if (m_entries == entries) {
+        return;
+    }
     const auto countChangedValue = m_entries.size() != entries.size();
     const auto dispatchableAgentCountValue =
         static_cast<int>(std::ranges::count_if(
@@ -1076,6 +1082,8 @@ bool MissionDetailModel::beginFullHydration()
         .nextOffset = 0,
         .pageCount = 0,
         .tasks = {},
+        .snapshot = {},
+        .restartCount = 0,
     };
     m_membersLoading = true;
     m_membersAuthoritative = false;
@@ -1139,6 +1147,8 @@ bool MissionDetailModel::refreshTasks()
         .nextOffset = 0,
         .pageCount = 0,
         .tasks = {},
+        .snapshot = {},
+        .restartCount = 0,
     };
     m_staleTaskIds.clear();
     for (const auto& task : std::as_const(m_tasks.m_tasks)) {
@@ -1173,13 +1183,19 @@ bool MissionDetailModel::selectCrew(const QString& presentationId)
         || context->sessionIncarnationId.isEmpty()) {
         return false;
     }
+    if (m_selectedCrewPresentationId == presentationId
+        && m_selectedSessionId == context->localSessionId
+        && m_selectedSessionIncarnationId == context->sessionIncarnationId) {
+        return true;
+    }
     m_selectedCrewPresentationId = presentationId;
     m_selectedSessionId = context->localSessionId;
     m_selectedSessionIncarnationId = context->sessionIncarnationId;
     if (m_dependencies.steering != nullptr) {
-        (void)m_dependencies.steering->inspect(context->localSessionId);
+        (void)m_dependencies.steering->rehydrate(context->localSessionId);
     }
     emit focusChanged();
+    emit focusPresentationChanged();
     return true;
 }
 
@@ -1191,10 +1207,8 @@ void MissionDetailModel::clearFocus()
     m_selectedCrewPresentationId.clear();
     m_selectedSessionId.clear();
     m_selectedSessionIncarnationId.clear();
-    if (m_dependencies.steering != nullptr) {
-        m_dependencies.steering->clearInspection();
-    }
     emit focusChanged();
+    emit focusPresentationChanged();
 }
 
 bool MissionDetailModel::openFocusedFullTerminal()
@@ -1225,7 +1239,7 @@ bool MissionDetailModel::steerFocused(const QString& text)
         return false;
     }
     auto* steering = m_dependencies.steering;
-    if (!steering->inspect(entry->localSessionId)
+    if (!steering->rehydrate(entry->localSessionId)
         || !steering->saveDraft(
             entry->localSessionId,
             text,
@@ -1510,6 +1524,16 @@ void MissionDetailModel::applyRoomEvent(const QJsonObject& object)
         rebuildMessagePresentation();
         return;
     }
+    if (*type == QStringLiteral("room.tasks.invalidated")) {
+        if (!m_taskLoad
+            || optionalString(object, QStringLiteral("hydration_id")) != m_taskLoad->token
+            || integer(object.value(QStringLiteral("request_offset")), true)
+                != std::optional<qint64>(m_taskLoad->nextOffset)) {
+            return;
+        }
+        restartTaskHydration();
+        return;
+    }
     if (*type == QStringLiteral("room.tasks.page")) {
         if (!m_taskLoad) {
             return;
@@ -1522,6 +1546,24 @@ void MissionDetailModel::applyRoomEvent(const QJsonObject& object)
             || *requestOffset != m_taskLoad->nextOffset) {
             return;
         }
+        const auto snapshot = requiredString(object, QStringLiteral("snapshot"));
+        if (!snapshot || snapshot->size() != 64
+            || !std::ranges::all_of(*snapshot, [](QChar value) {
+                return (value >= u'0' && value <= u'9')
+                    || (value >= u'a' && value <= u'f');
+            })) {
+            m_lastError = tr("Mission task synchronization did not include a valid snapshot. Retry the Mission.");
+            emit decodeError(m_lastError);
+            m_taskLoad.reset();
+            m_tasksLoading = false;
+            updateLoading();
+            return;
+        }
+        if (!m_taskLoad->snapshot.isEmpty() && m_taskLoad->snapshot != *snapshot) {
+            restartTaskHydration();
+            return;
+        }
+        m_taskLoad->snapshot = *snapshot;
         const auto hasMore = object.value(QStringLiteral("has_more"));
         const auto values = object.value(QStringLiteral("tasks"));
         if (!hasMore.isBool() || !values.isArray()
@@ -1755,16 +1797,41 @@ bool MissionDetailModel::requestTaskPage()
     if (!m_taskLoad) {
         return false;
     }
-    return m_dispatcher.send(
-        CommandLane::Rooms,
-        commandJson({
-            {QStringLiteral("type"), QStringLiteral("room.tasks.list")},
-            {QStringLiteral("room_id"), m_missionId},
-            {QStringLiteral("offset"),
-             static_cast<qint64>(m_taskLoad->nextOffset)},
-            {QStringLiteral("limit"), static_cast<qint64>(taskPageSize)},
-            {QStringLiteral("hydration_id"), m_taskLoad->token},
-        })).has_value();
+    QJsonObject command {
+        {QStringLiteral("type"), QStringLiteral("room.tasks.list")},
+        {QStringLiteral("room_id"), m_missionId},
+        {QStringLiteral("offset"), static_cast<qint64>(m_taskLoad->nextOffset)},
+        {QStringLiteral("limit"), static_cast<qint64>(taskPageSize)},
+        {QStringLiteral("hydration_id"), m_taskLoad->token},
+    };
+    if (!m_taskLoad->snapshot.isEmpty()) {
+        command.insert(QStringLiteral("snapshot"), m_taskLoad->snapshot);
+    }
+    return m_dispatcher.send(CommandLane::Rooms, commandJson(command)).has_value();
+}
+
+void MissionDetailModel::restartTaskHydration()
+{
+    if (!m_taskLoad) {
+        return;
+    }
+    if (m_taskLoad->restartCount < 2) {
+        ++m_taskLoad->restartCount;
+        m_taskLoad->token = QUuid::createUuidV7().toString(QUuid::WithoutBraces);
+        m_taskLoad->nextOffset = 0;
+        m_taskLoad->pageCount = 0;
+        m_taskLoad->tasks.clear();
+        m_taskLoad->snapshot.clear();
+        if (requestTaskPage()) {
+            m_hydrationTimer.start(static_cast<int>(m_hydrationTimeoutMs));
+            return;
+        }
+    }
+    m_taskLoad.reset();
+    m_tasksLoading = false;
+    m_tasksAuthoritative = false;
+    m_lastError = tr("The Mission queue changed during synchronization. Retry to load the current queue.");
+    updateLoading();
 }
 
 void MissionDetailModel::rebuildProjections()
@@ -1774,7 +1841,7 @@ void MissionDetailModel::rebuildProjections()
     }
     rebuildCrew();
     rebuildAttention();
-    rebuildCrew();
+    refreshCrewAttention();
     rebuildMessagePresentation();
     rebuildTaskPresentation();
     reconcileFocus();
@@ -1863,8 +1930,22 @@ bool MissionDetailModel::setAttentionPageOffset(const int offset)
     }
     m_attention.m_pageOffset = offset;
     rebuildAttention();
-    rebuildCrew();
+    refreshCrewAttention();
     return true;
+}
+
+void MissionDetailModel::refreshCrewAttention()
+{
+    for (qsizetype row = 0; row < m_crew.m_entries.size(); ++row) {
+        auto& entry = m_crew.m_entries[row];
+        const auto count = entry.kind == MissionCrewModel::Kind::Agent
+            ? m_attention.countForSession(entry.localSessionId) : 0;
+        if (entry.attentionCount != count) {
+            entry.attentionCount = count;
+            const auto index = m_crew.index(static_cast<int>(row));
+            emit m_crew.dataChanged(index, index, {MissionCrewModel::AttentionCountRole});
+        }
+    }
 }
 
 void MissionDetailModel::rebuildCrew()
@@ -1913,11 +1994,7 @@ void MissionDetailModel::rebuildCrew()
                                        index,
                                        SessionCatalogModel::NameRole)
                                    .toString(),
-                .secondaryLabel = m_dependencies.sessions
-                                      ->data(
-                                          index,
-                                          SessionCatalogModel::ModeRole)
-                                      .toString(),
+                .secondaryLabel = {},
                 .status = context->status,
                 .localSessionId = sessionId,
                 .sessionIncarnationId = context->incarnationId,
@@ -1993,7 +2070,7 @@ void MissionDetailModel::rebuildCrew()
     }
     m_crew.replace(std::move(entries));
     if (!m_selectedCrewPresentationId.isEmpty()) {
-        emit focusChanged();
+        emit focusPresentationChanged();
     }
 }
 
@@ -2115,9 +2192,9 @@ void MissionDetailModel::reconcileFocus()
         || context->localSessionId != m_selectedSessionId
         || context->sessionIncarnationId != m_selectedSessionIncarnationId) {
         clearFocus();
-        return;
+    } else if (m_dependencies.steering != nullptr && selectedCanSteer()) {
+        (void)m_dependencies.steering->rehydrate(m_selectedSessionId);
     }
-    emit focusChanged();
 }
 
 void MissionDetailModel::setDispatchSelection(
@@ -2445,6 +2522,8 @@ std::optional<MissionTasksModel::Task> MissionDetailModel::decodeTask(
         != assignedSessionIncarnationId.isEmpty()) {
         return std::nullopt;
     }
+    const auto unavailable = object.value(QStringLiteral("contentUnavailable"));
+    if (!unavailable.isUndefined() && !unavailable.isBool()) return std::nullopt;
     return MissionTasksModel::Task {
         .id = *id,
         .title = *title,
@@ -2459,6 +2538,7 @@ std::optional<MissionTasksModel::Task> MissionDetailModel::decodeTask(
         .resultAuthorDisplay = {},
         .revision = *revision,
         .knownStatus = knownTaskStatus(*status),
+        .contentUnavailable = unavailable.toBool(),
         .createdAt = *createdAt,
         .dueAt = dueAt,
         .completedAt = completedAt,

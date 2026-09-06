@@ -25,7 +25,7 @@ dependencies, runtime integration, or feature coverage.
   models.
 - Semantic checkpoint installation is synchronous and must finish before raw
   continuation is admitted.
-- Preserve FFI ABI 5 and desktop protocol 37.
+- Preserve FFI ABI 5 and desktop protocol 38.
 - Add a shared Rust projection interface only in `../Kodosi`, additively, after
   shadow parity against Swift. Do not invent a Qt-only projection authority.
 - Use stable IDs plus account/session incarnation identity. Never use a QML row

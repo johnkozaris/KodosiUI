@@ -1020,6 +1020,28 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
                 &TerminalSessionRegistry::Listener::resizeCompleted,
                 outcome);
         }
+    } else if (type == QStringLiteral("term.bell") || type == QStringLiteral("term.title")) {
+        const auto sessionId = object.value(QStringLiteral("sessionId"));
+        const auto title = object.value(QStringLiteral("title"));
+        if (!sessionId.isString() || sessionId.toString() != control.subscription.sessionId
+            || (type == QStringLiteral("term.title") && !title.isNull() && !title.isString())) {
+            publishFailureToAll({GhosttyTerminalKernel::Failure::Code::GhosttyRejected,
+                QStringLiteral("Terminal effect fields are invalid.")});
+            return;
+        }
+        for (const auto& entry : entries) {
+            if (type == QStringLiteral("term.title")) {
+                auto text = title.toString().left(512);
+                text.removeIf([](QChar character) { return character.category() == QChar::Other_Control
+                    || character.category() == QChar::Other_Format; });
+                publishValue(entry, &TerminalSessionRegistry::Listener::titleChanged, text);
+            } else {
+                std::scoped_lock lock(entry->listenerMutex);
+                if (entry->active && entry->listener.bell) {
+                    entry->listener.bell();
+                }
+            }
+        }
     } else if (type == QStringLiteral("term.notification")) {
         const auto sessionId = object.value(QStringLiteral("sessionId"));
         const auto title = object.value(QStringLiteral("title"));

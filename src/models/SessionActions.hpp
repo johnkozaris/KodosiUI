@@ -141,7 +141,6 @@ public:
         const QString& requestId) const;
     Q_INVOKABLE [[nodiscard]] bool canInterrupt(const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool canClose(const QString& sessionId) const;
-    Q_INVOKABLE [[nodiscard]] bool canSetMode(const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool canRename(const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool canOpenRemote(const QString& sessionId) const;
     Q_INVOKABLE [[nodiscard]] bool canHide(const QString& sessionId) const;
@@ -158,9 +157,6 @@ public:
     Q_INVOKABLE [[nodiscard]] bool hide(const QString& sessionId);
     Q_INVOKABLE [[nodiscard]] bool unhide(const QString& sessionId);
     Q_INVOKABLE [[nodiscard]] bool refreshHidden();
-    Q_INVOKABLE [[nodiscard]] bool setMode(
-        const QString& sessionId,
-        const QString& mode);
     Q_INVOKABLE void clearError();
     void setProviderConversationResumeResolver(
         ProviderConversationResumeResolver* resolver);
@@ -200,7 +196,6 @@ private:
         QString submittedName;
     };
     QHash<QString, PendingReceipt> m_pendingReceipts;
-    QHash<QString, QString> m_pendingModeIncarnations;
     QHash<QString, PendingRename> m_pendingRenames;
     QHash<QString, QString> m_pendingRemoteOpens;
     QSet<QString> m_pendingHides;

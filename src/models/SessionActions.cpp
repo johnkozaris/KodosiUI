@@ -402,20 +402,6 @@ bool SessionActions::canClose(const QString& sessionId) const
         && closeStatus(context->status);
 }
 
-bool SessionActions::canSetMode(const QString& sessionId) const
-{
-    constexpr quint32 setModePermission = 1U << 7;
-    const auto context = m_sessions.actionContext(sessionId);
-    if (!context || !context->commandable) {
-        return false;
-    }
-    const auto ownerControlled =
-        context->kind == QStringLiteral("local") || context->owner.isEmpty();
-    return ownerControlled
-        && (context->kind == QStringLiteral("local")
-            || (context->permissions & setModePermission) != 0);
-}
-
 bool SessionActions::canRename(const QString& sessionId) const
 {
     constexpr quint32 renamePermission = 1U << 5;
@@ -780,33 +766,6 @@ bool SessionActions::hasPendingLifecycle(const QString& sessionId) const
         || (m_access && m_access->hasPendingLeave(sessionId));
 }
 
-bool SessionActions::setMode(
-    const QString& sessionId,
-    const QString& mode)
-{
-    static const QSet<QString> modes {
-        QStringLiteral("normal"),
-        QStringLiteral("plan"),
-        QStringLiteral("autopilot"),
-    };
-    const auto context = m_sessions.actionContext(sessionId);
-    if (!context || !canSetMode(sessionId) || !modes.contains(mode)) {
-        m_lastError = QStringLiteral("This session mode change is not available.");
-        emit stateChanged();
-        return false;
-    }
-    const auto accepted = send({
-        {QStringLiteral("type"), QStringLiteral("session.mode")},
-        {QStringLiteral("sessionId"), sessionId},
-        {QStringLiteral("expectedRuntimeIncarnationId"), context->incarnationId},
-        {QStringLiteral("mode"), mode},
-    });
-    if (accepted) {
-        m_pendingModeIncarnations.insert(sessionId, context->incarnationId);
-    }
-    return accepted;
-}
-
 void SessionActions::clearError()
 {
     if (m_lastError.isEmpty()) {
@@ -872,7 +831,6 @@ void SessionActions::resetRuntimeAuthority()
 {
     m_accountFence.reset();
     m_pendingReceipts.clear();
-    m_pendingModeIncarnations.clear();
     m_pendingRenames.clear();
     m_pendingRemoteOpens.clear();
     m_pendingHides.clear();
@@ -922,15 +880,14 @@ void SessionActions::activateAccount(QString userId, const quint64 epoch)
             } else {
                 ++pending;
             }
-            for (auto* timer : std::as_const(m_inactiveCleanupTimers)) {
-                timer->stop();
-                timer->deleteLater();
-            }
-            m_inactiveCleanupTimers.clear();
-            m_inactiveCleanupQueue.clear();
-            m_inactiveCleanupIds.clear();
         }
-        m_pendingModeIncarnations.clear();
+        for (auto* timer : std::as_const(m_inactiveCleanupTimers)) {
+            timer->stop();
+            timer->deleteLater();
+        }
+        m_inactiveCleanupTimers.clear();
+        m_inactiveCleanupQueue.clear();
+        m_inactiveCleanupIds.clear();
         m_pendingRenames.clear();
         m_pendingRemoteOpens.clear();
         m_pendingHides.clear();
@@ -1031,23 +988,12 @@ void SessionActions::applySessionEvent(const QJsonObject& object)
     if (type == QStringLiteral("session.upsert")) {
         const auto session = object.value(QStringLiteral("session"));
         if (session.isObject()) {
-            const auto value = session.toObject();
-            const auto id = value.value(QStringLiteral("id")).toString();
-            const auto context = m_sessions.actionContext(id);
-            const auto incarnation =
-                context ? context->incarnationId : QString {};
-            if (m_pendingModeIncarnations.value(id) == incarnation) {
-                m_pendingModeIncarnations.remove(id);
-                bumpAvailability();
-                emit stateChanged();
-            }
             reconcilePendingFromCatalog();
         }
         return;
     }
     if (type == QStringLiteral("session.removed")) {
         const auto sessionId = object.value(QStringLiteral("sessionId")).toString();
-        m_pendingModeIncarnations.remove(sessionId);
         m_pendingRenames.remove(sessionId);
         const auto remoteIncarnation =
             m_pendingRemoteOpens.take(sessionId);
@@ -1122,11 +1068,6 @@ void SessionActions::applySessionEvent(const QJsonObject& object)
                 (void)refreshHidden();
             }
         }
-    } else if (operation.toString() == QStringLiteral("session.mode")
-        && sessionId.isString()
-        && m_pendingModeIncarnations.contains(sessionId.toString())) {
-        m_pendingModeIncarnations.remove(sessionId.toString());
-        correlated = true;
     } else if (operation.toString() == QStringLiteral("session.rename")
         && sessionId.isString()
         && m_pendingRenames.contains(sessionId.toString())) {

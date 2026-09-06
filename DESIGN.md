@@ -108,7 +108,9 @@ state. Large decorative accent fields are not part of the system.
 
 Use the platform UI family for controls and prose, and the platform fixed-pitch
 family only for terminal content, identifiers, codes, and measurements.
-Hierarchy is compact: 17px section titles, 13px body, and 11px labels.
+Hierarchy is compact: 18px section titles, 13px body, and 11px secondary labels.
+Primary actions use sentence case, not tracked uppercase. Keyboard focus has a visible
+copper underline distinct from hover and selection, including icon-only controls.
 
 ## Layout
 
@@ -150,12 +152,12 @@ remain square.
   platform blue.
 
 ### Cards / Containers
-- Cards use the card tone, a one-pixel border, and 12px internal padding.
+- Cards use the card tone and spacing; do not outline their full perimeter.
 - Do not nest decorative cards; use seams and spacing for structure.
 
 ### Navigation
-- The top navigation is a centered, inset segmented control with uppercase
-  eyebrow tracking, authored line icons, and a warm selected surface.
+- The top navigation is a centered, inset segmented control with sentence-case labels,
+  authored line icons, and a warm selected surface.
 - Session rows use state dots, one primary line, and one restrained metadata
   line. Selection is a tonal fill, not a wide accent stripe.
 - The session rail begins with a full-width copper New Session action and a
@@ -173,7 +175,9 @@ remain square.
 ### Terminal Stage
 - Terminal pixels sit directly on the deepest surface.
 - Chrome stays compact and never overlays terminal content.
-- Connection and failure states use short, actionable copy.
+- Connection and failure states use short, actionable copy. Native bell and title events
+  never turn a healthy terminal into a failure. Resize at the current output cursor applies
+  without waiting for another output byte; the renderer preserves cell aspect ratio.
 - Grid mode uses adaptive native tiling with six-pixel structural dividers,
   280×170 minimum panes, and vertical overflow instead of shrinking terminals
   below legibility.

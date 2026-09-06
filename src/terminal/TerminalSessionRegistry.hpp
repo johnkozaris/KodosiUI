@@ -54,6 +54,8 @@ public:
         std::function<void(TerminalFocusOutcome)> focusCompleted;
         std::function<void(TerminalResizeOutcome)> resizeCompleted;
         std::function<void(TerminalNotification)> notificationRequested;
+        std::function<void(QString)> titleChanged;
+        std::function<void()> bell;
         std::function<void()> closed;
     };
 

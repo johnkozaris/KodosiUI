@@ -50,6 +50,8 @@ private slots:
     void hydratesSelectedMissionWithExactTokens();
     void rejectsLateMissionAndHydrationResponses();
     void paginatesTasksWithBoundedOffsets();
+    void taskSnapshotConflictRestartsWithoutPublishingPartialQueue();
+    void unavailableTaskStaysVisibleWithoutMutationAuthority();
     void failedOpenRetainsRecoverableSelection();
     void fullRetryRecoversEachDispatchFailure();
     void fullRetryPreservesStaleProjectionsAcrossTimeout();
@@ -204,6 +206,7 @@ void completeHydration(
     }));
     detail.ingestRoomEvent(envelope({
         {QStringLiteral("type"), QStringLiteral("room.tasks.page")},
+        {QStringLiteral("snapshot"), QString(64, u'a')},
         {QStringLiteral("room_id"), QStringLiteral("mission-1")},
         {QStringLiteral("hydration_id"),
          taskCommand.value(QStringLiteral("hydration_id"))},
@@ -277,6 +280,7 @@ void MissionDetailModelTest::hydratesSelectedMissionWithExactTokens()
     }));
     detail.ingestRoomEvent(envelope({
         {QStringLiteral("type"), QStringLiteral("room.tasks.page")},
+        {QStringLiteral("snapshot"), QString(64, u'a')},
         {QStringLiteral("room_id"), QStringLiteral("mission-1")},
         {QStringLiteral("hydration_id"),
          taskCommand.value(QStringLiteral("hydration_id"))},
@@ -325,6 +329,7 @@ void MissionDetailModelTest::rejectsLateMissionAndHydrationResponses()
     QVERIFY(detail.openMission(QStringLiteral("mission-1")));
     detail.ingestRoomEvent(envelope({
         {QStringLiteral("type"), QStringLiteral("room.tasks.page")},
+        {QStringLiteral("snapshot"), QString(64, u'a')},
         {QStringLiteral("room_id"), QStringLiteral("mission-1")},
         {QStringLiteral("hydration_id"),
          firstTasks.value(QStringLiteral("hydration_id"))},
@@ -349,6 +354,7 @@ void MissionDetailModelTest::paginatesTasksWithBoundedOffsets()
 
     detail.ingestRoomEvent(envelope({
         {QStringLiteral("type"), QStringLiteral("room.tasks.page")},
+        {QStringLiteral("snapshot"), QString(64, u'a')},
         {QStringLiteral("room_id"), QStringLiteral("mission-1")},
         {QStringLiteral("hydration_id"), token},
         {QStringLiteral("request_offset"), 0},
@@ -361,6 +367,7 @@ void MissionDetailModelTest::paginatesTasksWithBoundedOffsets()
         1);
     detail.ingestRoomEvent(envelope({
         {QStringLiteral("type"), QStringLiteral("room.tasks.page")},
+        {QStringLiteral("snapshot"), QString(64, u'a')},
         {QStringLiteral("room_id"), QStringLiteral("mission-1")},
         {QStringLiteral("hydration_id"), token},
         {QStringLiteral("request_offset"), 1},
@@ -368,6 +375,102 @@ void MissionDetailModelTest::paginatesTasksWithBoundedOffsets()
         {QStringLiteral("tasks"), QJsonArray {task(QStringLiteral("task-2"))}},
     }));
     QCOMPARE(detail.tasks()->rowCount(), 2);
+}
+
+void MissionDetailModelTest::taskSnapshotConflictRestartsWithoutPublishingPartialQueue()
+{
+    FakeMissionDetailDispatcher dispatcher;
+    kodosi::MissionDirectoryModel directory(dispatcher);
+    kodosi::MissionDetailModel detail(dispatcher, directory);
+    seedDirectory(directory);
+    detail.ingestAuthEvent(auth());
+    QVERIFY(detail.openMission(QStringLiteral("mission-1")));
+    const auto initial = lastCommand(dispatcher, QStringLiteral("room.tasks.list"));
+    const auto token = initial.value(QStringLiteral("hydration_id"));
+    QVERIFY(!initial.contains(QStringLiteral("snapshot")));
+    detail.ingestRoomEvent(envelope({
+        {QStringLiteral("type"), QStringLiteral("room.tasks.page")},
+        {QStringLiteral("room_id"), QStringLiteral("mission-1")},
+        {QStringLiteral("hydration_id"), token},
+        {QStringLiteral("request_offset"), 0},
+        {QStringLiteral("snapshot"), QString(64, u'a')},
+        {QStringLiteral("has_more"), true},
+        {QStringLiteral("next_offset"), 1},
+        {QStringLiteral("tasks"), QJsonArray {task(QStringLiteral("partial"))}},
+    }));
+    QCOMPARE(detail.tasks()->rowCount(), 0);
+    QVERIFY(!detail.tasksReady());
+    const auto continuation = lastCommand(dispatcher, QStringLiteral("room.tasks.list"));
+    QCOMPARE(continuation.value(QStringLiteral("snapshot")).toString(), QString(64, u'a'));
+    QCOMPARE(continuation.value(QStringLiteral("offset")).toInteger(), 1);
+    detail.ingestRoomEvent(envelope({
+        {QStringLiteral("type"), QStringLiteral("room.tasks.invalidated")},
+        {QStringLiteral("room_id"), QStringLiteral("mission-1")},
+        {QStringLiteral("hydration_id"), token},
+        {QStringLiteral("request_offset"), 1},
+    }));
+    const auto restarted = lastCommand(dispatcher, QStringLiteral("room.tasks.list"));
+    QVERIFY(restarted.value(QStringLiteral("hydration_id")) != token);
+    QCOMPARE(restarted.value(QStringLiteral("offset")).toInteger(), 0);
+    QVERIFY(!restarted.contains(QStringLiteral("snapshot")));
+    detail.ingestRoomEvent(envelope({
+        {QStringLiteral("type"), QStringLiteral("room.tasks.page")},
+        {QStringLiteral("room_id"), QStringLiteral("mission-1")},
+        {QStringLiteral("hydration_id"), restarted.value(QStringLiteral("hydration_id"))},
+        {QStringLiteral("request_offset"), 0},
+        {QStringLiteral("snapshot"), QString(64, u'b')},
+        {QStringLiteral("has_more"), false},
+        {QStringLiteral("tasks"), QJsonArray {task(QStringLiteral("current"))}},
+    }));
+    QVERIFY(detail.tasksReady());
+    QCOMPARE(detail.tasks()->rowCount(), 1);
+    QCOMPARE(detail.tasks()->data(detail.tasks()->index(0), kodosi::MissionTasksModel::TaskIdRole).toString(),
+        QStringLiteral("current"));
+
+    QVERIFY(detail.refreshTasks());
+    for (int retry = 0; retry < 3; ++retry) {
+        const auto request = lastCommand(dispatcher, QStringLiteral("room.tasks.list"));
+        detail.ingestRoomEvent(envelope({
+            {QStringLiteral("type"), QStringLiteral("room.tasks.invalidated")},
+            {QStringLiteral("room_id"), QStringLiteral("mission-1")},
+            {QStringLiteral("hydration_id"), request.value(QStringLiteral("hydration_id"))},
+            {QStringLiteral("request_offset"), 0},
+        }));
+    }
+    QVERIFY(!detail.tasksReady());
+    QVERIFY(!detail.tasksLoading());
+    QVERIFY(detail.lastError().contains(QStringLiteral("changed")));
+    QCOMPARE(detail.tasks()->rowCount(), 1);
+}
+
+void MissionDetailModelTest::unavailableTaskStaysVisibleWithoutMutationAuthority()
+{
+    FakeMissionDetailDispatcher dispatcher;
+    kodosi::MissionDirectoryModel directory(dispatcher);
+    kodosi::MissionDetailModel detail(dispatcher, directory);
+    seedDirectory(directory);
+    detail.ingestAuthEvent(auth());
+    QVERIFY(detail.openMission(QStringLiteral("mission-1")));
+    auto unavailable = task(QStringLiteral("old"));
+    unavailable.insert(QStringLiteral("contentUnavailable"), true);
+    unavailable.insert(QStringLiteral("title"), QStringLiteral("Task unavailable on this device"));
+    detail.ingestRoomEvent(envelope({
+        {QStringLiteral("type"), QStringLiteral("room.tasks.page")},
+        {QStringLiteral("room_id"), QStringLiteral("mission-1")},
+        {QStringLiteral("hydration_id"), lastCommand(dispatcher, QStringLiteral("room.tasks.list")).value(QStringLiteral("hydration_id"))},
+        {QStringLiteral("request_offset"), 0},
+        {QStringLiteral("snapshot"), QString(64, u'a')},
+        {QStringLiteral("has_more"), false},
+        {QStringLiteral("tasks"), QJsonArray {unavailable, task(QStringLiteral("new"))}},
+    }));
+    QVERIFY(detail.tasksReady());
+    QCOMPARE(detail.tasks()->rowCount(), 2);
+    for (int row = 0; row < detail.tasks()->rowCount(); ++row) {
+        const auto index = detail.tasks()->index(row);
+        const bool missing = detail.tasks()->data(index, kodosi::MissionTasksModel::ContentUnavailableRole).toBool();
+        const auto presentation = detail.tasks()->data(index, kodosi::MissionTasksModel::TaskIdRole).toString();
+        QCOMPARE(detail.tasks()->actionContext(presentation).has_value(), !missing);
+    }
 }
 
 void MissionDetailModelTest::failedOpenRetainsRecoverableSelection()
@@ -520,6 +623,7 @@ void MissionDetailModelTest::fullRetryPreservesStaleProjectionsAcrossTimeout()
     QVERIFY(!detail.lastError().isEmpty());
     detail.ingestRoomEvent(envelope({
         {QStringLiteral("type"), QStringLiteral("room.tasks.page")},
+        {QStringLiteral("snapshot"), QString(64, u'a')},
         {QStringLiteral("room_id"), QStringLiteral("mission-1")},
         {QStringLiteral("hydration_id"),
          recoveredTasks.value(QStringLiteral("hydration_id"))},
@@ -588,6 +692,7 @@ void MissionDetailModelTest::hydrationPreservesLiveUpdates()
     }));
     detail.ingestRoomEvent(envelope({
         {QStringLiteral("type"), QStringLiteral("room.tasks.page")},
+        {QStringLiteral("snapshot"), QString(64, u'a')},
         {QStringLiteral("room_id"), QStringLiteral("mission-1")},
         {QStringLiteral("hydration_id"),
          tasks.value(QStringLiteral("hydration_id"))},
@@ -760,6 +865,14 @@ void MissionDetailModelTest::projectsCrewMessagesDeliveryAndFocusWithIncarnation
     }
     QVERIFY(!agentPresentation.isEmpty());
     QVERIFY(detail.selectCrew(agentPresentation));
+    QSignalSpy identityChanges(&detail, &kodosi::MissionDetailModel::focusChanged);
+    QSignalSpy presentationChanges(&detail, &kodosi::MissionDetailModel::focusPresentationChanged);
+    emit sessions.dataChanged(sessions.index(0), sessions.index(0), {kodosi::SessionCatalogModel::NameRole});
+    QCOMPARE(identityChanges.count(), 0);
+    QVERIFY(presentationChanges.count() > 0);
+    QCOMPARE(detail.selectedCrewPresentationId(), agentPresentation);
+    QVERIFY(detail.selectCrew(agentPresentation));
+    QCOMPARE(identityChanges.count(), 0);
     QCOMPARE(detail.crew()->dispatchableAgentCount(), 1);
     QCOMPARE(
         detail.selectedTerminalSessionId(),
@@ -927,6 +1040,7 @@ void MissionDetailModelTest::preservesUnknownArchivedDueAndResultTaskPresentatio
     archived.insert(QStringLiteral("status"), QStringLiteral("Archived"));
     detail.ingestRoomEvent(envelope({
         {QStringLiteral("type"), QStringLiteral("room.tasks.page")},
+        {QStringLiteral("snapshot"), QString(64, u'a')},
         {QStringLiteral("room_id"), QStringLiteral("mission-1")},
         {QStringLiteral("hydration_id"),
          tasks.value(QStringLiteral("hydration_id"))},

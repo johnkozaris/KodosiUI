@@ -7,10 +7,6 @@ ApplicationWindow {
     id: window
     objectName: "window.main"
 
-    property string selectedSessionName
-    property string selectedProject
-    property string selectedStatus
-    property string selectedMode
     property var optimisticRemoteOpens: ({})
     readonly property int themeMotionFast: KodosiTheme.motionFast
     readonly property int themeMotionNormal: KodosiTheme.motionNormal
@@ -67,32 +63,6 @@ ApplicationWindow {
         return item instanceof TextInput || item instanceof TextEdit
     }
 
-    function synchronizeSelectedSessionMetadata() {
-        const selectedSessionId = Models.DesktopState.selectedSessionId
-        if (selectedSessionId.length === 0) {
-            selectedSessionName = ""
-            selectedProject = ""
-            selectedStatus = ""
-            selectedMode = ""
-            return
-        }
-        if (Models.Sessions.authorityState !== Models.Sessions.Loaded)
-            return
-        const session =
-            Models.Sessions.presentationForSession(selectedSessionId)
-        if (session.sessionId !== selectedSessionId) {
-            selectedSessionName = ""
-            selectedProject = ""
-            selectedStatus = ""
-            selectedMode = ""
-            return
-        }
-        selectedSessionName = session.name
-        selectedProject = session.project
-        selectedStatus = session.status
-        selectedMode = session.mode
-    }
-
     function requestSessionSelection(sessionId, openRemote) {
         if (sessionId.length === 0)
             return false
@@ -102,7 +72,6 @@ ApplicationWindow {
         if (session.sessionId !== sessionId
                 || !Models.DesktopState.selectSession(sessionId))
             return false
-        synchronizeSelectedSessionMetadata()
         if (openRemote && Models.SessionActions.canOpenRemote(sessionId)) {
             if (!wasStaged) {
                 const pending = Object.assign(
@@ -233,13 +202,6 @@ ApplicationWindow {
         return true
     }
 
-    function openAgentSettings() {
-        agentIntelDrawer.close()
-        diagnosticsDrawer.close()
-        settingsDrawer.openAgents()
-        return true
-    }
-
     function reviewApproval(identityToken, sessionId) {
         if (Models.PendingPermissions.rowForIdentityToken(identityToken) < 0)
             return false
@@ -324,7 +286,8 @@ ApplicationWindow {
     }
 
     function handleTopApproval(approve) {
-        const request = Models.PendingPermissions.topPresentation()
+        const request = Models.PendingPermissions.presentationForSession(
+            Models.DesktopState.selectedSessionId)
         if (request.identityToken === undefined)
             return false
         if (!approve)
@@ -344,248 +307,223 @@ ApplicationWindow {
             utilityMenu.openAt(utilityButton)
     }
 
-    function setShellAccessibilityIgnored(item, ignored) {
-        if (!item)
-            return
-        item.Accessible.ignored = ignored
-        const children = item.children || []
-        for (let index = 0; index < children.length; ++index)
-            setShellAccessibilityIgnored(children[index], ignored)
-    }
-
-    function refreshShellAccessibility() {
-        setShellAccessibilityIgnored(shellContent, false)
-        if (!shellContent.visible)
-            return
-        if (blockingOverlayOpen)
-            setShellAccessibilityIgnored(shellContent, true)
-        else if (!Models.DesktopState.sidebarOpen)
-            setShellAccessibilityIgnored(sessionSidebar, true)
-    }
-
-    onBlockingOverlayOpenChanged:
-        Qt.callLater(window.refreshShellAccessibility)
-
     visible: false
     color: KodosiTheme.canvas
     title: qsTr("Kodosi")
 
-    ColumnLayout {
-        id: shellContent
-        objectName: "window.main"
-        Accessible.id: objectName
+    Models.AccessibilityScope {
         anchors.fill: parent
-        spacing: 0
-        enabled: !window.blockingOverlayOpen
+        suppressed: window.blockingOverlayOpen
         Accessible.name: qsTr("Kodosi mission control")
 
-        Rectangle {
-            objectName: "app.header"
+        ColumnLayout {
+            id: shellContent
+            objectName: "window.main"
             Accessible.id: objectName
-            Layout.fillWidth: true
-            Layout.preferredHeight: KodosiTheme.headerHeight
-            color: KodosiTheme.surface
-
-            RowLayout {
-                anchors.fill: parent
-                spacing: 0
-
-                RowLayout {
-                    Layout.minimumWidth: Models.DesktopState.activeView === 0
-                        && Models.DesktopState.sidebarOpen
-                        ? window.sidebarActualWidth
-                        : 180
-                    Layout.maximumWidth: Layout.minimumWidth
-                    Layout.fillHeight: true
-                    Layout.leftMargin: KodosiTheme.spacing5
-                    Layout.rightMargin: KodosiTheme.spacing5
-                    spacing: KodosiTheme.spacing3
-
-                    KIconButton {
-                        objectName: "header.sidebar.toggle"
-                        Accessible.id: objectName
-                        visible: Models.DesktopState.activeView === 0
-                        glyph: "sidebar"
-                        checkable: true
-                        checked: Models.DesktopState.sidebarOpen
-                        Accessible.name: qsTr("Toggle sidebar")
-                        Accessible.description: Models.DesktopState.sidebarOpen
-                            ? qsTr("Collapse My Agents sidebar")
-                            : qsTr("Expand My Agents sidebar")
-                        onClicked: Models.DesktopState.sidebarOpen =
-                            !Models.DesktopState.sidebarOpen
-                    }
-
-                    Image {
-                        objectName: "header.logo"
-                        Accessible.id: objectName
-                        Accessible.role: Accessible.Graphic
-                        Accessible.name: qsTr("Kodosi")
-                        Layout.preferredWidth: 28
-                        Layout.preferredHeight: 28
-                        source: "assets/kodosi-logo-dark.png"
-                        fillMode: Image.PreserveAspectFit
-                        smooth: true
-                        mipmap: true
-                    }
-
-                    Item { Layout.fillWidth: true }
-                }
-
-                Rectangle {
-                    visible: Models.DesktopState.activeView === 0
-                        && Models.DesktopState.sidebarOpen
-                    Layout.preferredWidth: 1
-                    Layout.fillHeight: true
-                    color: KodosiTheme.seam
-                }
-
-                Item {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-
-                    KSegmentedBar {
-                        anchors.centerIn: parent
-                        width: 224
-                        height: 36
-
-                        NavTab {
-                            Layout.preferredWidth: 110
-                            accessibleId: "my-agents"
-                            iconName: "command"
-                            title: qsTr("My Agents")
-                            selected: Models.DesktopState.activeView === 0
-                            onClicked: Models.DesktopState.activeView = 0
-                        }
-
-                        NavTab {
-                            Layout.preferredWidth: 110
-                            accessibleId: "missions"
-                            iconName: "people"
-                            title: qsTr("Missions")
-                            selected: Models.DesktopState.activeView === 1
-                            onClicked: Models.DesktopState.activeView = 1
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.minimumWidth: 48
-                    Layout.maximumWidth: Layout.minimumWidth
-                    Layout.fillHeight: true
-                    Layout.rightMargin: KodosiTheme.spacing5
-                    spacing: 0
-
-                    KIconButton {
-                        id: utilityButton
-                        objectName: "header.utility.menu"
-                        Accessible.id: objectName
-                        glyph: "account"
-                        Accessible.name: Models.AuthState.signedIn
-                            ? qsTr("Account menu")
-                            : qsTr("App menu")
-                        enabled: !Models.AuthActions.busy
-                        onClicked: window.toggleUtilityMenu()
-                    }
-                }
-
-            }
+            anchors.fill: parent
+            spacing: 0
+            enabled: !window.blockingOverlayOpen
+            Accessible.name: qsTr("Kodosi mission control")
 
             Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: 1
-                color: KodosiTheme.seam
-            }
-        }
+                objectName: "app.header"
+                Accessible.id: objectName
+                Layout.fillWidth: true
+                Layout.preferredHeight: KodosiTheme.headerHeight
+                color: KodosiTheme.surface
 
-        AuthErrorBanner {
-            Layout.fillWidth: true
-            onOpenAccountRequested:
-                Qt.callLater(window.openAccountSettings)
-        }
+                RowLayout {
+                    anchors.fill: parent
+                    spacing: 0
 
-        RuntimeHealthBanner {
-            Layout.fillWidth: true
-            onOpenDiagnosticsRequested: window.toggleDiagnostics()
-        }
+                    RowLayout {
+                        Layout.minimumWidth: Models.DesktopState.activeView === 0
+                            && Models.DesktopState.sidebarOpen
+                            ? window.sidebarActualWidth
+                            : 180
+                        Layout.maximumWidth: Layout.minimumWidth
+                        Layout.fillHeight: true
+                        Layout.leftMargin: KodosiTheme.spacing5
+                        Layout.rightMargin: KodosiTheme.spacing5
+                        spacing: KodosiTheme.spacing3
 
-        StackLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            objectName: "shell.views"
-            Accessible.id: objectName
-            currentIndex: Models.DesktopState.activeView
+                        KIconButton {
+                            objectName: "header.sidebar.toggle"
+                            Accessible.id: objectName
+                            visible: Models.DesktopState.activeView === 0
+                            glyph: "sidebar"
+                            checkable: true
+                            checked: Models.DesktopState.sidebarOpen
+                            Accessible.name: qsTr("Toggle sidebar")
+                            Accessible.description: Models.DesktopState.sidebarOpen
+                                ? qsTr("Collapse My Agents sidebar")
+                                : qsTr("Expand My Agents sidebar")
+                            onClicked: Models.DesktopState.sidebarOpen =
+                                !Models.DesktopState.sidebarOpen
+                        }
 
-            RowLayout {
-                spacing: 0
+                        Image {
+                            objectName: "header.logo"
+                            Accessible.id: objectName
+                            Accessible.role: Accessible.Graphic
+                            Accessible.name: qsTr("Kodosi")
+                            Layout.preferredWidth: 28
+                            Layout.preferredHeight: 28
+                            source: "assets/kodosi-logo-dark.png"
+                            fillMode: Image.PreserveAspectFit
+                            smooth: true
+                            mipmap: true
+                        }
 
-                SessionSidebar {
-                    id: sessionSidebar
-                    selectedSessionId:
-                        Models.DesktopState.selectedSessionId
-                    visible: Models.DesktopState.sidebarOpen
-                    Layout.fillHeight: true
-                    Layout.preferredWidth: window.sidebarActualWidth
-                    onSessionSelectionRequested: (sessionId, openRemote) =>
-                        window.requestSessionSelection(sessionId, openRemote)
-                    onProjectIntelligenceRequested: sessionId =>
-                        window.openProjectIntelForSession(sessionId)
-                    onResumeAgentWorkRequested:
-                        window.openResumeAgentWork()
+                        Item { Layout.fillWidth: true }
+                    }
+
+                    Rectangle {
+                        visible: Models.DesktopState.activeView === 0
+                            && Models.DesktopState.sidebarOpen
+                        Layout.preferredWidth: 1
+                        Layout.fillHeight: true
+                        color: KodosiTheme.seam
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+
+                        KSegmentedBar {
+                            anchors.centerIn: parent
+                            width: 224
+                            height: 36
+
+                            NavTab {
+                                Layout.preferredWidth: 110
+                                accessibleId: "my-agents"
+                                iconName: "command"
+                                title: qsTr("My Agents")
+                                selected: Models.DesktopState.activeView === 0
+                                onClicked: Models.DesktopState.activeView = 0
+                            }
+
+                            NavTab {
+                                Layout.preferredWidth: 110
+                                accessibleId: "missions"
+                                iconName: "people"
+                                title: qsTr("Missions")
+                                selected: Models.DesktopState.activeView === 1
+                                onClicked: Models.DesktopState.activeView = 1
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.minimumWidth: 48
+                        Layout.maximumWidth: Layout.minimumWidth
+                        Layout.fillHeight: true
+                        Layout.rightMargin: KodosiTheme.spacing5
+                        spacing: 0
+
+                        KIconButton {
+                            id: utilityButton
+                            objectName: "header.utility.menu"
+                            Accessible.id: objectName
+                            glyph: "account"
+                            Accessible.name: Models.AuthState.signedIn
+                                ? qsTr("Account menu")
+                                : qsTr("App menu")
+                            enabled: !Models.AuthActions.busy
+                            onClicked: window.toggleUtilityMenu()
+                        }
+                    }
+
                 }
 
                 Rectangle {
-                    visible: Models.DesktopState.sidebarOpen
-                    Layout.preferredWidth: 1
-                    Layout.fillHeight: true
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 1
                     color: KodosiTheme.seam
                 }
-
-                TerminalStage {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    sidebarOpen: Models.DesktopState.sidebarOpen
-                    interactionEnabled: !window.blockingOverlayOpen
-                        && Models.DesktopState.activeView === 0
-                    onNewSessionRequested: window.createDefaultSession()
-                    onShowSidebarRequested:
-                        Models.DesktopState.sidebarOpen = true
-                    onInspectSessionRequested: (sessionId, sessionName) => {
-                        window.openAgentIntel(sessionId, "")
-                    }
-                    onShareSessionRequested: (sessionId, sessionName) => {
-                        Models.DesktopState.sidebarOpen = true
-                        sessionSidebar.openShareByIdentity(
-                            sessionId,
-                            sessionName)
-                    }
-                }
             }
 
-            PeopleView {
+            AuthErrorBanner {
+                Layout.fillWidth: true
+                onOpenAccountRequested:
+                    Qt.callLater(window.openAccountSettings)
+            }
+
+            RuntimeHealthBanner {
+                Layout.fillWidth: true
+                onOpenDiagnosticsRequested: window.toggleDiagnostics()
+            }
+
+            StackLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                onSignInRequested: Models.AuthActions.beginSignIn()
+                objectName: "shell.views"
+                Accessible.id: objectName
+                currentIndex: Models.DesktopState.activeView
+
+                RowLayout {
+                    spacing: 0
+
+                    Models.AccessibilityScope {
+                        visible: Models.DesktopState.sidebarOpen
+                        Layout.fillHeight: true
+                        Layout.preferredWidth: window.sidebarActualWidth
+                        Accessible.name: qsTr("My Agents sidebar")
+
+                        SessionSidebar {
+                            id: sessionSidebar
+                            anchors.fill: parent
+                            selectedSessionId:
+                                Models.DesktopState.selectedSessionId
+                            onSessionSelectionRequested: (sessionId, openRemote) =>
+                                window.requestSessionSelection(sessionId, openRemote)
+                            onProjectIntelligenceRequested: sessionId =>
+                                window.openProjectIntelForSession(sessionId)
+                            onResumeAgentWorkRequested:
+                                window.openResumeAgentWork()
+                        }
+                    }
+
+                    Rectangle {
+                        visible: Models.DesktopState.sidebarOpen
+                        Layout.preferredWidth: 1
+                        Layout.fillHeight: true
+                        color: KodosiTheme.seam
+                    }
+
+                    TerminalStage {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        sidebarOpen: Models.DesktopState.sidebarOpen
+                        interactionEnabled: !window.blockingOverlayOpen
+                            && Models.DesktopState.activeView === 0
+                        onNewSessionRequested: window.createDefaultSession()
+                        onShowSidebarRequested:
+                            Models.DesktopState.sidebarOpen = true
+                        onInspectSessionRequested: (sessionId, sessionName) => {
+                            window.openAgentIntel(sessionId, "")
+                        }
+                        onShareSessionRequested: (sessionId, sessionName) => {
+                            Models.DesktopState.sidebarOpen = true
+                            sessionSidebar.openShareByIdentity(
+                                sessionId,
+                                sessionName)
+                        }
+                    }
+                }
+
+                PeopleView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    onSignInRequested: Models.AuthActions.beginSignIn()
+                }
+
             }
-
         }
-    }
 
-    Timer {
-        interval: 50
-        repeat: true
-        running: (window.blockingOverlayOpen
-            && !startupOverlay.visible)
-            || !Models.DesktopState.sidebarOpen
-        onTriggered: {
-            if (window.blockingOverlayOpen
-                    && !startupOverlay.visible)
-                window.setShellAccessibilityIgnored(shellContent, true)
-            else
-                window.setShellAccessibilityIgnored(sessionSidebar, true)
-        }
     }
 
     AuthOverlay {
@@ -608,7 +546,7 @@ ApplicationWindow {
 
     Shortcut {
         objectName: "shortcut.settings"
-        sequence: "Ctrl+,"
+        sequence: "Ctrl+Shift+,"
         context: Qt.ApplicationShortcut
         enabled: window.shortcutContextAvailable
         onActivated: window.openSettings()
@@ -616,7 +554,7 @@ ApplicationWindow {
 
     Shortcut {
         objectName: "shortcut.session.new"
-        sequence: "Ctrl+S"
+        sequence: "Ctrl+Shift+N"
         context: Qt.ApplicationShortcut
         enabled: window.shortcutContextAvailable
         onActivated: window.createDefaultSession()
@@ -648,7 +586,7 @@ ApplicationWindow {
 
     Shortcut {
         objectName: "shortcut.session.intelligence"
-        sequence: "Ctrl+I"
+        sequence: "Ctrl+Shift+I"
         context: Qt.ApplicationShortcut
         enabled: window.shortcutContextAvailable
             && window.canInspectSelectedSession
@@ -675,7 +613,7 @@ ApplicationWindow {
 
     Shortcut {
         objectName: "shortcut.sidebar"
-        sequence: "Ctrl+B"
+        sequence: "Ctrl+Shift+B"
         context: Qt.ApplicationShortcut
         enabled: window.shortcutContextAvailable
             && Models.DesktopState.activeView === 0
@@ -791,35 +729,6 @@ ApplicationWindow {
 
         function onMissingApprovalRequested(sessionId) {
             window.openMissingDeepLinkedApproval(sessionId)
-        }
-    }
-
-    Connections {
-        target: Models.DesktopState
-
-        function onSidebarOpenChanged() {
-            Qt.callLater(window.refreshShellAccessibility)
-        }
-
-        function onSelectedSessionIdChanged() {
-            window.synchronizeSelectedSessionMetadata()
-        }
-
-    }
-
-    Connections {
-        target: Models.Sessions
-
-        function onModelReset() {
-            window.synchronizeSelectedSessionMetadata()
-        }
-
-        function onDataChanged() {
-            window.synchronizeSelectedSessionMetadata()
-        }
-
-        function onAuthorityStateChanged() {
-            window.synchronizeSelectedSessionMetadata()
         }
     }
 

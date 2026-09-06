@@ -148,7 +148,7 @@ void SessionActionsTest::dispatchesCurrentIncarnationOnly()
         QStringLiteral("inc-1"));
 
     localSession(sessions, QStringLiteral("inc-2"));
-    QVERIFY(actions.setMode(QStringLiteral("session-1"), QStringLiteral("plan")));
+    QVERIFY(actions.interrupt(QStringLiteral("session-1")));
     QCOMPARE(
         dispatcher.commands.back()
             .value(QStringLiteral("expectedRuntimeIncarnationId"))
@@ -247,7 +247,6 @@ void SessionActionsTest::rejectsUnavailableLifecycleActions()
     QVERIFY(!actions.canInterrupt(QStringLiteral("session-1")));
     QVERIFY(!actions.interrupt(QStringLiteral("session-1")));
     QVERIFY(!actions.requestCloseConfirmation(QStringLiteral("missing")));
-    QVERIFY(!actions.setMode(QStringLiteral("session-1"), QStringLiteral("future")));
     QCOMPARE(dispatcher.commands.size(), 0);
 
     localSession(

@@ -622,6 +622,25 @@ QDateTime MissionActions::taskDraftDueAt() const
     return draft == nullptr ? QDateTime {} : draft->dueAt;
 }
 
+QString MissionActions::taskDraftDueDateText() const
+{
+    const auto* draft = currentTaskDraft();
+    return draft == nullptr ? QString {} : draft->dueDateText;
+}
+
+QString MissionActions::taskDraftDueDateError() const
+{
+    const auto* draft = currentTaskDraft();
+    if (draft == nullptr || !draft->hasDueAt) {
+        return {};
+    }
+    if (!draft->dueAt.isValid()) {
+        return tr("Enter a valid date as YYYY-MM-DD.");
+    }
+    return draft->dueAt <= QDateTime::currentDateTimeUtc()
+        ? tr("The task due date must be in the future.") : QString {};
+}
+
 QVariantList MissionActions::taskDraftAssignmentOptions() const
 {
     QVariantList result;
@@ -1094,8 +1113,10 @@ void MissionActions::setTaskDraftHasDueAt(const bool enabled)
         return;
     }
     draft->hasDueAt = enabled;
-    if (enabled && !draft->dueAt.isValid()) {
-        draft->dueAt = QDateTime::currentDateTimeUtc().addDays(1);
+    if (enabled && draft->dueDateText.isEmpty()) {
+        const auto tomorrow = QDate::currentDate().addDays(1);
+        draft->dueAt = QDateTime(tomorrow, QTime(23, 59, 59));
+        draft->dueDateText = tomorrow.toString(Qt::ISODate);
     }
     ++draft->revision;
     emit draftsChanged();
@@ -1108,6 +1129,21 @@ void MissionActions::setTaskDraftDueAt(const QDateTime& dueAt)
         return;
     }
     draft->dueAt = dueAt;
+    draft->dueDateText = dueAt.toLocalTime().date().toString(Qt::ISODate);
+    ++draft->revision;
+    emit draftsChanged();
+}
+
+void MissionActions::setTaskDraftDueDateText(const QString& text)
+{
+    auto* draft = currentTaskDraft(true);
+    if (draft == nullptr || draft->dueDateText == text) {
+        return;
+    }
+    const auto date = QDate::fromString(text, Qt::ISODate);
+    draft->dueDateText = text.left(32);
+    draft->dueAt = date.isValid() && date.toString(Qt::ISODate) == text
+        ? QDateTime(date, QTime(23, 59, 59)) : QDateTime {};
     ++draft->revision;
     emit draftsChanged();
 }
@@ -2434,6 +2470,7 @@ void MissionActions::applyRoomEvent(const QJsonObject& object)
         const auto roomId = optionalString(object, QStringLiteral("room_id"));
         const auto task = object.value(QStringLiteral("task"));
         if (task.isObject()
+            && !task.toObject().value(QStringLiteral("contentUnavailable")).toBool()
             && MissionDetailModel::isCompleteTaskEntity(
                 task.toObject(),
                 roomId)) {
@@ -2455,6 +2492,7 @@ void MissionActions::applyRoomEvent(const QJsonObject& object)
                 optionalString(value, QStringLiteral("dueAt")));
         }
         if (!task.isObject()
+            || task.toObject().value(QStringLiteral("contentUnavailable")).toBool()
             || !MissionDetailModel::isCompleteTaskEntity(
                 task.toObject(),
                 roomId)) {
@@ -2488,6 +2526,43 @@ void MissionActions::applyRoomEvent(const QJsonObject& object)
             }
         }
         return;
+    }
+    if (type == QStringLiteral("room.tasks.page")
+        || type == QStringLiteral("room.tasks.invalidated")) {
+        const auto roomId = optionalString(object, QStringLiteral("room_id"));
+        const auto hydrationId = optionalString(object, QStringLiteral("hydration_id"));
+        const auto offset = nonnegativeInteger(object.value(QStringLiteral("request_offset")));
+        auto pending = std::ranges::find_if(m_pending, [&](const Pending& candidate) {
+            return candidate.missionId == roomId && !hydrationId.isEmpty()
+                && candidate.reconciliationHydrationId == hydrationId
+                && offset == std::optional<qint64>(candidate.reconciliationNextOffset);
+        });
+        if (pending == m_pending.end()) {
+            return;
+        }
+        const auto snapshot = optionalString(object, QStringLiteral("snapshot"));
+        if (type == QStringLiteral("room.tasks.invalidated")
+            || (!pending->reconciliationSnapshot.isEmpty()
+                && pending->reconciliationSnapshot != snapshot)) {
+            const auto requestId = pending.key();
+            if (pending->reconciliationSnapshotRestarts < 2) {
+                ++pending->reconciliationSnapshotRestarts;
+                pending->reconciliationHydrationId = QUuid::createUuidV7().toString(QUuid::WithoutBraces);
+                pending->reconciliationSnapshot.clear();
+                pending->reconciliationNextOffset = 0;
+                pending->reconciliationPageCount = 0;
+                if (dispatchTaskProjectionPage(*pending)) {
+                    return;
+                }
+            }
+            failProjection(requestId, tr("The Mission queue changed during synchronization. Check the outcome again."));
+            return;
+        }
+        if (!validFingerprint(snapshot)) {
+            failProjection(pending.key(), tr("The Mission task page did not include a valid snapshot."));
+            return;
+        }
+        pending->reconciliationSnapshot = snapshot;
     }
     if (type == QStringLiteral("room.tasks.snapshot")
         || type == QStringLiteral("room.tasks.page")) {
@@ -2545,6 +2620,9 @@ void MissionActions::applyRoomEvent(const QJsonObject& object)
         }
         for (const auto& task : taskValues) {
             const auto value = task.toObject();
+            if (value.value(QStringLiteral("contentUnavailable")).toBool()) {
+                continue;
+            }
             reconcileEntity(
                 optionalString(value, QStringLiteral("id")),
                 roomId,
@@ -2588,30 +2666,14 @@ void MissionActions::applyRoomEvent(const QJsonObject& object)
                 const auto nextOffset = nonnegativeInteger(
                     object.value(QStringLiteral("next_offset")));
                 if (!nextOffset || *nextOffset <= *requestOffset
+                    || *nextOffset != *requestOffset + taskValues.size()
                     || pending.reconciliationPageCount >= 20
                     || *nextOffset > 10'000) {
                     pending.reconciliationHydrationId.clear();
                     return false;
                 }
                 pending.reconciliationNextOffset = *nextOffset;
-                const auto accepted = m_dispatcher.send(
-                    CommandLane::Rooms,
-                    json({
-                        {QStringLiteral("type"),
-                         QStringLiteral("room.tasks.list")},
-                        {QStringLiteral("room_id"), roomId},
-                        {QStringLiteral("offset"),
-                         static_cast<qint64>(*nextOffset)},
-                        {QStringLiteral("limit"), 500},
-                        {QStringLiteral("hydration_id"),
-                         hydrationId},
-                    }));
-                if (accepted) {
-                    pending.deadline =
-                        QDateTime::currentDateTimeUtc()
-                            .addMSecs(m_receiptTimeoutMs);
-                }
-                return static_cast<bool>(accepted);
+                return dispatchTaskProjectionPage(pending);
             };
         if (type == QStringLiteral("room.tasks.page")
             && directPending != m_pending.end()) {
@@ -2633,6 +2695,10 @@ void MissionActions::applyRoomEvent(const QJsonObject& object)
             });
         if (target != taskValues.end()) {
             const auto requestId = receiptPending.key();
+            if ((*target).toObject().value(QStringLiteral("contentUnavailable")).toBool()) {
+                failProjection(requestId, tr("The completed task cannot be verified on this device."));
+                return;
+            }
             if (taskProjectionMatches(
                     *receiptPending,
                     (*target).toObject())) {
@@ -2717,6 +2783,8 @@ void MissionActions::applyRoomEvent(const QJsonObject& object)
                 recovered.projectionEntityMatched = false;
                 recovered.reconciliationHydrationId.clear();
                 recovered.reconciliationNextOffset = 0;
+                recovered.reconciliationSnapshot.clear();
+                recovered.reconciliationSnapshotRestarts = 0;
                 recovered.reconciliationAttempts = 0;
                 recovered.reconciliationPageCount = 0;
                 recovered.retiredReceiptReplay = true;
@@ -2967,6 +3035,8 @@ void MissionActions::reconcileExpired()
             pending->reconciliationHydrationId =
                 QUuid::createUuidV7().toString(QUuid::WithoutBraces);
             pending->reconciliationNextOffset = 0;
+            pending->reconciliationSnapshot.clear();
+            pending->reconciliationSnapshotRestarts = 0;
             pending->reconciliationPageCount = 0;
             accepted = static_cast<bool>(m_dispatcher.send(
                 CommandLane::Rooms,
@@ -3325,6 +3395,25 @@ bool MissionActions::requestReceiptRetirement(const QString& requestId)
         })));
 }
 
+bool MissionActions::dispatchTaskProjectionPage(Pending& pending)
+{
+    QJsonObject command {
+        {QStringLiteral("type"), QStringLiteral("room.tasks.list")},
+        {QStringLiteral("room_id"), pending.missionId},
+        {QStringLiteral("offset"), static_cast<qint64>(pending.reconciliationNextOffset)},
+        {QStringLiteral("limit"), 500},
+        {QStringLiteral("hydration_id"), pending.reconciliationHydrationId},
+    };
+    if (!pending.reconciliationSnapshot.isEmpty()) {
+        command.insert(QStringLiteral("snapshot"), pending.reconciliationSnapshot);
+    }
+    const auto accepted = m_dispatcher.send(CommandLane::Rooms, json(command));
+    if (accepted) {
+        pending.deadline = QDateTime::currentDateTimeUtc().addMSecs(m_receiptTimeoutMs);
+    }
+    return static_cast<bool>(accepted);
+}
+
 bool MissionActions::refreshReceiptProjections(Pending& pending)
 {
     pending.projectionRevisionMatched =
@@ -3334,6 +3423,8 @@ bool MissionActions::refreshReceiptProjections(Pending& pending)
     pending.projectionEntityMatched = false;
     pending.reconciliationHydrationId.clear();
     pending.reconciliationNextOffset = 0;
+    pending.reconciliationSnapshot.clear();
+    pending.reconciliationSnapshotRestarts = 0;
     pending.reconciliationPageCount = 0;
 
     if (pending.operation == QStringLiteral("removeMember")) {
@@ -3417,6 +3508,8 @@ bool MissionActions::refreshDirectProjection(Pending& pending)
     }
     if (pending.operation == QStringLiteral("tasks.create")) {
         pending.reconciliationNextOffset = 0;
+        pending.reconciliationSnapshot.clear();
+        pending.reconciliationSnapshotRestarts = 0;
         pending.reconciliationPageCount = 0;
         return static_cast<bool>(m_dispatcher.send(
             CommandLane::Rooms,
@@ -3484,6 +3577,8 @@ void MissionActions::retireReceipt(const Pending& pending)
     retired.terminalAwaitingProjection = false;
     retired.reconciliationHydrationId.clear();
     retired.reconciliationNextOffset = 0;
+    retired.reconciliationSnapshot.clear();
+    retired.reconciliationSnapshotRestarts = 0;
     retired.reconciliationAttempts = 0;
     retired.reconciliationPageCount = 0;
     retired.exhausted = false;
@@ -3571,6 +3666,8 @@ void MissionActions::failProjection(
     pending->exhausted = true;
     pending->reconciliationHydrationId.clear();
     pending->reconciliationNextOffset = 0;
+    pending->reconciliationSnapshot.clear();
+    pending->reconciliationSnapshotRestarts = 0;
     pending->reconciliationPageCount = 0;
     m_lastError = message;
     if (pending->receiptAuthoritative) {

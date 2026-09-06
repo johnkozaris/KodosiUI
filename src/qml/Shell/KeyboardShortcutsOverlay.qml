@@ -14,7 +14,7 @@ KPopover {
             key: "application",
             title: qsTr("Application"),
             shortcuts: [
-                { keys: qsTr("Ctrl + ,"), label: qsTr("Settings") },
+                { keys: qsTr("Ctrl + Shift + ,"), label: qsTr("Settings") },
                 {
                     keys: qsTr("Ctrl + Shift + /"),
                     label: qsTr("Keyboard shortcuts")
@@ -29,13 +29,13 @@ KPopover {
             key: "session",
             title: qsTr("Selected session"),
             shortcuts: [
-                { keys: qsTr("Ctrl + S"), label: qsTr("New session") },
+                { keys: qsTr("Ctrl + Shift + N"), label: qsTr("New session") },
                 {
                     keys: qsTr("Ctrl + Shift + R"),
                     label: qsTr("Resume Agent Work")
                 },
                 {
-                    keys: qsTr("Ctrl + I"),
+                    keys: qsTr("Ctrl + Shift + I"),
                     label: qsTr("Agent Intelligence")
                 },
                 {
@@ -48,11 +48,11 @@ KPopover {
                 },
                 {
                     keys: qsTr("Ctrl + Shift + A"),
-                    label: qsTr("Approve or review top request")
+                    label: qsTr("Approve or review selected session request")
                 },
                 {
                     keys: qsTr("Ctrl + Shift + X"),
-                    label: qsTr("Deny top request")
+                    label: qsTr("Deny selected session request")
                 }
             ]
         },
@@ -60,7 +60,7 @@ KPopover {
             key: "workbench",
             title: qsTr("Workbench"),
             shortcuts: [
-                { keys: qsTr("Ctrl + B"), label: qsTr("Toggle sidebar") },
+                { keys: qsTr("Ctrl + Shift + B"), label: qsTr("Toggle sidebar") },
                 {
                     keys: qsTr("Ctrl + Shift + Enter"),
                     label: qsTr("Toggle focus")
@@ -196,7 +196,7 @@ KPopover {
                             Layout.fillWidth: true
                             text: group.modelData.title.toUpperCase()
                             color: KodosiTheme.textSecondary
-                            font.pixelSize: 9
+                            font.pixelSize: KodosiTheme.fontCaption
                             font.weight: Font.DemiBold
                             font.letterSpacing: 1.0
                         }
@@ -225,7 +225,7 @@ KPopover {
                                         text: shortcutRow.modelData.keys
                                         color: KodosiTheme.textPrimary
                                         font.family: "monospace"
-                                        font.pixelSize: 9
+                                        font.pixelSize: KodosiTheme.fontCaption
                                         font.weight: Font.DemiBold
                                     }
                                 }

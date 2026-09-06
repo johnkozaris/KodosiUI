@@ -1,3 +1,46 @@
+set(KODOSI_CONTROL_TEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/control-fixture")
+file(MAKE_DIRECTORY "${KODOSI_CONTROL_TEST_DIR}/Controls")
+foreach(control KButton KFocusIndicator KIcon PlainLabel)
+    configure_file(
+        "${PROJECT_SOURCE_DIR}/src/qml/Controls/${control}.qml"
+        "${KODOSI_CONTROL_TEST_DIR}/Controls/${control}.qml" COPYONLY)
+endforeach()
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/qml/KodosiTheme.qml"
+    "${KODOSI_CONTROL_TEST_DIR}/Controls/KodosiTheme.qml" COPYONLY)
+file(WRITE "${KODOSI_CONTROL_TEST_DIR}/Controls/qmldir"
+    "singleton KodosiTheme 1.0 KodosiTheme.qml\n")
+qt_add_executable(kodosi-control-tests tst_controls.cpp)
+target_link_libraries(kodosi-control-tests PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Test)
+target_compile_definitions(kodosi-control-tests PRIVATE
+    KODOSI_CONTROL_TEST_DIR="${KODOSI_CONTROL_TEST_DIR}")
+add_test(NAME kodosi-control-tests COMMAND kodosi-control-tests)
+set_tests_properties(kodosi-control-tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software"
+    TIMEOUT 15)
+
+qt_add_executable(kodosi-resume-modal-tests tst_resume_modal.cpp)
+target_link_libraries(kodosi-resume-modal-tests PRIVATE
+    kodosi-desktop-integration kodosi-runtime-bridge
+    Qt6::Core Qt6::DBus Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2
+    Qt6::Widgets Qt6::Test)
+target_compile_definitions(kodosi-resume-modal-tests PRIVATE
+    KODOSI_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+add_test(NAME kodosi-resume-modal-tests COMMAND kodosi-resume-modal-tests)
+set_tests_properties(kodosi-resume-modal-tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software"
+    TIMEOUT 30)
+
+qt_add_executable(kodosi-accessibility-scope-tests tst_accessibility_scope.cpp)
+target_link_libraries(kodosi-accessibility-scope-tests PRIVATE
+    kodosi-terminal-kernel kodosi-ghostty-vt
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Test)
+add_test(NAME kodosi-accessibility-scope-tests COMMAND kodosi-accessibility-scope-tests)
+set_tests_properties(kodosi-accessibility-scope-tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software"
+    TIMEOUT 30)
+
 qt_add_executable(kodosi-qt-contract-tests
     tst_contract.cpp
 )
@@ -491,21 +534,35 @@ add_test(
     COMMAND kodosi-mission-detail-model-tests
 )
 
+qt_add_executable(kodosi-mission-journey-tests tst_mission_journey.cpp)
+target_link_libraries(kodosi-mission-journey-tests PRIVATE
+    kodosi-runtime-bridge kodosi-terminal-kernel kodosi-ghostty-vt
+    Qt6::Core Qt6::DBus Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Test)
+target_compile_definitions(kodosi-mission-journey-tests PRIVATE
+    KODOSI_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+add_test(NAME kodosi-mission-journey-tests COMMAND kodosi-mission-journey-tests)
+set_tests_properties(kodosi-mission-journey-tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software"
+    TIMEOUT 30)
+
 qt_add_executable(kodosi-mission-actions-tests
     tst_mission_actions.cpp
 )
 target_link_libraries(kodosi-mission-actions-tests
     PRIVATE
         kodosi-runtime-bridge
-        Qt6::Core
+        Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2
         Qt6::Test
 )
 target_compile_definitions(kodosi-mission-actions-tests
     PRIVATE
+        KODOSI_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         QT_NO_CAST_FROM_ASCII
         QT_NO_CAST_TO_ASCII
 )
 add_test(NAME kodosi-mission-actions-tests COMMAND kodosi-mission-actions-tests)
+set_tests_properties(kodosi-mission-actions-tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
 
 qt_add_executable(kodosi-agent-global-model-tests
     tst_agent_global_model.cpp

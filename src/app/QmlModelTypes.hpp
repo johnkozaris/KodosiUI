@@ -1,5 +1,6 @@
 #pragma once
 
+#include "accessibility/AccessibilityScope.hpp"
 #include "app/ApplicationLifecycleModel.hpp"
 #include "app/DeepLinkController.hpp"
 #include "logging/ApplicationLogStore.hpp"
@@ -666,6 +667,12 @@ public:
     {
         return singleton(instance, engine);
     }
+};
+
+struct AccessibilityScopeForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::AccessibilityScope)
+    QML_NAMED_ELEMENT(AccessibilityScope)
 };
 
 struct TerminalViewForeign {

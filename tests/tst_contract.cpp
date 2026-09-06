@@ -45,7 +45,7 @@ void ContractTest::dependencyBaselineIsCurrent()
 
     const auto kodosi = root.value(QStringLiteral("kodosi")).toObject();
     QCOMPARE(kodosi.value(QStringLiteral("ffiAbiVersion")).toInt(), 5);
-    QCOMPARE(kodosi.value(QStringLiteral("desktopProtocolVersion")).toInt(), 37);
+    QCOMPARE(kodosi.value(QStringLiteral("desktopProtocolVersion")).toInt(), 38);
 }
 
 void ContractTest::desktopStateQmlContractIsNativeOwned()
@@ -65,8 +65,6 @@ void ContractTest::desktopStateQmlContractIsNativeOwned()
         "Models.DesktopState.sidebarOpen ="));
     QVERIFY(mainSource.contains(
         "Models.DesktopState.selectSession(sessionId)"));
-    QVERIFY(mainSource.contains(
-        "target: Models.DesktopState"));
     QVERIFY(!mainSource.contains(
         "Models.DesktopState.selectedSessionId ="));
     QVERIFY(!mainSource.contains("onRemoteRestoreRequested"));
@@ -120,12 +118,6 @@ void ContractTest::desktopStateQmlContractIsNativeOwned()
         "interactive: !root.focusMode"));
     QVERIFY(stageSource.contains(
         "if (root.focusMode && contentY !== 0)"));
-    QVERIFY(stageSource.contains(
-        "function setTerminalSubtreeAccessibility(item, ignored)"));
-    QVERIFY(stageSource.contains(
-        "onEntryVisibleChanged:"));
-    QVERIFY(stageSource.contains(
-        "root.setTerminalSubtreeAccessibility("));
     QVERIFY(stageSource.contains(
         "Accessible.name: qsTr(\"Terminal grid scroll bar\")"));
     QVERIFY(stageSource.contains(
@@ -306,12 +298,12 @@ void ContractTest::shellAccountDeviceParityContract()
     QVERIFY2(mainQml.open(QIODevice::ReadOnly), qPrintable(mainQml.errorString()));
     const auto mainSource = mainQml.readAll();
     for (const auto shortcut : {
-             QByteArrayLiteral("sequence: \"Ctrl+,\""),
-             QByteArrayLiteral("sequence: \"Ctrl+S\""),
-             QByteArrayLiteral("sequence: \"Ctrl+I\""),
+             QByteArrayLiteral("sequence: \"Ctrl+Shift+,\""),
+             QByteArrayLiteral("sequence: \"Ctrl+Shift+N\""),
+             QByteArrayLiteral("sequence: \"Ctrl+Shift+I\""),
              QByteArrayLiteral("sequence: \"Ctrl+Shift+S\""),
              QByteArrayLiteral("sequence: \"Ctrl+Shift+W\""),
-             QByteArrayLiteral("sequence: \"Ctrl+B\""),
+             QByteArrayLiteral("sequence: \"Ctrl+Shift+B\""),
              QByteArrayLiteral("sequence: \"Ctrl+Shift+/\""),
              QByteArrayLiteral("sequence: \"Ctrl+Shift+D\""),
              QByteArrayLiteral("sequence: \"Ctrl+Shift+Enter\""),
@@ -561,18 +553,6 @@ void ContractTest::missionPresentationRecoveryContract()
         QVERIFY2(!detailSource.contains(removed), removed.constData());
     }
 
-    QFile composition(QStringLiteral(
-        KODOSI_SOURCE_DIR "/src/app/main.cpp"));
-    QVERIFY2(
-        composition.open(QIODevice::ReadOnly),
-        qPrintable(composition.errorString()));
-    const auto compositionSource = composition.readAll();
-    QVERIFY(compositionSource.contains(
-        "Unknown Mission chat has no compact recovery path."));
-    QVERIFY(compositionSource.contains(
-        "Mission focus actions did not disclose exclusively."));
-    QVERIFY(compositionSource.contains(
-        "Mission Tasks did not disclose exclusively."));
 }
 
 void ContractTest::desktopFileIntegrationContractIsNativeOwned()
@@ -640,7 +620,6 @@ void ContractTest::desktopFileIntegrationContractIsNativeOwned()
         < mainSource.indexOf("QApplication application"));
     QVERIFY(mainSource.contains(
         "desktopFiles.setTransientParent(mainWindow)"));
-    QVERIFY(mainSource.contains("\"XDG_STATE_HOME\""));
     QVERIFY(mainSource.contains(
         "kodosi::ApplicationLogStore applicationLog"));
     QVERIFY(

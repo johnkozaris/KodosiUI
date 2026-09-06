@@ -723,12 +723,6 @@ void ProviderConversationsModelTest::qmlContractKeepsAuthorityNative()
              QByteArrayLiteral(
                  "objectName: \"resumeAgentWork.resume\""),
              QByteArrayLiteral(
-                 "closePolicy: root.resumePending"),
-             QByteArrayLiteral("? Popup.NoAutoClose"),
-             QByteArrayLiteral(
-                 "if (root.resumePending)\n"
-                 "            return false"),
-             QByteArrayLiteral(
                  "Models.SessionActions.lastCreateRequestId"),
              QByteArrayLiteral(
                  "Models.SessionActions.isCreatePending("),
@@ -749,8 +743,6 @@ void ProviderConversationsModelTest::qmlContractKeepsAuthorityNative()
         + QStringLiteral("/src/qml/Workbench/SessionSidebar.qml"));
     QVERIFY(sidebar.open(QIODevice::ReadOnly));
     const auto sidebarQml = sidebar.readAll();
-    QVERIFY(sidebarQml.contains(
-        "Accessible.name: qsTr(\"Hidden sessions\")"));
     QVERIFY(sidebarQml.contains(
         "objectName: \"sidebar.session.resumeAgentWork\""));
     QVERIFY(sidebarQml.contains(

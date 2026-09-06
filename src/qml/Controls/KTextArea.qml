@@ -14,13 +14,15 @@ TextArea {
     placeholderTextColor: KodosiTheme.placeholderText
     selectionColor: KodosiTheme.accent
     selectedTextColor: KodosiTheme.accentForeground
-    font.pixelSize: 12
+    font.pixelSize: KodosiTheme.fontBody
     selectByMouse: true
 
     onTextChanged: {
         if (maximumLength >= 0 && length > maximumLength)
             remove(maximumLength, length)
     }
+
+    KFocusIndicator { active: root.activeFocus && root.enabled }
 
     background: Rectangle {
         color: KodosiTheme.input

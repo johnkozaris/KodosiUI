@@ -6,6 +6,8 @@ Slider {
 
     implicitHeight: 28
 
+    KFocusIndicator { active: root.activeFocus && root.enabled }
+
     background: Rectangle {
         x: root.leftPadding
         y: Math.round(root.topPadding + root.availableHeight / 2 - height / 2)

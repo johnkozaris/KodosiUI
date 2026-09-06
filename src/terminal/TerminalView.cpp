@@ -427,6 +427,7 @@ TerminalView::TerminalView(QQuickItem* parent)
     , m_cursorBlinkTimer(this)
 {
     setFlag(ItemHasContents, true);
+    setClip(true);
     setFlag(ItemAcceptsInputMethod, true);
     setActiveFocusOnTab(true);
     setAcceptedMouseButtons(Qt::AllButtons);
@@ -462,6 +463,77 @@ TerminalView::~TerminalView()
 {
     m_renderPerformanceGeneration.fetch_add(1, std::memory_order_acq_rel);
     detach();
+}
+
+QSizeF TerminalView::gridSize() const
+{
+    return m_frame ? TerminalRasterizer::logicalSize(*m_frame, m_font, m_lineHeight) : QSizeF {};
+}
+
+qreal TerminalView::viewportScale() const
+{
+    const auto grid = gridSize();
+    if (!m_fitToView || m_canResize || grid.isEmpty() || width() <= 0 || height() <= 0)
+        return 1.0;
+    return std::min({1.0, width() / grid.width(), height() / grid.height()});
+}
+
+QPointF TerminalView::viewportOffset() const
+{
+    return m_fitToView || m_canResize ? QPointF {} : -m_pan;
+}
+
+QPointF TerminalView::gridPoint(const QPointF& point) const
+{
+    return (point - viewportOffset()) / viewportScale();
+}
+
+void TerminalView::updateViewport()
+{
+    const auto grid = gridSize();
+    if (m_fitToView || m_canResize) {
+        m_pan = {};
+    } else {
+        m_pan.setX(std::clamp(m_pan.x(), 0.0, std::max(0.0, grid.width() - width())));
+        m_pan.setY(std::clamp(m_pan.y(), 0.0, std::max(0.0, grid.height() - height())));
+    }
+    emit viewportChanged();
+    update();
+}
+
+void TerminalView::setFitToView(const bool fit)
+{
+    if (m_fitToView == fit) return;
+    m_fitToView = fit;
+    emit fitToViewChanged();
+    updateViewport();
+    if (!fit) revealCursor();
+}
+
+void TerminalView::setPanX(const qreal value)
+{
+    if (!std::isfinite(value) || m_pan.x() == value) return;
+    m_pan.setX(value);
+    updateViewport();
+}
+
+void TerminalView::setPanY(const qreal value)
+{
+    if (!std::isfinite(value) || m_pan.y() == value) return;
+    m_pan.setY(value);
+    updateViewport();
+}
+
+void TerminalView::revealCursor()
+{
+    if (!m_frame || m_fitToView || m_canResize) return;
+    const auto cell = TerminalRasterizer::cellSize(m_font, m_lineHeight);
+    const QPointF cursor(m_frame->cursor.column * cell.width(), m_frame->cursor.row * cell.height());
+    if (cursor.x() < m_pan.x()) m_pan.setX(cursor.x());
+    else if (cursor.x() + cell.width() > m_pan.x() + width()) m_pan.setX(cursor.x() + cell.width() - width());
+    if (cursor.y() < m_pan.y()) m_pan.setY(cursor.y());
+    else if (cursor.y() + cell.height() > m_pan.y() + height()) m_pan.setY(cursor.y() + cell.height() - height());
+    updateViewport();
 }
 
 QString TerminalView::fontFamily() const
@@ -681,13 +753,14 @@ QRect TerminalView::accessibleCharacterRect(const int offset) const
         return {};
     }
     const auto cellSize = TerminalRasterizer::cellSize(m_font, m_lineHeight);
-    const auto scenePoint = mapToScene(
-        QPointF(cellSize.width() * targetColumn, cellSize.height() * targetRow));
+    const auto scale = viewportScale();
+    const auto scenePoint = mapToScene(viewportOffset() +
+        QPointF(cellSize.width() * targetColumn, cellSize.height() * targetRow) * scale);
     return {
         window()->mapToGlobal(scenePoint.toPoint()),
         QSize(
-            static_cast<int>(cellSize.width() * targetWidth),
-            static_cast<int>(cellSize.height())),
+            std::max(1, static_cast<int>(std::ceil(cellSize.width() * targetWidth * scale))),
+            std::max(1, static_cast<int>(std::ceil(cellSize.height() * scale)))),
     };
 }
 
@@ -912,6 +985,7 @@ void TerminalView::setTerminalCapabilities(
         scheduleResize();
     }
     emit capabilitiesChanged();
+    updateViewport();
     if (wasReadOnly != readOnly()) {
         if (auto* accessible = qobject_cast<QQuickAccessibleAttached*>(
                 qmlAttachedPropertiesObject<QQuickAccessibleAttached>(
@@ -1039,6 +1113,20 @@ bool TerminalView::attach(
                     },
                     Qt::QueuedConnection);
             },
+            .titleChanged = [this, epoch](QString title) {
+                QMetaObject::invokeMethod(this, [this, epoch, title = std::move(title)] {
+                    if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch
+                        || m_terminalTitle == title) return;
+                    m_terminalTitle = title;
+                    emit terminalTitleChanged();
+                }, Qt::QueuedConnection);
+            },
+            .bell = [this, epoch] {
+                QMetaObject::invokeMethod(this, [this, epoch] {
+                    if (m_attachmentEpoch.load(std::memory_order_acquire) == epoch)
+                        emit terminalBell();
+                }, Qt::QueuedConnection);
+            },
             .closed = [this, epoch] {
                 QMetaObject::invokeMethod(
                     this,
@@ -1112,6 +1200,10 @@ void TerminalView::detach()
         (void)runtime->disconnectTerminal(m_subscription);
     }
     m_subscription = {};
+    if (!m_terminalTitle.isEmpty()) {
+        m_terminalTitle.clear();
+        emit terminalTitleChanged();
+    }
     m_expectedRuntimeIncarnationId.clear();
     m_surfaceGeneration = 0;
     m_resizeQueued = false;
@@ -1148,6 +1240,7 @@ void TerminalView::detach()
     }
     m_frame.reset();
     m_renderedFrame.reset();
+    updateViewport();
     if (wasReady) {
         emit terminalReadyChanged();
     }
@@ -1182,8 +1275,10 @@ QSGNode* TerminalView::updatePaintNode(
     }
 
     const auto devicePixelRatio = window()->effectiveDevicePixelRatio();
+    const auto scale = viewportScale();
     if (nodeNeedsTexture || m_renderedFrame != m_frame
         || !qFuzzyCompare(m_renderedDevicePixelRatio, devicePixelRatio)
+        || !qFuzzyCompare(m_renderedViewportScale, scale)
         || m_renderedFontPixelSize != m_font.pixelSize()
         || m_renderedPreedit != m_preedit) {
         TerminalRasterizer::Options options;
@@ -1196,11 +1291,18 @@ QSGNode* TerminalView::updatePaintNode(
         options.cursorPhaseVisible = m_cursorPhaseVisible;
         QElapsedTimer rasterTimer;
         rasterTimer.start();
-        const auto image = TerminalRasterizer::render(
+        auto image = TerminalRasterizer::render(
             *m_frame,
             m_font,
             devicePixelRatio,
             options);
+        if (!image.isNull() && scale < 1.0) {
+            image = image.scaled(
+                QSize(std::max(1, qRound(image.width() * scale)),
+                    std::max(1, qRound(image.height() * scale))),
+                Qt::IgnoreAspectRatio,
+                Qt::SmoothTransformation);
+        }
         if (image.isNull()) {
             queueRenderPerformance(
                 rasterTimer.elapsed(),
@@ -1222,11 +1324,13 @@ QSGNode* TerminalView::updatePaintNode(
         node->setTexture(texture);
         m_renderedFrame = m_frame;
         m_renderedDevicePixelRatio = devicePixelRatio;
+        m_renderedViewportScale = scale;
         m_renderedFontPixelSize = m_font.pixelSize();
         m_renderedPreedit = m_preedit;
     }
-    node->setRect(boundingRect());
-    node->setFiltering(QSGTexture::Nearest);
+    const auto logicalSize = gridSize() * scale;
+    node->setRect(QRectF(viewportOffset(), logicalSize));
+    node->setFiltering(scale == 1.0 ? QSGTexture::Nearest : QSGTexture::Linear);
     return node;
 }
 
@@ -1279,9 +1383,24 @@ void TerminalView::geometryChange(const QRectF& newGeometry, const QRectF& oldGe
 {
     QQuickItem::geometryChange(newGeometry, oldGeometry);
     if (newGeometry.size() != oldGeometry.size()) {
-        update();
+        updateViewport();
         scheduleResize();
     }
+}
+
+bool TerminalView::event(QEvent* event)
+{
+    if (event->type() == QEvent::ShortcutOverride && hasActiveFocus()) {
+        const auto* key = static_cast<QKeyEvent*>(event);
+        const auto modifiers = key->modifiers();
+        if (modifiers == Qt::ControlModifier
+            || modifiers == Qt::AltModifier
+            || modifiers == Qt::NoModifier) {
+            event->accept();
+            return true;
+        }
+    }
+    return QQuickItem::event(event);
 }
 
 void TerminalView::keyPressEvent(QKeyEvent* event)
@@ -1393,11 +1512,11 @@ QVariant TerminalView::inputMethodQuery(const Qt::InputMethodQuery query) const
     case Qt::ImCursorRectangle:
         if (m_frame) {
             const auto cell = TerminalRasterizer::cellSize(m_font, m_lineHeight);
-            return QRectF(
+            const auto scale = viewportScale();
+            return QRectF(viewportOffset() + QPointF(
                 cell.width() * m_frame->cursor.column,
-                cell.height() * m_frame->cursor.row,
-                cell.width(),
-                cell.height());
+                cell.height() * m_frame->cursor.row) * scale,
+                cell * scale);
         }
         return QRectF {};
     case Qt::ImCursorPosition:
@@ -1577,6 +1696,16 @@ void TerminalView::wheelEvent(QWheelEvent* event)
         QQuickItem::wheelEvent(event);
         return;
     }
+    if (!m_canResize && !m_fitToView
+        && (event->modifiers().testFlag(Qt::ShiftModifier)
+            || event->pixelDelta().x() != 0 || event->angleDelta().x() != 0)) {
+        const auto dx = event->pixelDelta().x() != 0 ? event->pixelDelta().x()
+            : event->angleDelta().x() != 0 ? event->angleDelta().x() / 3
+            : event->pixelDelta().y() != 0 ? event->pixelDelta().y() : event->angleDelta().y() / 3;
+        setPanX(m_pan.x() - dx);
+        event->accept();
+        return;
+    }
     const auto delta = event->pixelDelta().y() != 0
         ? event->pixelDelta().y()
         : event->angleDelta().y();
@@ -1625,18 +1754,22 @@ bool TerminalView::sendMouseEvent(
             QStringLiteral("Terminal mouse geometry is unavailable."));
         return true;
     }
+    const auto point = gridPoint(position);
+    const auto grid = gridSize();
+    if (point.x() < 0 || point.y() < 0 || point.x() >= grid.width() || point.y() >= grid.height())
+        return false;
     auto encoded = m_registry->encodeMouse(
         surfaceIdentity(),
         {
             .action = action,
             .button = button,
             .modifiers = modifiers(keyboardModifiers),
-            .x = static_cast<float>(position.x()),
-            .y = static_cast<float>(position.y()),
+            .x = static_cast<float>(point.x()),
+            .y = static_cast<float>(point.y()),
             .screenWidth = static_cast<std::uint32_t>(
-                std::ceil(width())),
+                std::ceil(grid.width())),
             .screenHeight = static_cast<std::uint32_t>(
-                std::ceil(height())),
+                std::ceil(grid.height())),
             .cellWidth = static_cast<std::uint32_t>(
                 std::ceil(cellSize.width())),
             .cellHeight = static_cast<std::uint32_t>(
@@ -1719,6 +1852,7 @@ void TerminalView::presentFrame(GhosttyTerminalKernel::Frame frame)
         setImplicitSize(sizeHint.width(), sizeHint.height());
     }
     emit frameChanged();
+    updateViewport();
     if (wasReady != m_terminalReady) {
         emit terminalReadyChanged();
     }
@@ -2191,19 +2325,21 @@ std::optional<QPoint> TerminalView::terminalCellAt(
     if (cell.width() <= 0.0 || cell.height() <= 0.0) {
         return std::nullopt;
     }
+    const auto point = gridPoint(position);
     if (hitTest == CellHitTest::Strict
         && (position.x() < 0.0 || position.y() < 0.0
             || position.x() >= width() || position.y() >= height()
-            || position.x() >= cell.width() * m_frame->columns
-            || position.y() >= cell.height() * m_frame->rows)) {
+            || point.x() < 0.0 || point.y() < 0.0
+            || point.x() >= cell.width() * m_frame->columns
+            || point.y() >= cell.height() * m_frame->rows)) {
         return std::nullopt;
     }
     const auto column = std::clamp(
-        static_cast<int>(std::floor(position.x() / cell.width())),
+        static_cast<int>(std::floor(point.x() / cell.width())),
         0,
         static_cast<int>(m_frame->columns) - 1);
     const auto row = std::clamp(
-        static_cast<int>(std::floor(position.y() / cell.height())),
+        static_cast<int>(std::floor(point.y() / cell.height())),
         0,
         static_cast<int>(m_frame->rows) - 1);
     return QPoint(column, row);
@@ -2390,7 +2526,7 @@ void TerminalView::invalidateMetrics()
             TerminalRasterizer::logicalSize(*m_frame, m_font, m_lineHeight);
         setImplicitSize(sizeHint.width(), sizeHint.height());
     }
-    update();
+    updateViewport();
     scheduleResize();
     if (auto* inputMethod = QGuiApplication::inputMethod()) {
         inputMethod->update(Qt::ImFont | Qt::ImCursorRectangle);

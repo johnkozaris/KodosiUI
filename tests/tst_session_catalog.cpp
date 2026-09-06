@@ -269,10 +269,8 @@ void SessionCatalogTest::separatesDisplayOwnerFromOwnerIdentity()
     FakeCatalogDispatcher dispatcher;
     kodosi::SessionActions actions(dispatcher, model);
     QVERIFY(actions.canInterrupt(QStringLiteral("owned")));
-    QVERIFY(actions.canSetMode(QStringLiteral("owned")));
     QVERIFY(model.presentationSession(QStringLiteral("owned"))->canResize);
     QVERIFY(!actions.canInterrupt(QStringLiteral("participant")));
-    QVERIFY(!actions.canSetMode(QStringLiteral("participant")));
     QVERIFY(!model.presentationSession(QStringLiteral("participant"))->canResize);
 
     const auto owned = model.actionContext(QStringLiteral("owned"));

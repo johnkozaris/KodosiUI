@@ -190,7 +190,7 @@ Item {
                             text: qsTr("Signed by %1").arg(
                                 Models.Devices.selfCertSignerDeviceId)
                             color: KodosiTheme.textTertiary
-                            font.pixelSize: 9
+                            font.pixelSize: KodosiTheme.fontCaption
                             elide: Text.ElideMiddle
                         }
                         PlainLabel {
@@ -202,7 +202,7 @@ Item {
                             text: root.formattedIssued(
                                 Models.Devices.selfCertIssuedAt)
                             color: KodosiTheme.textTertiary
-                            font.pixelSize: 9
+                            font.pixelSize: KodosiTheme.fontCaption
                         }
                     }
 
@@ -338,7 +338,7 @@ Item {
                                 text: qsTr(
                                     "Ignore this request to let it expire.")
                                 color: KodosiTheme.textTertiary
-                                font.pixelSize: 9
+                                font.pixelSize: KodosiTheme.fontCaption
                             }
                         }
                     }
@@ -497,7 +497,7 @@ Item {
                             text: Models.Devices.lastResolvedUserCode
                             color: KodosiTheme.textSecondary
                             font.family: "monospace"
-                            font.pixelSize: 9
+                            font.pixelSize: KodosiTheme.fontCaption
                         }
                     }
 
@@ -616,7 +616,7 @@ Item {
                             text: Models.DeviceActions.lastUserCode
                             color: KodosiTheme.textSecondary
                             font.family: "monospace"
-                            font.pixelSize: 9
+                            font.pixelSize: KodosiTheme.fontCaption
                         }
                     }
 
@@ -693,7 +693,7 @@ Item {
                             PlainLabel {
                                 text: device.deviceId
                                 color: KodosiTheme.textSecondary
-                                font.pixelSize: 9
+                                font.pixelSize: KodosiTheme.fontCaption
                                 elide: Text.ElideMiddle
                             }
                             PlainLabel {
@@ -715,7 +715,7 @@ Item {
                                     return value.length > 0
                                 }).join(" · ")
                                 color: KodosiTheme.textTertiary
-                                font.pixelSize: 8
+                                font.pixelSize: KodosiTheme.fontCaption
                                 elide: Text.ElideMiddle
                             }
                         }

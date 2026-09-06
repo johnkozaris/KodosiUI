@@ -222,7 +222,7 @@ Item {
             Layout.rightMargin: KodosiTheme.spacing5
             text: Models.SessionActions.lastError
             color: KodosiTheme.danger
-            font.pixelSize: 9
+            font.pixelSize: KodosiTheme.fontCaption
             wrapMode: Text.Wrap
         }
 
@@ -276,7 +276,7 @@ Item {
                     === Models.Sessions.Failed
                     ? KodosiTheme.warning
                     : KodosiTheme.textSecondary
-                font.pixelSize: 9
+                font.pixelSize: KodosiTheme.fontCaption
             }
 
             KButton {
@@ -331,7 +331,7 @@ Item {
                                 text: hiddenSession.owner + " · "
                                     + hiddenSession.project
                                 color: KodosiTheme.textSecondary
-                                font.pixelSize: 9
+                                font.pixelSize: KodosiTheme.fontCaption
                                 elide: Text.ElideMiddle
                             }
                         }

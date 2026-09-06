@@ -43,6 +43,8 @@ Button {
         }
     }
 
+    KFocusIndicator { active: root.activeFocus && root.enabled }
+
     background: Rectangle {
         radius: KodosiTheme.radiusSmall
         color: root.selected

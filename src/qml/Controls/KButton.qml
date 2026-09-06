@@ -8,7 +8,7 @@ Button {
     property string variant: "secondary"
     property string iconName: ""
     property bool iconTrailing: variant === "directional"
-    property bool uppercase: variant === "primary" || variant === "directional"
+    property bool uppercase: false
     property bool compact: false
     property bool contentLeftAligned: false
     property bool showLeadingDot: false
@@ -17,6 +17,8 @@ Button {
     property color iconColor: label.color
     property string secondaryText: ""
     property real secondaryMaximumWidth: 160
+    Accessible.description: secondaryText
+    activeFocusOnTab: true
 
     implicitHeight: compact
         ? KodosiTheme.compactControlHeight
@@ -88,13 +90,25 @@ Button {
                     : root.variant === "dangerQuiet"
                       ? KodosiTheme.danger
                       : KodosiTheme.textPrimary
-            font.pixelSize: 11
-            font.weight: Font.DemiBold
+            font.pixelSize: KodosiTheme.fontBody
+            font.weight: Font.Medium
             font.letterSpacing: root.uppercase ? 1.0 : 0
             horizontalAlignment: root.contentLeftAligned
                 ? Text.AlignLeft
                 : Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+
+        PlainLabel {
+            visible: root.secondaryText.length > 0
+            Layout.maximumWidth: root.secondaryMaximumWidth
+            Layout.leftMargin: KodosiTheme.spacing2
+            text: root.secondaryText
+            color: root.enabled
+                ? KodosiTheme.textSecondary
+                : KodosiTheme.disabled
+            font.pixelSize: KodosiTheme.fontCaption
             elide: Text.ElideRight
         }
 
@@ -144,6 +158,13 @@ Button {
         Behavior on color {
             ColorAnimation { duration: KodosiTheme.motionFast }
         }
+    }
+
+    KFocusIndicator {
+        objectName: "control.keyboardFocus"
+        Accessible.id: objectName
+        active: root.activeFocus && root.enabled
+        color: root.filled ? KodosiTheme.accentForeground : KodosiTheme.focusRing
     }
 
     transform: Translate { y: root.pressed && root.enabled ? 1 : 0 }

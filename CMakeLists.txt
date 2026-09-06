@@ -59,9 +59,16 @@ set(KODOSI_RUNTIME_GENERATED_HEADER
     "${KODOSI_RUNTIME_ROOT}/rustProcess/target/include/kodosi_runtime.h"
 )
 set(KODOSI_RUNTIME_HEADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/kodosi-runtime")
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(KODOSI_RUST_PROFILE "release")
+    set(KODOSI_RUST_PROFILE_ARGS --release)
+else()
+    set(KODOSI_RUST_PROFILE "debug")
+    set(KODOSI_RUST_PROFILE_ARGS)
+endif()
 set(
     KODOSI_RUNTIME_ARCHIVE
-    "${KODOSI_RUNTIME_ROOT}/rustProcess/target/release/libkodosi_ffi_c.a"
+    "${KODOSI_RUNTIME_ROOT}/rustProcess/target/${KODOSI_RUST_PROFILE}/libkodosi_ffi_c.a"
 )
 set(
     KODOSI_RUNTIME_CLI
@@ -118,7 +125,7 @@ add_custom_target(kodosi-rust-ffi-build
         "${CARGO_EXECUTABLE}" build
         --manifest-path "${KODOSI_RUNTIME_MANIFEST}"
         --locked
-        --release
+        ${KODOSI_RUST_PROFILE_ARGS}
         -p kodosi-ffi-c
     COMMAND ${KODOSI_VERIFY_PINNED_SOURCES_COMMAND}
     COMMAND

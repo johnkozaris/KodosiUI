@@ -1153,6 +1153,9 @@ void SteeringModelTest::draftSurvivesUnavailableAuthorityAndReinspection()
     finishEmptyHydration(dispatcher, model);
 
     model.clearInspection();
+    const auto presentation = model.presentationForSession(QStringLiteral("session-1"));
+    QCOMPARE(presentation.value(QStringLiteral("draftText")).toString(), QStringLiteral("keep this draft"));
+    QVERIFY(presentation.value(QStringLiteral("canSend")).toBool());
     const auto commandsBeforeReopen = dispatcher.commands.size();
     QVERIFY(model.inspect(QStringLiteral("session-1")));
     QCOMPARE(dispatcher.commands.size(), commandsBeforeReopen);

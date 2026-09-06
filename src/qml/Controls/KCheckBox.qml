@@ -28,6 +28,8 @@ CheckBox {
         }
     }
 
+    KFocusIndicator { active: root.activeFocus && root.enabled }
+
     contentItem: PlainLabel {
         text: root.text
         color: root.enabled

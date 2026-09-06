@@ -14,7 +14,7 @@ static_assert(KODOSI_FFI_ABI_VERSION == 5, "KodosiQT requires FFI ABI 5");
 namespace kodosi {
 namespace {
 
-constexpr std::uint32_t supportedProtocolVersion = 37;
+constexpr std::uint32_t supportedProtocolVersion = 38;
 constexpr std::uint32_t requiredTerminalCapability = 1;
 
 QByteArray copyBytes(const std::uint8_t* bytes, const std::uintptr_t length)
@@ -93,7 +93,7 @@ RuntimeBridge::Result RuntimeBridge::start()
         return std::unexpected(failure(
             RuntimeFailure::Code::ContractMismatch,
             KODOSI_FFI_DESER_FAILED,
-            QStringLiteral("The linked Kodosi runtime does not satisfy ABI 5 / protocol 37.")));
+            QStringLiteral("The linked Kodosi runtime does not satisfy ABI 5 / protocol 38.")));
     }
 
     const kodosi_callbacks_v2_t callbacks {

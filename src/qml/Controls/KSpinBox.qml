@@ -66,6 +66,8 @@ SpinBox {
         }
     }
 
+    KFocusIndicator { active: root.activeFocus && root.enabled; z: 3 }
+
     background: Rectangle {
         color: KodosiTheme.input
         radius: KodosiTheme.radiusSmall

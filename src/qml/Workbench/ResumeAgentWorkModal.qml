@@ -22,23 +22,21 @@ KPopover {
     modal: true
     dim: true
     focus: true
-    closePolicy: root.resumePending
-        ? Popup.NoAutoClose
-        : Popup.CloseOnEscape
+    closePolicy: Popup.CloseOnEscape
 
     function openModal() {
-        resumePending = false
-        resumeRequestId = ""
+        resumePending = resumeRequestId.length > 0
+            && Models.SessionActions.isCreatePending(resumeRequestId)
+        if (!resumePending)
+            resumeRequestId = ""
         Models.SessionActions.clearError()
         Models.ProviderConversations.open()
         open()
     }
 
     function closeModal() {
-        if (root.resumePending)
-            return false
-        resumePending = false
-        resumeRequestId = ""
+        if (!root.resumePending)
+            resumeRequestId = ""
         close()
         return true
     }
@@ -59,8 +57,8 @@ KPopover {
     }
     onClosed: {
         focusTimer.stop()
-        resumePending = false
-        resumeRequestId = ""
+        if (!resumePending)
+            resumeRequestId = ""
         Models.ProviderConversations.close()
     }
 
@@ -75,17 +73,19 @@ KPopover {
         target: Models.SessionActions
 
         function onSessionCreationResolved(requestId) {
-            if (root.resumePending
-                    && requestId === root.resumeRequestId)
-                root.closeModal()
+            if (!root.resumePending || requestId !== root.resumeRequestId)
+                return
+            root.resumePending = false
+            root.closeModal()
         }
 
         function onStateChanged() {
-            if (root.resumePending
-                    && !Models.SessionActions.isCreatePending(
-                        root.resumeRequestId)
-                    && Models.SessionActions.lastError.length > 0)
+            if (!root.resumePending)
+                return
+            if (!Models.SessionActions.isCreatePending(root.resumeRequestId)) {
                 root.resumePending = false
+                root.resumeRequestId = ""
+            }
         }
     }
 
@@ -165,7 +165,6 @@ KPopover {
                     Accessible.id: objectName
                     glyph: "close"
                     Accessible.name: qsTr("Close Resume Agent Work")
-                    enabled: !root.resumePending
                     onClicked: root.closeModal()
                 }
             }
@@ -865,10 +864,11 @@ KPopover {
                 KButton {
                     objectName: "resumeAgentWork.cancel"
                     Accessible.id: objectName
-                    text: qsTr("Cancel")
+                    text: root.resumePending ? qsTr("Close") : qsTr("Cancel")
                     variant: "quiet"
-                    enabled: !root.resumePending
                     Accessible.name: text
+                    Accessible.description: root.resumePending
+                        ? qsTr("The session will continue starting in the background.") : ""
                     onClicked: root.closeModal()
                 }
 

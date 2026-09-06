@@ -337,8 +337,8 @@ void SingleInstanceTest::
     contenderTakesOwnershipOnlyAfterUnreadyOwnerFails()
 {
     QTemporaryDir directory(
-        QDir::current().filePath(
-            QStringLiteral("single-instance-owner-failure-XXXXXX")));
+        QDir::temp().filePath(
+            QStringLiteral("kodosi-owner-failure-XXXXXX")));
     QVERIFY(directory.isValid());
     auto owner = std::make_unique<kodosi::SingleInstanceGuard>();
     QCOMPARE(

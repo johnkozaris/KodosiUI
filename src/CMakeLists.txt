@@ -127,6 +127,8 @@ target_link_libraries(kodosi-desktop-integration
 )
 
 qt_add_library(kodosi-terminal-kernel STATIC
+    accessibility/AccessibilityScope.cpp
+    accessibility/AccessibilityScope.hpp
     terminal/GhosttyC.hpp
     terminal/TerminalAccessibility.cpp
     terminal/TerminalAccessibility.hpp
@@ -276,6 +278,7 @@ qt_add_qml_module(kodosi-qt
         qml/AgentIntel/ProjectIntelligenceModal.qml
         qml/Controls/NavTab.qml
         qml/Controls/KButton.qml
+        qml/Controls/KFocusIndicator.qml
         qml/Controls/KBusyIndicator.qml
         qml/Controls/KCheckBox.qml
         qml/Controls/KComboBox.qml
@@ -306,6 +309,7 @@ qt_add_qml_module(kodosi-qt
         qml/Diagnostics/RuntimeHealthBanner.qml
         qml/People/PeopleView.qml
         qml/People/MissionDetailView.qml
+        qml/People/TaskDueDateField.qml
         qml/Settings/SettingsDrawer.qml
         qml/Settings/AgentsSettingsSurface.qml
         qml/Shell/KeyboardShortcutsOverlay.qml
@@ -315,6 +319,7 @@ qt_add_qml_module(kodosi-qt
         qml/Workbench/ResumeAgentWorkModal.qml
         qml/Workbench/TerminalDivider.qml
         qml/Workbench/TerminalStage.qml
+        qml/Workbench/TerminalViewportControls.qml
         qml/Workbench/TerminalTile.qml
     RESOURCES
         qml/assets/kodosi-logo-dark.png

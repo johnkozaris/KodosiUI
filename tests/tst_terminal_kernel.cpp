@@ -318,6 +318,9 @@ private slots:
     void keyEncodingUsesRestoredTerminalModes();
     void mouseEncodingUsesRestoredTerminalModes();
     void terminalViewRoutesTrackedMouseToPty();
+    void remoteGridFitsPansAndMapsAccessibleMouseCoordinates();
+    void terminalViewPreservesControlAndEscapeKeys();
+    void runtimeBellAndTitleKeepTerminalAvailable();
     void pasteEncodingUsesRestoredTerminalModes();
     void wheelScrollsGhosttyViewportWithoutChangingSequence();
     void selectionUsesGhosttyTrackedStateAndFormatting();
@@ -352,6 +355,56 @@ private slots:
     void registryRetiresAbandonedSeedCapacity();
     void registryRoutesMultiSurfaceControlExactly();
 };
+
+void TerminalKernelTest::terminalViewPreservesControlAndEscapeKeys()
+{
+    QQuickWindow window;
+    window.resize(800, 500);
+    kodosi::TerminalView view(window.contentItem());
+    view.setSize(QSizeF(800, 500));
+    window.show();
+    window.requestActivate();
+    view.forceActiveFocus();
+    QTRY_VERIFY(view.hasActiveFocus());
+    for (const auto key : {Qt::Key_B, Qt::Key_S, Qt::Key_I}) {
+        QKeyEvent event(QEvent::ShortcutOverride, key, Qt::ControlModifier);
+        event.ignore();
+        QCoreApplication::sendEvent(&view, &event);
+        QVERIFY(event.isAccepted());
+    }
+    QKeyEvent escape(QEvent::ShortcutOverride, Qt::Key_Escape, Qt::NoModifier);
+    escape.ignore();
+    QCoreApplication::sendEvent(&view, &escape);
+    QVERIFY(escape.isAccepted());
+    QKeyEvent applicationShortcut(QEvent::ShortcutOverride, Qt::Key_N,
+        Qt::ControlModifier | Qt::ShiftModifier);
+    applicationShortcut.ignore();
+    QCoreApplication::sendEvent(&view, &applicationShortcut);
+    QVERIFY(!applicationShortcut.isAccepted());
+}
+
+void TerminalKernelTest::runtimeBellAndTitleKeepTerminalAvailable()
+{
+    kodosi::TerminalSessionRegistry registry;
+    FakeTerminalDispatcher dispatcher;
+    kodosi::TerminalView view;
+    const kodosi::TerminalSubscription subscription {
+        QStringLiteral("session"), QStringLiteral("subscription"), 1};
+    QVERIFY(view.attach(registry, dispatcher, subscription, QStringLiteral("incarnation")));
+    makeTerminalReady(registry, subscription);
+    QSignalSpy errors(&view, &kodosi::TerminalView::terminalError);
+    QSignalSpy bells(&view, &kodosi::TerminalView::terminalBell);
+    registry.receiveControl({subscription, QByteArrayLiteral(R"({"type":"term.bell","sessionId":"session"})")});
+    registry.receiveControl({subscription, QByteArrayLiteral(R"({"type":"term.title","sessionId":"session","title":"Building project"})")});
+    QTRY_COMPARE(bells.count(), 1);
+    QTRY_COMPARE(view.terminalTitle(), QStringLiteral("Building project"));
+    QCOMPARE(errors.count(), 0);
+    QVERIFY(view.terminalReady());
+    registry.receiveControl({subscription, QByteArrayLiteral(R"({"type":"term.title","sessionId":"session","title":null})")});
+    QTRY_VERIFY(view.terminalTitle().isEmpty());
+    registry.receiveControl({subscription, QByteArrayLiteral(R"({"type":"term.bell","sessionId":"wrong"})")});
+    QTRY_COMPARE(errors.count(), 1);
+}
 
 void TerminalKernelTest::initTestCase()
 {
@@ -967,6 +1020,74 @@ void TerminalKernelTest::terminalViewRoutesTrackedMouseToPty()
             QByteArrayLiteral("\x1b[<0;1;1M"),
             QByteArrayLiteral("\x1b[<0;1;1m"),
         }));
+}
+
+void TerminalKernelTest::remoteGridFitsPansAndMapsAccessibleMouseCoordinates()
+{
+    kodosi::TerminalSessionRegistry registry;
+    FakeTerminalDispatcher dispatcher;
+    QQuickWindow window;
+    window.resize(400, 220);
+    kodosi::TerminalView view(window.contentItem());
+    view.setSize(QSizeF(400, 220));
+    view.setTerminalCapabilities(true, true, true, false);
+    const kodosi::TerminalSubscription subscription {
+        QStringLiteral("remote"), QStringLiteral("remote-view"), 1};
+    QVERIFY(view.attach(registry, dispatcher, subscription, QStringLiteral("remote-incarnation")));
+    QVERIFY(registry.installSemanticCheckpoint({
+        subscription, 1, 24, 120,
+        checkpointFor(QByteArrayLiteral(
+            "\x1b[?1000h\x1b[?1006hLEFT\x1b[1;116HRIGHT\x1b[24;114HBOTTOM"), 120, 24),
+    }));
+    registry.receiveConnectResult({subscription, ffiOk});
+    window.show();
+    QTRY_VERIFY(view.terminalReady());
+    const auto text = view.accessibleText();
+    const auto right = static_cast<int>(text.indexOf(QStringLiteral("RIGHT")));
+    const auto bottom = static_cast<int>(text.indexOf(QStringLiteral("BOTTOM")));
+    QVERIFY(right >= 0 && bottom >= 0);
+    QVERIFY(view.viewportScale() < 1);
+    const QRect pane(window.mapToGlobal(QPoint(0, 0)), window.size());
+    QVERIFY(pane.contains(view.accessibleCharacterRect(0).center()));
+    QVERIFY(pane.contains(view.accessibleCharacterRect(right + 4).center()));
+    QVERIFY(pane.contains(view.accessibleCharacterRect(bottom + 5).center()));
+    QCOMPARE(view.accessibleOffsetAt(view.accessibleCharacterRect(right).center()), right);
+
+    const auto click = [&](const int offset) {
+        const QPointF point = window.mapFromGlobal(view.accessibleCharacterRect(offset).center());
+        QMouseEvent press(QEvent::MouseButtonPress, point, point,
+            Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, point, point,
+            Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(&view, &press);
+        QCoreApplication::sendEvent(&view, &release);
+    };
+    click(right);
+    QCOMPARE(dispatcher.inputCommands.constLast(), QByteArrayLiteral("\x1b[<0;116;1m"));
+    QVERIFY(std::ranges::none_of(dispatcher.terminalCommands, [](const QJsonObject& command) {
+        return command.value(QStringLiteral("type")) == QStringLiteral("terminal.resize");
+    }));
+
+    view.setFitToView(false);
+    QCOMPARE(view.viewportScale(), 1.0);
+    QVERIFY(pane.contains(view.accessibleCharacterRect(bottom + 5).center()));
+    view.setPanX(0);
+    view.setPanY(0);
+    QVERIFY(!pane.contains(view.accessibleCharacterRect(right).center()));
+    view.setPanX(1e6);
+    QCOMPARE(view.panX(), view.gridSize().width() - view.width());
+    QVERIFY(pane.contains(view.accessibleCharacterRect(right).center()));
+    QCOMPARE(view.accessibleOffsetAt(view.accessibleCharacterRect(right).center()), right);
+    click(right);
+    QCOMPARE(dispatcher.inputCommands.constLast(), QByteArrayLiteral("\x1b[<0;116;1m"));
+    view.setPanY(1e6);
+    QCOMPARE(view.panY(), view.gridSize().height() - view.height());
+    QVERIFY(pane.contains(view.accessibleCharacterRect(bottom + 5).center()));
+    view.setFitToView(true);
+    QCOMPARE(view.panX(), 0.0);
+    QCOMPARE(view.panY(), 0.0);
+    QVERIFY(pane.contains(view.accessibleCharacterRect(right).center()));
+    QVERIFY(pane.contains(view.accessibleCharacterRect(bottom + 5).center()));
 }
 
 void TerminalKernelTest::pasteEncodingUsesRestoredTerminalModes()
@@ -2175,11 +2296,11 @@ void TerminalKernelTest::terminalViewCopySelectionStillUsesHostClipboard()
         subscription,
         QStringLiteral("copy-incarnation")));
     makeTerminalReady(registry, subscription);
-    const auto cell = kodosi::TerminalRasterizer::cellSize(
-        QFontDatabase::systemFont(QFontDatabase::FixedFont),
-        view.lineHeight());
-    const QPointF anchor(cell.width() * 0.5, cell.height() * 0.5);
-    const QPointF endpoint(cell.width() * 4.5, cell.height() * 0.5);
+    const QSizeF scaledCell(view.gridSize().width() / 80, view.gridSize().height() / 24);
+    const QPointF anchor(scaledCell.width() * view.viewportScale() * 0.5,
+        scaledCell.height() * view.viewportScale() * 0.5);
+    const QPointF endpoint(scaledCell.width() * view.viewportScale() * 4.5,
+        scaledCell.height() * view.viewportScale() * 0.5);
     QMouseEvent press(
         QEvent::MouseButtonPress,
         anchor,

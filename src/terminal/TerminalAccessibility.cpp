@@ -1,4 +1,5 @@
 #include "terminal/TerminalAccessibility.hpp"
+#include "accessibility/AccessibilityScope.hpp"
 #include "terminal/TerminalView.hpp"
 
 #include <QAccessible>
@@ -78,7 +79,10 @@ public:
                 || !rect().intersects(view->window()->geometry());
             result.active = view->hasActiveFocus();
         } else {
-            result.invalid = true;
+            result.invalid = object() == nullptr;
+            result.invisible = true;
+            result.offscreen = true;
+            result.disabled = true;
         }
         return result;
     }
@@ -170,7 +174,8 @@ public:
 private:
     TerminalView* terminalView() const
     {
-        return qobject_cast<TerminalView*>(object());
+        auto* view = qobject_cast<TerminalView*>(object());
+        return view != nullptr && !AccessibilityScope::isSuppressed(view) ? view : nullptr;
     }
 };
 

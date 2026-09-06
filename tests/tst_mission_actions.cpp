@@ -4,6 +4,15 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QQmlComponent>
+#include <QQmlEngine>
+#include <QQuickItem>
+#include <QQuickWindow>
+#include <QTemporaryDir>
+#include <memory>
 #include <QUuid>
 #include <QtTest/QTest>
 
@@ -57,6 +66,7 @@ private slots:
     void createsMissionWithExactSlugAndEntityReconciliation();
     void directedChatUsesOpaqueCurrentRecipientAuthority();
     void taskDraftUsesExactAssignmentDueAndRevisionClearing();
+    void invalidDueDateFieldCannotSubmitPreviousDate();
     void archiveAndRestoreUseTaskTransitions();
     void directCreateChatAndTaskCanRunConcurrently();
     void directSuccessRequiresExactProjection();
@@ -342,6 +352,7 @@ void seedTask(
     QVERIFY(!tasksCommand.isEmpty());
     detail.ingestRoomEvent(envelope({
         {QStringLiteral("type"), QStringLiteral("room.tasks.page")},
+        {QStringLiteral("snapshot"), QString(64, u'a')},
         {QStringLiteral("room_id"), QStringLiteral("mission")},
         {QStringLiteral("hydration_id"),
          tasksCommand.value(QStringLiteral("hydration_id"))},
@@ -1302,6 +1313,7 @@ void MissionActionsTest::recoveredTaskReceiptsWithoutIntentReconcile()
             const auto event = envelope({
                 {QStringLiteral("type"),
                  QStringLiteral("room.tasks.page")},
+                {QStringLiteral("snapshot"), QString(64, u'a')},
                 {QStringLiteral("room_id"),
                  QStringLiteral("mission")},
                 {QStringLiteral("hydration_id"),
@@ -1427,6 +1439,7 @@ void MissionActionsTest::recoveredTaskReceiptMalformedProjectionStaysUnknown()
         actions.ingestRoomEvent(envelope({
             {QStringLiteral("type"),
              QStringLiteral("room.tasks.page")},
+            {QStringLiteral("snapshot"), QString(64, u'a')},
             {QStringLiteral("room_id"), QStringLiteral("mission")},
             {QStringLiteral("hydration_id"),
              refresh.value(QStringLiteral("hydration_id"))},
@@ -1540,6 +1553,7 @@ void MissionActionsTest::retiredReceiptReplayRestoresRecovery()
         const auto event = envelope({
             {QStringLiteral("type"),
              QStringLiteral("room.tasks.page")},
+            {QStringLiteral("snapshot"), QString(64, u'a')},
             {QStringLiteral("room_id"), QStringLiteral("mission")},
             {QStringLiteral("hydration_id"),
              refresh.value(QStringLiteral("hydration_id"))},
@@ -1641,6 +1655,7 @@ void MissionActionsTest::retirementTombstonesAreBounded()
         actions.ingestRoomEvent(envelope({
             {QStringLiteral("type"),
              QStringLiteral("room.tasks.page")},
+            {QStringLiteral("snapshot"), QString(64, u'a')},
             {QStringLiteral("room_id"), missionId},
             {QStringLiteral("hydration_id"),
              refresh.value(QStringLiteral("hydration_id"))},
@@ -1753,6 +1768,7 @@ void MissionActionsTest::taskActionsUseNativeRevisionsAndIncarnations()
             const auto event = envelope({
                 {QStringLiteral("type"),
                  QStringLiteral("room.tasks.page")},
+                {QStringLiteral("snapshot"), QString(64, u'a')},
                 {QStringLiteral("room_id"),
                  QStringLiteral("mission")},
                 {QStringLiteral("hydration_id"),
@@ -2017,18 +2033,20 @@ void MissionActionsTest::reconcilesTaskAfterMissionSwitch()
         firstPageCommand.value(QStringLiteral("hydration_id"));
     actions.ingestRoomEvent(envelope({
         {QStringLiteral("type"), QStringLiteral("room.tasks.page")},
+        {QStringLiteral("snapshot"), QString(64, u'a')},
         {QStringLiteral("room_id"), QStringLiteral("mission")},
         {QStringLiteral("hydration_id"), hydrationId},
         {QStringLiteral("request_offset"), 0},
         {QStringLiteral("has_more"), true},
         {QStringLiteral("next_offset"), 1},
-        {QStringLiteral("tasks"), QJsonArray {}},
+        {QStringLiteral("tasks"), QJsonArray {taskEntity(QStringLiteral("unrelated"), QStringLiteral("Other task"))}},
     }));
     QCOMPARE(
         dispatcher.commands.back().value(QStringLiteral("offset")).toInteger(),
         1);
     actions.ingestRoomEvent(envelope({
         {QStringLiteral("type"), QStringLiteral("room.tasks.page")},
+        {QStringLiteral("snapshot"), QString(64, u'a')},
         {QStringLiteral("room_id"), QStringLiteral("mission")},
         {QStringLiteral("hydration_id"), hydrationId},
         {QStringLiteral("request_offset"), 1},
@@ -2556,6 +2574,85 @@ void MissionActionsTest::taskDraftUsesExactAssignmentDueAndRevisionClearing()
     QVERIFY(!actions.submitTaskCreate());
     QVERIFY(actions.taskCreateError().contains(
         QStringLiteral("future")));
+}
+
+void MissionActionsTest::invalidDueDateFieldCannotSubmitPreviousDate()
+{
+    FakeMissionMutationDispatcher dispatcher;
+    kodosi::MissionDirectoryModel directory(dispatcher);
+    seed(directory);
+    kodosi::PeopleModel people;
+    people.ingestAuthEvent(auth());
+    kodosi::SessionCatalogModel sessions;
+    kodosi::MissionDetailModel detail(dispatcher, directory);
+    detail.ingestAuthEvent(auth());
+    seedMembers(dispatcher, detail);
+    kodosi::MissionActions actions(dispatcher, directory, detail, people, sessions);
+    actions.ingestAuthEvent(auth());
+    actions.setTaskDraftTitle(QStringLiteral("Ship"));
+    actions.setTaskDraftHasDueAt(true);
+    QVERIFY(actions.taskCreateCanSubmit());
+
+    QTemporaryDir fixture;
+    QVERIFY(fixture.isValid());
+    const QDir source(QStringLiteral(KODOSI_SOURCE_DIR "/src/qml"));
+    for (const auto& relative : {QStringLiteral("People/TaskDueDateField.qml"),
+             QStringLiteral("Controls/KTextField.qml"), QStringLiteral("Controls/KFocusIndicator.qml")}) {
+        QVERIFY(QFile::copy(source.filePath(relative),
+            QDir(fixture.path()).filePath(QFileInfo(relative).fileName())));
+    }
+    QVERIFY(QFile::copy(QStringLiteral(KODOSI_SOURCE_DIR "/tests/qml/KodosiTheme.qml"),
+        QDir(fixture.path()).filePath(QStringLiteral("KodosiTheme.qml"))));
+    QFile qmldir(QDir(fixture.path()).filePath(QStringLiteral("qmldir")));
+    QVERIFY(qmldir.open(QIODevice::WriteOnly));
+    QVERIFY(qmldir.write("singleton KodosiTheme 1.0 KodosiTheme.qml\n") > 0);
+    qmldir.close();
+    qmlRegisterSingletonInstance("Kodosi.Models", 1, 0, "MissionActions", &actions);
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(R"(
+        import QtQuick
+        import QtQuick.Controls
+        import "."
+        ApplicationWindow {
+            width: 400; height: 120; visible: true
+            TaskDueDateField { anchors.centerIn: parent }
+        }
+    )", QUrl::fromLocalFile(QDir(fixture.path()).filePath(QStringLiteral("due.qml"))));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> root(component.create());
+    QVERIFY2(root != nullptr, qPrintable(component.errorString()));
+    auto* window = qobject_cast<QQuickWindow*>(root.get());
+    auto* field = root->findChild<QQuickItem*>(QStringLiteral("missions.task.due.date"));
+    QVERIFY(window && field);
+    window->requestActivate();
+    field->forceActiveFocus();
+    QTRY_VERIFY(field->hasActiveFocus());
+    const auto typeDate = [&](const QString& text) {
+        QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+        for (const auto letter : text) {
+            QTest::keyClick(window, static_cast<Qt::Key>(letter.toUpper().unicode()));
+        }
+    };
+    const auto before = dispatcher.commands.size();
+    for (const auto& invalid : {QStringLiteral("2030-02-31"), QStringLiteral("2030-13-01"),
+             QStringLiteral("bad-date")}) {
+        typeDate(invalid);
+        QCOMPARE(actions.taskDraftDueDateText(), invalid);
+        QVERIFY(!actions.taskDraftDueAt().isValid());
+        QVERIFY(!actions.taskCreateCanSubmit());
+        QVERIFY(!actions.submitTaskCreate());
+        QCOMPARE(dispatcher.commands.size(), before);
+        QVERIFY(!actions.taskDraftDueDateError().isEmpty());
+    }
+    typeDate(QStringLiteral("2030-02-28"));
+    QVERIFY(actions.taskDraftDueDateError().isEmpty());
+    QVERIFY(actions.taskCreateCanSubmit());
+    QVERIFY(actions.submitTaskCreate());
+    const auto submitted = QDateTime::fromString(
+        dispatcher.commands.back().value(QStringLiteral("due_at")).toString(), Qt::ISODateWithMs);
+    QCOMPARE(submitted.toLocalTime().date(), QDate(2030, 2, 28));
+    QCOMPARE(submitted.toLocalTime().time(), QTime(23, 59, 59));
 }
 
 void MissionActionsTest::archiveAndRestoreUseTaskTransitions()
@@ -3325,6 +3422,6 @@ void MissionActionsTest::preservesUnavailableRecipientsAndUsesTypedCandidates()
     QVERIFY(actions.chatCanSubmit());
 }
 
-QTEST_GUILESS_MAIN(MissionActionsTest)
+QTEST_MAIN(MissionActionsTest)
 
 #include "tst_mission_actions.moc"

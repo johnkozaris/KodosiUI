@@ -109,6 +109,8 @@ class MissionActions final : public QObject {
         READ taskDraftHasDueAt
         NOTIFY draftsChanged)
     Q_PROPERTY(QDateTime taskDraftDueAt READ taskDraftDueAt NOTIFY draftsChanged)
+    Q_PROPERTY(QString taskDraftDueDateText READ taskDraftDueDateText NOTIFY draftsChanged)
+    Q_PROPERTY(QString taskDraftDueDateError READ taskDraftDueDateError NOTIFY draftsChanged)
     Q_PROPERTY(
         QVariantList taskDraftAssignmentOptions
         READ taskDraftAssignmentOptions
@@ -192,6 +194,8 @@ public:
     [[nodiscard]] QString taskDraftAssignmentPresentationId() const;
     [[nodiscard]] bool taskDraftHasDueAt() const;
     [[nodiscard]] QDateTime taskDraftDueAt() const;
+    [[nodiscard]] QString taskDraftDueDateText() const;
+    [[nodiscard]] QString taskDraftDueDateError() const;
     [[nodiscard]] QVariantList taskDraftAssignmentOptions() const;
     [[nodiscard]] Outcome taskCreateOutcome() const;
     [[nodiscard]] QString taskCreateError() const;
@@ -230,6 +234,7 @@ public:
         const QString& presentationId);
     Q_INVOKABLE void setTaskDraftHasDueAt(bool enabled);
     Q_INVOKABLE void setTaskDraftDueAt(const QDateTime& dueAt);
+    Q_INVOKABLE void setTaskDraftDueDateText(const QString& text);
     Q_INVOKABLE [[nodiscard]] bool submitTaskCreate();
     Q_INVOKABLE [[nodiscard]] bool checkTaskCreate();
     Q_INVOKABLE [[nodiscard]] bool retryTaskCreate();
@@ -341,6 +346,7 @@ private:
         QString submittedAssignedSessionIncarnationId;
         QString submittedDueAt;
         QDateTime dueAt;
+        QString dueDateText;
         quint64 revision = 0;
         bool hasDueAt = false;
         DraftOutcome state;
@@ -375,6 +381,8 @@ private:
         QString expectedEntityId;
         QString expectedFingerprint;
         QString reconciliationHydrationId;
+        QString reconciliationSnapshot;
+        int reconciliationSnapshotRestarts = 0;
         QString expectedTaskStatus;
         QString expectedTaskResult;
         QString expectedAssignedSessionId;
@@ -463,6 +471,7 @@ private:
     void reconcileInvitation(const QJsonObject& invitation, bool outgoing);
     [[nodiscard]] bool requestReceiptRetirement(const QString& requestId);
     [[nodiscard]] bool refreshReceiptProjections(Pending& pending);
+    [[nodiscard]] bool dispatchTaskProjectionPage(Pending& pending);
     [[nodiscard]] bool refreshDirectProjection(Pending& pending);
     void finalizeReceipt(
         const QString& requestId,

@@ -140,6 +140,7 @@ public:
         CompletedAtRole,
         ResultEvidenceRole,
         ResultAuthorDisplayRole,
+        ContentUnavailableRole,
         UnknownStatusTitleRole,
         UnknownStatusMessageRole,
     };
@@ -171,6 +172,7 @@ private:
         QString resultAuthorDisplay;
         qint64 revision = 0;
         bool knownStatus = false;
+        bool contentUnavailable = false;
         QDateTime createdAt;
         QDateTime dueAt;
         QDateTime completedAt;
@@ -264,6 +266,7 @@ private:
         bool canInterrupt = false;
         bool dispatchSelected = false;
         int attentionCount = 0;
+        bool operator==(const Entry&) const = default;
     };
 
     QVector<Entry> m_entries;
@@ -430,11 +433,11 @@ class MissionDetailModel final : public QObject {
     Q_PROPERTY(
         QString selectedSessionDisplayName
         READ selectedSessionDisplayName
-        NOTIFY focusChanged)
+        NOTIFY focusPresentationChanged)
     Q_PROPERTY(
         QString selectedSessionStatus
         READ selectedSessionStatus
-        NOTIFY focusChanged)
+        NOTIFY focusPresentationChanged)
     Q_PROPERTY(
         QString selectedTerminalSessionId
         READ selectedTerminalSessionId
@@ -442,31 +445,31 @@ class MissionDetailModel final : public QObject {
     Q_PROPERTY(
         bool selectedCanOpenFullTerminal
         READ selectedCanOpenFullTerminal
-        NOTIFY focusChanged)
+        NOTIFY focusPresentationChanged)
     Q_PROPERTY(
         bool selectedCanToggleDispatch
         READ selectedCanToggleDispatch
-        NOTIFY focusChanged)
+        NOTIFY focusPresentationChanged)
     Q_PROPERTY(
         bool selectedCanSteer
         READ selectedCanSteer
-        NOTIFY focusChanged)
+        NOTIFY focusPresentationChanged)
     Q_PROPERTY(
         bool selectedCanInterrupt
         READ selectedCanInterrupt
-        NOTIFY focusChanged)
+        NOTIFY focusPresentationChanged)
     Q_PROPERTY(
         bool selectedDispatchSelected
         READ selectedDispatchSelected
-        NOTIFY focusChanged)
+        NOTIFY focusPresentationChanged)
     Q_PROPERTY(
         QString selectedDeliveryState
         READ selectedDeliveryState
-        NOTIFY focusChanged)
+        NOTIFY focusPresentationChanged)
     Q_PROPERTY(
         QString selectedDeliveryDetail
         READ selectedDeliveryDetail
-        NOTIFY focusChanged)
+        NOTIFY focusPresentationChanged)
 
 public:
     struct Dependencies {
@@ -548,6 +551,7 @@ public slots:
 signals:
     void stateChanged();
     void focusChanged();
+    void focusPresentationChanged();
     void decodeError(QString message);
 
 private:
@@ -559,6 +563,8 @@ private:
         qsizetype nextOffset = 0;
         int pageCount = 0;
         QVector<MissionTasksModel::Task> tasks;
+        QString snapshot;
+        int restartCount = 0;
     };
 
     struct Delivery {
@@ -615,10 +621,12 @@ private:
     void hydrationTimedOut();
     [[nodiscard]] bool beginFullHydration();
     [[nodiscard]] bool requestTaskPage();
+    void restartTaskHydration();
     void rebuildProjections();
     void rebuildAttention();
     [[nodiscard]] bool setAttentionPageOffset(int offset);
     void rebuildCrew();
+    void refreshCrewAttention();
     void rebuildMessagePresentation();
     void rebuildTaskPresentation();
     void reconcileFocus();
