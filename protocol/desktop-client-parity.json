@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "baseline": {
     "runtimeRepository": "johnkozaris/Kodosi",
-    "runtimeCommit": "a628cb339a5bedd97fa2e54d9432c3b38f6c43c1",
+    "runtimeCommit": "25fb76cab7ab084f24a80a30899a368e00752789",
     "swiftRepository": "johnkozaris/kodosiSwift",
-    "swiftCommit": "3ad7aec8bc5dd343292f07c2796ef3e620abf05d",
+    "swiftCommit": "6f566b813e320b0f0ee81b1537011b148b6afcfc",
     "ffiAbiVersion": 5,
     "desktopProtocolVersion": 38
   },
