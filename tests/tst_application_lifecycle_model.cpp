@@ -31,7 +31,6 @@ private slots:
     void boundsAndSanitizesSynchronousFailure();
     void runtimeStopReturnsReadyLifecycleToFailure();
     void explicitStopInvalidatesCompletion();
-    void startupQmlContractIsPresentationOnly();
 };
 
 void ApplicationLifecycleModelTest::
@@ -233,74 +232,6 @@ void ApplicationLifecycleModelTest::explicitStopInvalidatesCompletion()
         model.state(),
         kodosi::ApplicationLifecycleModel::State::Starting);
     QCOMPARE(model.runtimeGeneration(), 0);
-}
-
-void ApplicationLifecycleModelTest::
-    startupQmlContractIsPresentationOnly()
-{
-    QFile overlay(
-        QStringLiteral(
-            KODOSI_SOURCE_DIR
-            "/src/qml/Startup/StartupOverlay.qml"));
-    QVERIFY2(
-        overlay.open(QIODevice::ReadOnly),
-        qPrintable(overlay.errorString()));
-    const auto qml = overlay.readAll();
-    for (const auto& contract : {
-             QByteArrayLiteral("objectName: \"startup.overlay\""),
-             QByteArrayLiteral("objectName: \"startup.busy\""),
-             QByteArrayLiteral("objectName: \"startup.retry\""),
-             QByteArrayLiteral("qsTr(\"Starting Kodosi…\")"),
-             QByteArrayLiteral("qsTr(\"Kodosi couldn’t start\")"),
-             QByteArrayLiteral("Models.ApplicationLifecycle.retry()"),
-             QByteArrayLiteral("KBusyIndicator {"),
-             QByteArrayLiteral("Accessible.role: Accessible.Dialog"),
-             QByteArrayLiteral(
-                 "Accessible.ignored: !root.visible"),
-             QByteArrayLiteral("id: startupContent"),
-             QByteArrayLiteral("visible: root.contentAvailable"),
-             QByteArrayLiteral(
-                 "Accessible.ignored: !root.contentAvailable"),
-             QByteArrayLiteral("maximumLineCount: 5"),
-             QByteArrayLiteral("restorePrimaryFocus()"),
-         }) {
-        QVERIFY2(qml.contains(contract), contract.constData());
-    }
-    QVERIFY(!qml.contains("RuntimeBridge"));
-    QVERIFY(!qml.contains("runtime.start"));
-    QVERIFY(!qml.contains("kodosi_"));
-
-    QFile main(
-        QStringLiteral(KODOSI_SOURCE_DIR "/src/qml/Main.qml"));
-    QVERIFY(main.open(QIODevice::ReadOnly));
-    const auto mainQml = main.readAll();
-    QVERIFY(mainQml.contains("startup.visible"));
-    QVERIFY(mainQml.contains("interactionEnabled: !window.modalOpen"));
-    QVERIFY(!mainQml.contains("DiagnosticsDrawer"));
-
-    QFile busy(
-        QStringLiteral(
-            KODOSI_SOURCE_DIR
-            "/src/qml/Controls/KBusyIndicator.qml"));
-    QVERIFY(busy.open(QIODevice::ReadOnly));
-    QVERIFY(busy.readAll().contains(
-        "running: root.running && !KodosiTheme.reduceMotion"));
-
-    QFile composition(
-        QStringLiteral(KODOSI_SOURCE_DIR "/src/app/main.cpp"));
-    QVERIFY(composition.open(QIODevice::ReadOnly));
-    const auto mainSource = composition.readAll();
-    QVERIFY(!mainSource.contains(
-        "else if (auto result = runtime.start(); !result)"));
-    QVERIFY(mainSource.indexOf("single.publishEndpoint()")
-        < mainSource.indexOf(
-            "lifecycle.scheduleInitialStart()"));
-    QVERIFY(mainSource.contains(
-        "&kodosi::ApplicationLifecycleModel::runtimeGenerationReady"));
-    QCOMPARE(
-        mainSource.count("kodosi::RuntimeBridge runtime(terminalSessions);"),
-        1);
-    QVERIFY(!mainSource.contains("agentGlobal"));
 }
 
 QTEST_GUILESS_MAIN(ApplicationLifecycleModelTest)

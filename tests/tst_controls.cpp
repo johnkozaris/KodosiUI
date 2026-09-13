@@ -1,9 +1,14 @@
+#include "app/QmlModelTypes.hpp"
+#include <QTemporaryDir>
 #include <QGuiApplication>
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QtTest/QTest>
+#include <QtQml/QQmlExtensionPlugin>
+
+Q_IMPORT_QML_PLUGIN(KodosiPlugin)
 
 #include <memory>
 
@@ -15,12 +20,18 @@ private slots:
 
 void ControlsTest::secondaryTextAndKeyboardFocusAreVisible()
 {
+    QTemporaryDir directory;
+    kodosi::AppearanceModel appearance(
+        std::make_unique<QSettings>(directory.filePath(QStringLiteral("appearance.ini")), QSettings::IniFormat),
+        QDBusConnection(QStringLiteral("control-test-no-bus")),
+        { [] { return Qt::ColorScheme::Dark; }, [](Qt::ColorScheme) {}, [] {} }, false);
+    kodosi::qml::AppearanceModelForeign::instance = &appearance;
     QQmlEngine engine;
     QQmlComponent component(&engine);
     component.setData(R"(
         import QtQuick
         import QtQuick.Controls
-        import "Controls"
+        import Kodosi 1.0
         ApplicationWindow {
             width: 640; height: 240; visible: true
             KButton {
@@ -31,7 +42,7 @@ void ControlsTest::secondaryTextAndKeyboardFocusAreVisible()
                 secondaryText: "Everyone can read it"
             }
         }
-    )", QUrl::fromLocalFile(QStringLiteral(KODOSI_CONTROL_TEST_DIR "/test.qml")));
+    )", {});
     QVERIFY2(component.isReady(), qPrintable(component.errorString()));
     std::unique_ptr<QObject> root(component.create());
     QVERIFY2(root != nullptr, qPrintable(component.errorString()));

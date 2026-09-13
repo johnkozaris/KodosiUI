@@ -1,7 +1,7 @@
 # Kodosi Qt design
 
-Swift's current workflow is the reference; `UI-DONTS.md` contains binding visual
-constraints. Qt remains a native Linux presentation layer, not an agent dashboard.
+Swift's current workflow is the reference. These visual constraints are binding;
+Qt remains a native Linux presentation layer, not an agent dashboard.
 
 - Warm charcoal/cream surfaces and copper actions. Use the semantic colors in
   `src/qml/Theme/KodosiTheme.qml`; light and dark appearances share role names.
@@ -24,3 +24,16 @@ The current Qt theme uses 8/10/12/16px control/container radii; do not invent an
 radius family locally. Product-wide visual changes must update the shared design
 intent and implementation together. Avoid status furniture, decorative cards,
 backend controls, or repeated host metadata on every session row.
+
+## Avoid
+
+- Purple/blue gradients, gradient text, glass cards, colored-border cards, transparent
+  surfaces, thin outlined controls, grain-on-gradient overlays, and low contrast.
+- Emoji headings, decorative italic serifs, default Inter everywhere, the Space Grotesk
+  and Instrument Serif pairing, universal Lucide iconography, and stock web-kit styling.
+- Repetitive icon-box grids, headline badges, navigation counts, connection-status
+  furniture, a separate Attention sidebar, or repeated project/mode metadata per row.
+- Scroll-reveal animations, cursor-following effects, controls fading on hover,
+  inconsistent spacing, excessive em dashes, buzzwords, and helper copy for obvious actions.
+- Multiple Mission panes, controls exposing backend internals, or new interaction
+  patterns absent from the Swift client.

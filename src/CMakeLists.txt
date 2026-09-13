@@ -46,8 +46,8 @@ target_link_libraries(kodosi-runtime-bridge
 )
 
 qt_add_library(kodosi-desktop-integration STATIC
-    attention/TerminalNotifications.cpp
-    attention/TerminalNotifications.hpp
+    platform/TerminalNotifications.cpp
+    platform/TerminalNotifications.hpp
     platform/DesktopNotificationDriver.hpp
     platform/DesktopFileIntegration.cpp
     platform/DesktopFileIntegration.hpp
@@ -92,6 +92,9 @@ qt_add_library(kodosi-terminal-kernel STATIC
     terminal/TerminalSurfaceController.cpp
     terminal/TerminalSurfaceController.hpp
     terminal/TerminalView.cpp
+    terminal/TerminalViewAccessibility.cpp
+    terminal/TerminalViewInput.cpp
+    terminal/TerminalViewRendering.cpp
     terminal/TerminalView.hpp
 )
 
@@ -120,49 +123,20 @@ target_link_libraries(kodosi-qml-models
         kodosi-terminal-kernel
 )
 
-get_target_property(_qt_quick_include_dirs Qt6::Quick INTERFACE_INCLUDE_DIRECTORIES)
-foreach(_qt_quick_include_dir IN LISTS _qt_quick_include_dirs)
-    if(_qt_quick_include_dir MATCHES "/include/QtQuick$")
-        set(_qt_quick_private_root
-            "${_qt_quick_include_dir}/${Qt6_VERSION}"
-        )
-    endif()
-    get_target_property(_qt_qml_include_dirs Qt6::Qml INTERFACE_INCLUDE_DIRECTORIES)
-    foreach(_qt_qml_include_dir IN LISTS _qt_qml_include_dirs)
-        if(_qt_qml_include_dir MATCHES "/include/QtQml$")
-            set(_qt_qml_private_root "${_qt_qml_include_dir}/${Qt6_VERSION}")
-        endif()
-    endforeach()
-    get_target_property(_qt_core_include_dirs Qt6::Core INTERFACE_INCLUDE_DIRECTORIES)
-    foreach(_qt_core_include_dir IN LISTS _qt_core_include_dirs)
-        if(_qt_core_include_dir MATCHES "/include/QtCore$")
-            set(_qt_core_private_root "${_qt_core_include_dir}/${Qt6_VERSION}")
-        endif()
-    endforeach()
-    get_target_property(_qt_gui_include_dirs Qt6::Gui INTERFACE_INCLUDE_DIRECTORIES)
-    foreach(_qt_gui_include_dir IN LISTS _qt_gui_include_dirs)
-        if(_qt_gui_include_dir MATCHES "/include/QtGui$")
-            set(_qt_gui_private_root "${_qt_gui_include_dir}/${Qt6_VERSION}")
+target_include_directories(kodosi-terminal-kernel PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+foreach(module Core Gui Qml Quick)
+    get_target_property(module_includes Qt6::${module} INTERFACE_INCLUDE_DIRECTORIES)
+    foreach(include_dir IN LISTS module_includes)
+        if(include_dir MATCHES "/include/Qt${module}$")
+            set(private_root "${include_dir}/${Qt6_VERSION}")
+            if(NOT IS_DIRECTORY "${private_root}/Qt${module}")
+                message(FATAL_ERROR "Qt ${module} private headers are required for accessibility")
+            endif()
+            target_include_directories(kodosi-terminal-kernel PRIVATE
+                "${private_root}" "${private_root}/Qt${module}")
         endif()
     endforeach()
 endforeach()
-if(NOT _qt_quick_private_root)
-    message(FATAL_ERROR "Qt Quick private include root was not found for accessibility enrollment")
-endif()
-
-target_include_directories(kodosi-terminal-kernel
-    PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-    PRIVATE
-        "${_qt_quick_private_root}"
-        "${_qt_quick_private_root}/QtQuick"
-        "${_qt_qml_private_root}"
-        "${_qt_qml_private_root}/QtQml"
-        "${_qt_core_private_root}"
-        "${_qt_core_private_root}/QtCore"
-        "${_qt_gui_private_root}"
-        "${_qt_gui_private_root}/QtGui"
-)
 
 target_link_libraries(kodosi-terminal-kernel
     PUBLIC
@@ -177,35 +151,6 @@ target_link_libraries(kodosi-terminal-kernel
 
 qt_add_executable(kodosi-qt
     app/main.cpp
-)
-
-qt_add_library(kodosi-ui-probe-core STATIC
-    ui_probe/AtSpiProbe.cpp
-    ui_probe/AtSpiProbe.hpp
-    ui_probe/InputAdapter.cpp
-    ui_probe/InputAdapter.hpp
-    ui_probe/PortalScreenshot.cpp
-)
-
-target_include_directories(kodosi-ui-probe-core
-    PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-)
-
-target_link_libraries(kodosi-ui-probe-core
-    PUBLIC
-        Qt6::Core
-        Qt6::DBus
-        Qt6::Network
-)
-
-qt_add_executable(kodosi-ui-probe
-    ui_probe/main.cpp
-)
-
-target_link_libraries(kodosi-ui-probe
-    PRIVATE
-        kodosi-ui-probe-core
 )
 
 qt_add_library(kodosi-ui STATIC)
@@ -299,34 +244,9 @@ target_compile_definitions(kodosi-terminal-kernel
         QT_NO_URL_CAST_FROM_STRING
 )
 target_compile_definitions(kodosi-qt PRIVATE QT_NO_CAST_FROM_ASCII QT_NO_CAST_TO_ASCII)
-target_compile_definitions(kodosi-ui-probe-core
-    PUBLIC
-        QT_NO_CAST_FROM_ASCII
-        QT_NO_CAST_TO_ASCII
-        QT_NO_URL_CAST_FROM_STRING
-)
-target_compile_definitions(kodosi-ui-probe
-    PRIVATE
-        QT_NO_CAST_FROM_ASCII
-        QT_NO_CAST_TO_ASCII
-        QT_NO_URL_CAST_FROM_STRING
-)
-
-if(MSVC)
-    target_compile_options(kodosi-runtime-bridge PRIVATE /W4 /WX /permissive-)
-    target_compile_options(kodosi-desktop-integration PRIVATE /W4 /WX /permissive-)
-    target_compile_options(kodosi-terminal-kernel PRIVATE /W4 /WX /permissive-)
-    target_compile_options(kodosi-qt PRIVATE /W4 /WX /permissive-)
-    target_compile_options(kodosi-ui-probe-core PRIVATE /W4 /WX /permissive-)
-    target_compile_options(kodosi-ui-probe PRIVATE /W4 /WX /permissive-)
-else()
-    target_compile_options(kodosi-runtime-bridge PRIVATE -Wall -Wextra -Wpedantic -Werror)
-    target_compile_options(kodosi-desktop-integration PRIVATE -Wall -Wextra -Wpedantic -Werror)
-    target_compile_options(kodosi-terminal-kernel PRIVATE -Wall -Wextra -Wpedantic -Werror)
-    target_compile_options(kodosi-qt PRIVATE -Wall -Wextra -Wpedantic -Werror)
-    target_compile_options(kodosi-ui-probe-core PRIVATE -Wall -Wextra -Wpedantic -Werror)
-    target_compile_options(kodosi-ui-probe PRIVATE -Wall -Wextra -Wpedantic -Werror)
-endif()
+foreach(target kodosi-runtime-bridge kodosi-desktop-integration kodosi-terminal-kernel kodosi-qt)
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endforeach()
 
 install(TARGETS kodosi-qt
     BUNDLE DESTINATION .

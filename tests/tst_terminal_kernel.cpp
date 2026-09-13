@@ -314,7 +314,7 @@ private slots:
     void keyEncodingUsesRestoredTerminalModes();
     void mouseEncodingUsesRestoredTerminalModes();
     void terminalViewRoutesTrackedMouseToPty();
-    void remoteGridFitsPansAndMapsAccessibleMouseCoordinates();
+    void remoteGridFitsAndMapsAccessibleMouseCoordinates();
     void terminalViewPreservesControlAndEscapeKeys();
     void runtimeBellAndTitleKeepTerminalAvailable();
     void pasteEncodingUsesRestoredTerminalModes();
@@ -1018,7 +1018,7 @@ void TerminalKernelTest::terminalViewRoutesTrackedMouseToPty()
         }));
 }
 
-void TerminalKernelTest::remoteGridFitsPansAndMapsAccessibleMouseCoordinates()
+void TerminalKernelTest::remoteGridFitsAndMapsAccessibleMouseCoordinates()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
@@ -1061,10 +1061,8 @@ void TerminalKernelTest::remoteGridFitsPansAndMapsAccessibleMouseCoordinates()
     click(right);
     QCOMPARE(dispatcher.inputCommands.constLast(), QByteArrayLiteral("\x1b[<0;116;1m"));
     QVERIFY(std::ranges::none_of(dispatcher.terminalCommands, [](const QJsonObject& command) {
-        return command.value(QStringLiteral("type")) == QStringLiteral("terminal.resize");
+        return command.value(QStringLiteral("type")) == QStringLiteral("session.resize");
     }));
-
-
 }
 
 void TerminalKernelTest::pasteEncodingUsesRestoredTerminalModes()

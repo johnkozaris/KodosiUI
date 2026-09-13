@@ -32,7 +32,7 @@ find_program(DBUS_RUN_SESSION_EXECUTABLE dbus-run-session REQUIRED)
 execute_process(
     COMMAND
         "${Python3_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/source-date-epoch.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/release/source-date-epoch.py"
         --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
     OUTPUT_VARIABLE KODOSI_SOURCE_DATE_EPOCH
     OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -94,7 +94,7 @@ endif()
 set(
     KODOSI_VERIFY_PINNED_SOURCES_COMMAND
     "${Python3_EXECUTABLE}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify-pinned-checkouts.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/release/verify-pinned-checkouts.py"
     --dependencies "${CMAKE_CURRENT_SOURCE_DIR}/dependencies.lock.json"
     --runtime-root "${KODOSI_RUNTIME_ROOT}"
     --ghostty-package-root "${KODOSI_GHOSTTY_ROOT}"
@@ -161,7 +161,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
     add_custom_target(kodosi-native-license-evidence ALL
         COMMAND
             "${Python3_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify-native-license-evidence.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/release/verify-native-license-evidence.py"
             --manifest "${KODOSI_NATIVE_LICENSE_MANIFEST}"
             --license-root "${CMAKE_CURRENT_SOURCE_DIR}/packaging/licenses"
             --qt-root "${CMAKE_PREFIX_PATH}"
@@ -196,7 +196,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
         COMMAND ${KODOSI_VERIFY_PINNED_SOURCES_COMMAND}
         COMMAND
             "${Python3_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate-source-identity.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/release/generate-source-identity.py"
             --client-root "${CMAKE_CURRENT_SOURCE_DIR}"
             --runtime-root "${KODOSI_RUNTIME_ROOT}"
             --ghostty-package-root "${KODOSI_GHOSTTY_ROOT}"
@@ -213,7 +213,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
         COMMAND ${KODOSI_VERIFY_PINNED_SOURCES_COMMAND}
         COMMAND
             "${Python3_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate-rust-license-inventory.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/release/generate-rust-license-inventory.py"
             --manifest "${KODOSI_RUNTIME_MANIFEST}"
             --output-dir "${KODOSI_RUST_LICENSE_DIR}"
             --overrides
@@ -262,7 +262,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
         execute_process(
             COMMAND
                 \"${Python3_EXECUTABLE}\"
-                \"${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify-pinned-checkouts.py\"
+                \"${CMAKE_CURRENT_SOURCE_DIR}/scripts/release/verify-pinned-checkouts.py\"
                 --dependencies
                 \"${CMAKE_CURRENT_SOURCE_DIR}/dependencies.lock.json\"
                 --runtime-root
@@ -363,7 +363,7 @@ set(CPACK_PACKAGE_NAME "kodosi")
 set(CPACK_PACKAGE_VENDOR "Kodosi")
 set(CPACK_PACKAGE_CONTACT "support@kodosi.com")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    "Local-first mission control for coding agents"
+    "Local terminals with trusted device and friend access"
 )
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")

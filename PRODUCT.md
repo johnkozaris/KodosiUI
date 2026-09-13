@@ -8,8 +8,9 @@ adaptive
 
 ## Stack
 
-Qt Quick 6.11.2 and C++23 over the Kodosi Rust runtime, desktop protocol 39 and
-C ABI 6. Swift is the macOS client; Qt is the Linux client.
+Qt Quick and C++ over the shared Kodosi Rust runtime. Qt is the Linux client; Swift
+is the macOS client. Current versions and contracts live in the build/protocol files.
+Cross-platform product direction lives in `../Kodosi/PRODUCT.md`.
 
 ## Users
 
@@ -19,45 +20,60 @@ work from another approved device or share selected terminals with trusted peopl
 ## Product Purpose
 
 A small terminal workbench: local terminals, approved personal devices, explicit
-full-control friend sharing, and Missions as named project groups with people and
-attached terminals. Native provider history supplies conversation preview/resume.
-Configuration files open in the user's existing editor; Kodosi does not manage or
-erase provider memory, history, or configuration.
+full-control friend sharing, and Missions as named groups of people and terminals.
+Native provider history supplies read-only conversation preview and explicit resume.
+Original provider configuration files open in the user's editor.
+
+The September 2026 pivot changed the product substantially. This brief is a current
+direction, not a complete specification or proof that all workflows are solved.
+Creative thinking is welcome: question inherited assumptions, identify missing pieces,
+and find better, simpler implementations. Use `/code-cleanup:code-cleanup`,
+`/code-review`, and `/simplify` as appropriate, not a separate audit framework in these
+docs. Existing code and candidate lists are starting evidence, not predetermined answers.
 
 ## Operating Context
 
-- Local processes continue when a view or window closes; explicit Stop or Quit ends them.
+- Closing a view or window leaves its process running. Stop ends that session;
+  quitting its host ends local processes, not sessions hosted elsewhere.
 - A shared shell runs with the host OS user's capabilities, not a project sandbox.
-- Terminal control does not confer identity, device, friend-set, or Mission administration.
+- Terminal control does not confer identity or sharing administration.
 - Mission membership is independent of terminal sharing.
-- Agent-to-agent messaging and task-board design are future work, not dormant UI.
 - Linux GNOME/KDE use Wayland or X11; macOS uses the native Swift client.
+- Agent messaging and task boards are outside today's scope. Explore them separately
+  if the product direction changes rather than reviving dormant old implementations.
 
 ## Capabilities and Constraints
 
-Keep **Sessions**, **Missions**, and **Stage**. Preserve native terminal input,
-checkpoint ordering, screen-reader text, IME, window behavior, and adaptive tiling.
-Keep execution and cryptographic authority in Rust. QML is presentation only.
+Sessions, Missions, and the terminal stage are the current navigation model. Their
+presentation and implementation can improve as the product develops. Native input,
+checkpoint ordering, screen-reader text, IME, window behavior, and useful tiling matter.
+Rust owns execution and cryptographic authority; Qt/QML presents and adapts the native
+experience rather than becoming a competing process or authorization owner.
 
-Do not reintroduce access tiers, semantic steering, approval interception,
-Agent Intelligence/Attention dashboards, provider catalogs, Mission chat/tasks,
-or compatibility with the removed product. No old feature should remain as a
-hidden button, reserved schema, or no-op command.
+Access tiers, semantic steering, approval interception, agent-intelligence dashboards,
+and provider/plugin management are outside the current focus. Do not preserve their
+old machinery merely because it still compiles or has tests. Equally, do not remove a
+useful current native capability just because its implementation predates the pivot.
+
+Protect consent, identity pins, provider files, credentials, histories, and user working
+data. Architectural flexibility is not permission to weaken those boundaries.
 
 ## Brand Commitments
 
 Warm near-black surfaces, restrained copper accents, compact authored controls,
 subtle seams, and a workbench rather than administration-dashboard character.
-Follow `UI-DONTS.md`; do not use the reduction as an unrelated redesign.
+`DESIGN.md` describes the current visual language. Improve usability thoughtfully
+without turning maintenance into an unrelated visual redesign.
 
 ## Accessibility & Inclusion
 
-Keyboard navigation, screen-reader semantics, stable accessible IDs, visible
-focus, reduced motion, and sufficient contrast remain requirements. Terminal
-content uses its native accessible text interface, never a QML copy.
+Keyboard navigation, screen-reader semantics, visible focus, reduced motion, and
+sufficient contrast are part of the native experience. Use the terminal's accessible
+text boundary rather than an independent QML copy of terminal state. Reassess gaps
+and incomplete interactions rather than assuming existing tests settle the design.
 
 ## Evidence
 
 The product is unlaunched. Do not invent usage, release, parity, or live-desktop
 validation claims. Source/model checks, native compiled tests, and real desktop
-interaction evidence are separate.
+interaction evidence establish different things.

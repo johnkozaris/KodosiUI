@@ -1,4 +1,4 @@
-#include "attention/TerminalNotifications.hpp"
+#include "platform/TerminalNotifications.hpp"
 
 #include <QByteArray>
 #include <QJsonDocument>

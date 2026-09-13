@@ -2,7 +2,7 @@
 
 Read `README.md`, `PRODUCT.md`, `dependencies.lock.json`, and
 `../Kodosi/protocol/desktop-runtime-authority.json` before changing runtime integration.
-Read `UI-DONTS.md` before visual changes.
+Read `DESIGN.md` before visual changes.
 
 ## Ownership
 
@@ -28,7 +28,7 @@ accessibility, localization, file picking, and desktop notifications.
 - Provider conversation/configuration reads are on demand. Never mutate or erase
   provider files, memory, or history.
 - Use the pinned Linux VT archive from `../kodosi-ghostty/LinuxGhostty.ref`.
-  Ghostty remains unchanged; do not infer its source from the macOS pin.
+  Do not infer its source from the macOS pin.
 - Keep explanatory comments out of source; preserve functional tool directives and license notices.
 - Dependencies stay project-local. Prefer Qt and the standard library.
 - The dirty-runtime development override is not release provenance. Immutable
@@ -42,3 +42,7 @@ must not be replaced with no-op production paths.
 
 Interactive QML objects need stable dotted `objectName`, matching `Accessible.id`
 where supported, and an accessible name. User-visible text uses `qsTr`.
+
+Validate live workflows manually with available agent skills and tools (Peekaboo,
+curl, seam probes, or native platform tools). Do not add automated smoke drivers.
+Keep focused regression tests for contracts, security, lifecycle, and native behavior.

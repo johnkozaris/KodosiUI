@@ -255,6 +255,7 @@ private:
     void pasteClipboard();
     [[nodiscard]] bool sendKey(QKeyEvent* event, TerminalKeyAction action);
     [[nodiscard]] bool enqueueInput(QByteArray bytes);
+    static constexpr int inputBackoffMilliseconds[] {4, 8, 16, 32, 64};
     void drainInputQueue();
     void sendFocus(bool focused);
     void dispatchFocus(FocusOperation operation);

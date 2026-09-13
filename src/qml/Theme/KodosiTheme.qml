@@ -1,6 +1,5 @@
 pragma Singleton
 
-import Kodosi 1.0
 import QtQuick
 import Kodosi.Models 1.0 as Models
 

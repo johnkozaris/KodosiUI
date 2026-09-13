@@ -58,10 +58,6 @@
     "ffiAbiVersion": 6,
     "desktopProtocolVersion": 39
   },
-  "swiftParityBaseline": {
-    "repository": "johnkozaris/kodosiSwift",
-    "commit": "5f7d86b6c5de6f7c34785a67975c77bd9c0fbf18"
-  },
   "ghostty": {
     "repository": "ghostty-org/ghostty",
     "commit": "9bbb9b24680358c939846b79a519ce10f7638d1f",
@@ -69,11 +65,5 @@
     "packageCommit": "c1ab17147bcf1780f1f473e75205892328e98218",
     "linuxVtArchiveSha256": "1eee386d470ef24c122cca4432e4d4a35835549404bb874153e7005159ac2d7e",
     "versioning": "unversioned-libghostty-tip"
-  },
-  "packaging": {
-    "archLinuxContainer": {
-      "image": "archlinux",
-      "digest": "sha256:b860afd5823683f7ea389ba5f00d812f4fe55f6f286dea329d2abeefa535e309"
-    }
   }
 }

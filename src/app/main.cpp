@@ -2,7 +2,7 @@
 #include "app/DeepLinkRouter.hpp"
 #include "app/QmlModelTypes.hpp"
 #include "app/SingleInstanceGuard.hpp"
-#include "attention/TerminalNotifications.hpp"
+#include "platform/TerminalNotifications.hpp"
 #include "bridge/RuntimeBridge.hpp"
 #include "logging/ApplicationLogStore.hpp"
 #include "models/AppearanceModel.hpp"

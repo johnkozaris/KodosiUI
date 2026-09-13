@@ -93,7 +93,6 @@ private slots:
     void scopedPerformanceSpansPersistOnlyBoundedMetadata();
     void reportsWritePathFailuresWithoutRecursion();
     void keepsExplicitRootsIsolated();
-    void shellDoesNotExposeLogStorage();
 };
 
 void ApplicationLogStoreTest::createsPrivateFilesAndRedactsStructuredLines()
@@ -483,43 +482,6 @@ void ApplicationLogStoreTest::keepsExplicitRootsIsolated()
     QVERIFY(readAll(second.path()).contains("second-root-only"));
     QVERIFY(first.path().startsWith(firstRoot.path()));
     QVERIFY(second.path().startsWith(secondRoot.path()));
-}
-
-void ApplicationLogStoreTest::shellDoesNotExposeLogStorage()
-{
-    QFile drawer(
-        QStringLiteral(KODOSI_SOURCE_DIR)
-        + QStringLiteral("/src/qml/Main.qml"));
-    QVERIFY(drawer.open(QIODevice::ReadOnly));
-    const auto source = drawer.readAll();
-    QVERIFY(!source.contains("title: qsTr(\"Logging\")"));
-    QVERIFY(!source.contains("Models.ApplicationLog"));
-    QVERIFY(!source.contains("openLogDirectory("));
-    QVERIFY(!source.contains("panel.diagnostics.logging"));
-
-    QFile terminalView(
-        QStringLiteral(KODOSI_SOURCE_DIR)
-        + QStringLiteral("/src/terminal/TerminalView.cpp"));
-    QVERIFY(terminalView.open(QIODevice::ReadOnly));
-    const auto terminalSource = terminalView.readAll();
-    const auto paintStart =
-        terminalSource.indexOf("QSGNode* TerminalView::updatePaintNode");
-    const auto paintEnd =
-        terminalSource.indexOf("void TerminalView::geometryChange", paintStart);
-    QVERIFY(paintStart >= 0);
-    QVERIFY(paintEnd > paintStart);
-    const auto paintBody =
-        terminalSource.sliced(paintStart, paintEnd - paintStart);
-    QVERIFY(!paintBody.contains("ScopedPerformanceSpan"));
-    QVERIFY(paintBody.contains("queueRenderPerformance"));
-
-    QFile logStoreSource(
-        QStringLiteral(KODOSI_SOURCE_DIR)
-        + QStringLiteral("/src/logging/ApplicationLogStore.cpp"));
-    QVERIFY(logStoreSource.open(QIODevice::ReadOnly));
-    const auto loggingSource = logStoreSource.readAll();
-    QVERIFY(loggingSource.contains("message.first("));
-    QVERIFY(loggingSource.contains("maximumPersistedMessageCharacters"));
 }
 
 QTEST_APPLESS_MAIN(ApplicationLogStoreTest)

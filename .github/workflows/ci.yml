@@ -40,15 +40,6 @@ jobs:
           path: Kodosi
           persist-credentials: false
 
-      - name: Check out pinned Swift parity baseline
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: johnkozaris/kodosiSwift
-          ref: 5f7d86b6c5de6f7c34785a67975c77bd9c0fbf18
-          token: ${{ secrets.KODOSI_REPOSITORY_TOKEN }}
-          path: kodosiSwift
-          persist-credentials: false
-
       - name: Check out pinned Ghostty package
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -121,8 +112,8 @@ jobs:
       - name: Repackage same build tree reproducibly
         run: just package-repeatability-existing
 
-      - name: Build and install Manjaro package
-        run: ./scripts/build-manjaro-package.sh
+      - name: Build Arch-compatible package
+        run: ./scripts/release/build-arch-package.sh
 
       - name: Generate and verify deterministic release manifest
         run: |
