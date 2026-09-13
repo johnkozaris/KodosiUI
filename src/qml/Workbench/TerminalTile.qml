@@ -1,741 +1,271 @@
+import Kodosi 1.0
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 import Kodosi.Models 1.0 as Models
 
 Item {
     id: root
 
-    required property string sessionId
-    property string sessionName
-    property string project
-    property string status
-    property string terminalError
-    property string terminalOperationError
-    property string kind
-    property double approvalNow: Date.now()
-    property bool canRetainPresentation: false
-    property bool isStageReady: false
-    property bool focusedSizeAuthority: false
     property bool accessibilitySuppressed: false
-    readonly property bool active:
-        Models.DesktopState.selectedSessionId === sessionId
-    readonly property bool focusMode:
-        Models.DesktopState.stageLayoutMode
-            === Models.DesktopState.Focus
-    readonly property int chromeTier:
-        width < 360 ? 0 : width < 640 ? 1 : 2
-    property var approval: ({})
-    readonly property string projectLabel: {
-        const normalized = project.replace(/\/+$/, "")
-        const segments = normalized.split("/")
-        const name = segments.length > 0
-            ? segments[segments.length - 1]
-            : ""
-        return name.length > 0 ? "~/" + name : project
-    }
-    readonly property color statusColor:
-        status === "active"
-        ? KodosiTheme.success
-        : status === "blocked"
-          ? KodosiTheme.danger
-          : status === "reconnecting"
-            ? KodosiTheme.reconnecting
-            : status === "waiting"
-              ? KodosiTheme.warning
-              : KodosiTheme.textTertiary
-    readonly property string terminalAccessibilityStatus:
-        terminalError.length > 0
-        ? qsTr("Terminal unavailable: %1").arg(terminalError)
-        : !terminal.terminalReady
-          ? qsTr("Connecting terminal")
-          : status.length > 0
-            ? qsTr("Terminal status: %1").arg(status)
-            : qsTr("Terminal ready")
-    readonly property string value: terminalAccessibilityStatus
-    readonly property string sharePhase:
-        Models.SessionShareScope.stateRevision >= 0
-        ? Models.SessionShareScope.phase(sessionId)
-        : "idle"
-    readonly property bool canShare:
-        Models.SessionShareScope.canChange(sessionId)
-        || sharePhase !== "idle"
+    readonly property bool active: Models.DesktopState.selectedSessionId === sessionId
+    property bool componentReady: false
+    property bool focusedSizeAuthority: false
+    required property string sessionId
+    property string sessionName: ""
+    property string headerTitle: ""
+    property string program: ""
+    property string terminalError: ""
+    property string terminalOperationError: ""
+
     signal inspectSessionRequested(string sessionId, string sessionName)
     signal shareSessionRequested(string sessionId, string sessionName)
 
-    objectName: "stage.tile." + sessionId
+    function bindTerminal() {
+        terminalError = "";
+        if (!Models.TerminalSurfaces.bind(terminal, sessionId))
+            terminalError = qsTr("This session is no longer available.");
+    }
+    function forceTerminalFocus() {
+        if (visible && enabled)
+            terminal.forceActiveFocus(Qt.ShortcutFocusReason);
+    }
+    function refreshSession() {
+        const session = Models.Sessions.presentationForSession(sessionId);
+        sessionName = session.name || qsTr("Terminal");
+        headerTitle = session.headerTitle || sessionName;
+        program = session.program || "";
+    }
+
     Accessible.id: objectName
     Accessible.ignored: accessibilitySuppressed || !visible
+    Accessible.name: qsTr("%1 terminal").arg(sessionName)
     Accessible.role: Accessible.Pane
-    Accessible.name: qsTr("%1 terminal").arg(
-        sessionName.length > 0 ? sessionName : sessionId)
-    Accessible.description: terminalAccessibilityStatus
-    Accessible.selected: active
-    Accessible.readOnly: terminal.readOnly
+    objectName: "stage.tile." + sessionId
 
-    function requestClose() {
-        if (Models.SessionActions.closeConfirmationSessionId
-                !== sessionId) {
-            Models.SessionActions.requestCloseConfirmation(sessionId)
-        } else {
-            Models.SessionActions.confirmClose(sessionId)
-        }
-    }
-
-    function refreshPresentation() {
-        const presentation =
-            Models.Sessions.presentationForSession(sessionId)
-        if (presentation.sessionId !== sessionId)
-            return
-        sessionName = presentation.name
-        project = presentation.project
-        status = presentation.status
-        kind = presentation.kind
-        canRetainPresentation = presentation.canRetainPresentation
-        isStageReady = presentation.isStageReady
-    }
-
-    function synchronizeTerminal() {
-        terminalError = ""
-        terminalOperationError = ""
-        if (sessionId.length === 0) {
-            Models.TerminalSurfaces.detach(terminal)
-            return
-        }
-        if (!Models.TerminalSurfaces.bind(terminal, sessionId))
-            terminalError = qsTr("This session is no longer available.")
-    }
-
-    function refreshApproval() {
-        approval = Models.PendingPermissions.presentationForSession(sessionId)
-    }
-
-    function approvalCountdown() {
-        if (approval.deadline === undefined)
-            return ""
-        const remaining = Math.max(
-            0,
-            Math.ceil(
-                (new Date(approval.deadline).getTime() - approvalNow)
-                    / 1000))
-        return qsTr("%1s").arg(remaining)
-    }
-
-    function forceTerminalFocus() {
-        if (visible && enabled && terminal.visible && terminal.enabled)
-            terminal.forceActiveFocus(Qt.ShortcutFocusReason)
-    }
-
-    onSessionIdChanged: {
-        refreshPresentation()
-        Qt.callLater(synchronizeTerminal)
-    }
     Component.onCompleted: {
-        refreshPresentation()
-        refreshApproval()
-        Qt.callLater(synchronizeTerminal)
+        componentReady = true;
+        refreshSession();
+        bindTerminal();
     }
     Component.onDestruction: Models.TerminalSurfaces.detach(terminal)
+    onSessionIdChanged: {
+        if (componentReady) {
+            Models.TerminalSurfaces.detach(terminal);
+            refreshSession();
+            bindTerminal();
+        }
+    }
 
     Connections {
+        function onModelReset() {
+            root.refreshSession();
+        }
+
         target: Models.Sessions
-
-        function onModelReset() {
-            root.refreshPresentation()
-        }
-
-        function onDataChanged() {
-            root.refreshPresentation()
-        }
-
-        function onAuthorityStateChanged() {
-            root.refreshPresentation()
-        }
     }
-
-    Timer {
-        interval: 1000
-        repeat: true
-        running: root.approval.identityToken !== undefined
-            && root.chromeTier > 0
-        onTriggered: root.approvalNow = Date.now()
-    }
-
     Connections {
-        target: Models.PendingPermissions
-
-        function onModelReset() {
-            root.refreshApproval()
+        function onAttachmentReady(surface, id) {
+            if (surface === terminal && id === root.sessionId)
+                root.terminalError = "";
+        }
+        function onAttachmentRejected(surface, id, reason) {
+            if (surface === terminal && id === root.sessionId)
+                root.terminalError = reason;
         }
 
-        function onRowsInserted() {
-            root.refreshApproval()
-        }
-
-        function onRowsRemoved() {
-            root.refreshApproval()
-        }
-
-        function onDataChanged() {
-            root.refreshApproval()
-        }
-    }
-
-    Connections {
         target: Models.TerminalSurfaces
-
-        function onAttachmentReady(surface, readySessionId) {
-            if (surface === terminal && readySessionId === root.sessionId)
-                root.terminalError = ""
-        }
-
-        function onAttachmentRejected(surface, rejectedSessionId, reason) {
-            if (surface === terminal && rejectedSessionId === root.sessionId)
-                root.terminalError = reason
-        }
     }
-
     Rectangle {
         anchors.fill: parent
-        radius: KodosiTheme.radiusSmall
-        color: KodosiTheme.surfaceElevated
+        color: KodosiTheme.terminal
     }
-
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 1
         spacing: 0
 
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 34
-            color: KodosiTheme.surface
+            color: root.active ? KodosiTheme.surfaceRaised : KodosiTheme.surface
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: KodosiTheme.spacing2
-                anchors.rightMargin: KodosiTheme.spacing2
-                spacing: 2
+                anchors.leftMargin: 10
+                anchors.rightMargin: 6
+                spacing: 6
 
-                KIconButton {
-                    objectName: "stage.tile." + root.sessionId + ".remove"
-                    Accessible.id: objectName
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
-                    glyph: "close"
-                    size: 26
-                    Accessible.name: qsTr("Remove %1 from Stage").arg(
-                        root.sessionName)
-                    onClicked: {
-                        Models.TerminalSurfaces.detach(terminal)
-                        Models.DesktopState.unstageSession(root.sessionId)
-                    }
-                }
-
-                KButton {
-                    objectName: "stage.tile." + root.sessionId + ".select"
-                    Accessible.id: objectName
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
+                ProviderIcon { program: root.program; Layout.preferredWidth: 18; Layout.preferredHeight: 18 }
+                PlainLabel {
                     Layout.fillWidth: true
-                    Layout.minimumWidth: 24
-                    compact: true
-                    variant: "quiet"
-                    uppercase: false
-                    contentLeftAligned: true
-                    showLeadingDot: true
-                    leadingDotColor: root.statusColor
-                    text: root.sessionName.length > 0
-                        ? root.sessionName
-                        : qsTr("Session")
-                    secondaryText: root.chromeTier === 2
-                        ? (terminal.terminalTitle.length > 0 ? terminal.terminalTitle : root.projectLabel)
-                        : ""
-                    Accessible.name: qsTr("Select session %1").arg(
-                        root.sessionName.length > 0
-                        ? root.sessionName
-                        : qsTr("Session"))
-                    Accessible.selected: root.active
-                    onClicked:
-                        Models.DesktopState.selectSession(root.sessionId)
+                    color: KodosiTheme.textPrimary
+                    elide: Text.ElideRight
+                    font.pixelSize: 12
+                    text: root.headerTitle
                 }
-
                 KIconButton {
-                    objectName: "stage.tile." + root.sessionId + ".inspect"
                     Accessible.id: objectName
-                    Accessible.ignored: root.accessibilitySuppressed || !visible
-                    glyph: "intel"
-                    size: 28
-                    visible: root.chromeTier >= 1
-                    Accessible.name: qsTr("Inspect %1").arg(root.sessionName)
+                    Accessible.name: qsTr("Session details")
+                    glyph: "document"
+                    objectName: root.objectName + ".details"
+
                     onClicked: root.inspectSessionRequested(root.sessionId, root.sessionName)
                 }
-
                 KIconButton {
-                    objectName: "stage.tile." + root.sessionId + ".interrupt"
                     Accessible.id: objectName
-                    Accessible.ignored: root.accessibilitySuppressed || !visible
-                    glyph: "interrupt"
-                    size: 28
-                    visible: root.chromeTier >= 1
-                        && Models.SessionActions.availabilityRevision >= 0
-                        && Models.SessionActions.canInterrupt(root.sessionId)
-                    Accessible.name: qsTr("Interrupt %1").arg(root.sessionName)
-                    onClicked: Models.SessionActions.interrupt(root.sessionId)
-                }
+                    Accessible.name: root.focusedSizeAuthority ? qsTr("Return to tiles") : qsTr("Maximize")
+                    glyph: "focus"
+                    objectName: root.objectName + ".focus"
 
-                KIconButton {
-                    objectName: "stage.tile." + root.sessionId + ".focus"
-                    Accessible.id: objectName
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
-                    glyph: root.focusMode ? "grid" : "focus"
-                    size: 26
-                    visible: root.chromeTier >= 1
-                    Accessible.name: root.focusMode
-                        ? qsTr("Exit terminal focus")
-                        : qsTr("Focus %1").arg(root.sessionName)
                     onClicked: {
-                        if (root.focusMode)
-                            Models.DesktopState.exitFocusMode()
-                        else
-                            Models.DesktopState.enterFocusMode(
-                                root.sessionId)
+                        Models.DesktopState.selectSession(root.sessionId);
+                        Models.DesktopState.toggleFocusForSelectedSession();
                     }
                 }
-
-                PlainLabel {
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
-                    visible: terminal.terminalReady
-                        && terminal.readOnly
-                    text: qsTr("Read only")
-                    color: KodosiTheme.textSecondary
-                    font.pixelSize: KodosiTheme.fontCaption
-                    font.weight: Font.DemiBold
-                }
-
                 KIconButton {
-                    objectName:
-                        "stage.tile." + root.sessionId + ".overflow"
                     Accessible.id: objectName
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
-                    glyph: "more"
-                    size: 26
-                    visible: true
-                    Accessible.name: qsTr("More actions for %1").arg(
-                        root.sessionName)
-                    onClicked: overflowMenu.open()
-
-                    KMenu {
-                        id: overflowMenu
-
-                        KMenuItem {
-                            objectName:
-                                "stage.tile." + root.sessionId
-                                + ".overflow.focus"
-                            Accessible.id: objectName
-                            Accessible.ignored: !visible
-                            visible: root.chromeTier === 0
-                            text: root.focusMode
-                                ? qsTr("Return to grid")
-                                : qsTr("Focus terminal")
-                            onTriggered: {
-                                if (root.focusMode)
-                                    Models.DesktopState.exitFocusMode()
-                                else
-                                    Models.DesktopState.enterFocusMode(
-                                        root.sessionId)
-                            }
-                        }
-
-                        KMenuItem {
-                            objectName:
-                                "stage.tile." + root.sessionId
-                                + ".overflow.intel"
-                            Accessible.id: objectName
-                            Accessible.ignored: !visible
-                            text: qsTr("Agent Intelligence")
-                            onTriggered: root.inspectSessionRequested(
-                                root.sessionId,
-                                root.sessionName)
-                        }
-
-                        KMenuItem {
-                            objectName:
-                                "stage.tile." + root.sessionId
-                                + ".overflow.interrupt"
-                            Accessible.id: objectName
-                            Accessible.ignored: !visible
-                            text: qsTr("Interrupt")
-                            enabled:
-                                Models.SessionActions.availabilityRevision >= 0
-                                && Models.SessionActions.canInterrupt(
-                                    root.sessionId)
-                            onTriggered:
-                                Models.SessionActions.interrupt(root.sessionId)
-                        }
-
-                        KMenuItem {
-                            objectName:
-                                "stage.tile." + root.sessionId
-                                + ".overflow.share"
-                            Accessible.id: objectName
-                            Accessible.ignored: !visible
-                            visible: root.canShare
-                            text: qsTr("Share...")
-                            enabled: root.canShare
-                            onTriggered: root.shareSessionRequested(
-                                root.sessionId,
-                                root.sessionName)
-                        }
-
-                        KMenuSeparator {}
-
-                        KMenuItem {
-                            objectName:
-                                "stage.tile." + root.sessionId
-                                + ".overflow.close"
-                            Accessible.id: objectName
-                            Accessible.ignored: !visible
-                            text:
-                                Models.SessionActions
-                                    .closeConfirmationSessionId
-                                    === root.sessionId
-                                ? qsTr("Confirm close")
-                                : qsTr("Close...")
-                            enabled:
-                                Models.SessionActions.availabilityRevision >= 0
-                                && Models.SessionActions.canClose(
-                                    root.sessionId)
-                            onTriggered: root.requestClose()
-                        }
-                    }
+                    Accessible.name: qsTr("Share terminal")
+                    glyph: "people"
+                    objectName: root.objectName + ".share"
+                    onClicked: root.shareSessionRequested(root.sessionId, root.sessionName)
                 }
-            }
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: 1
-                color: root.active
-                    ? KodosiTheme.accentMuted
-                    : KodosiTheme.seam
+                KIconButton {
+                    Accessible.id: objectName
+                    Accessible.name: qsTr("Minimize")
+                    glyph: "minus"
+                    objectName: root.objectName + ".minimize"
+                    onClicked: Models.Workspace.closeView(root.sessionId)
+                }
+                KIconButton {
+                    Accessible.id: objectName
+                    Accessible.name: qsTr("Close session")
+                    glyph: "close"
+                    objectName: root.objectName + ".close"
+                    onClicked: stopConfirmation.open()
+                }
             }
         }
-
         Item {
-            Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.fillWidth: true
 
             Models.TerminalView {
                 id: terminal
-                objectName:
-                    "stage.tile." + root.sessionId + ".terminal"
+
                 Accessible.id: objectName
-                Accessible.ignored:
-                    root.accessibilitySuppressed || !visible
                 anchors.fill: parent
-                anchors.topMargin: viewportControls.topInset
-                anchors.rightMargin: viewportControls.scrollInset
-                anchors.bottomMargin: viewportControls.scrollInset
+                cursorBlink: Models.DesktopSettings.cursorBlink
+                cursorStyle: Models.DesktopSettings.cursorStyle
+                focusedSizeAuthority: root.focusedSizeAuthority
                 fontFamily: Models.DesktopSettings.fontFamily
                 fontPixelSize: Models.DesktopSettings.fontSize
                 lineHeight: Models.DesktopSettings.lineHeight
-                cursorStyle: Models.DesktopSettings.cursorStyle
-                cursorBlink: Models.DesktopSettings.cursorBlink
+                objectName: root.objectName + ".terminal"
+                preeditBackground: KodosiTheme.accent
+                preeditForeground: KodosiTheme.accentForeground
                 scrollbackLines: Models.DesktopSettings.scrollbackLines
                 selectionBackground: KodosiTheme.accent
                 selectionForeground: KodosiTheme.accentForeground
-                preeditBackground: KodosiTheme.accent
-                preeditForeground: KodosiTheme.accentForeground
-                focusedSizeAuthority: root.focusedSizeAuthority
 
                 onActiveFocusChanged: {
                     if (activeFocus)
-                        Models.DesktopState.selectSession(root.sessionId)
+                        Models.DesktopState.selectSession(root.sessionId);
                 }
-                onTerminalError: message =>
-                    root.terminalError = message
-                onOperationError: message =>
-                    root.terminalOperationError = message
                 onContextMenuRequested: (x, y) => {
-                    const point = terminal.mapToItem(root, x, y)
-                    terminalContextMenu.popup(point.x, point.y)
+                    const point = terminal.mapToItem(root, x, y);
+                    context.popup(point.x, point.y);
                 }
-                onTerminalClosed: root.terminalError =
-                    qsTr("The terminal session has ended.")
+                onOperationError: message => root.terminalOperationError = message
+                onTerminalClosed: root.terminalError = qsTr("The terminal session has ended.")
+                onTerminalError: message => root.terminalError = message
             }
-
-            TerminalViewportControls {
-                id: viewportControls
-                anchors.fill: parent
-                terminalView: terminal
-                identifier: "stage.tile." + root.sessionId + ".viewport"
-            }
-
-            KMenu {
-                id: terminalContextMenu
-
-                KMenuItem {
-                    objectName: "stage.tile." + root.sessionId
-                        + ".terminal.copy"
-                    Accessible.id: objectName
-                    text: qsTr("Copy")
-                    enabled: terminal.hasSelection
-                    onTriggered: terminal.copySelectionToClipboard()
-                }
-
-                KMenuItem {
-                    objectName: "stage.tile." + root.sessionId
-                        + ".terminal.paste"
-                    Accessible.id: objectName
-                    text: qsTr("Paste")
-                    visible: !terminal.readOnly
-                    enabled: visible
-                    onTriggered: terminal.pasteFromClipboard()
-                }
-            }
-
             Rectangle {
-                anchors.top: parent.top
+                anchors.fill: parent
+                color: KodosiTheme.surface
+                visible: !terminal.terminalReady || root.terminalError.length > 0
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 12
+                    width: Math.min(320, parent.width - 32)
+
+                    KBusyIndicator {
+                        Layout.alignment: Qt.AlignHCenter
+                        running: root.terminalError.length === 0
+                        visible: running
+                    }
+                    PlainLabel {
+                        Layout.fillWidth: true
+                        color: KodosiTheme.textPrimary
+                        horizontalAlignment: Text.AlignHCenter
+                        text: root.terminalError.length ? qsTr("Terminal unavailable") : qsTr("Connecting terminal")
+                    }
+                    PlainLabel {
+                        Layout.fillWidth: true
+                        color: KodosiTheme.textSecondary
+                        horizontalAlignment: Text.AlignHCenter
+                        text: root.terminalError
+                        visible: root.terminalError.length > 0
+                        wrapMode: Text.WordWrap
+                    }
+                    KButton {
+                        Accessible.id: objectName
+                        Layout.alignment: Qt.AlignHCenter
+                        objectName: root.objectName + ".retry"
+                        text: qsTr("Retry")
+                        visible: root.terminalError.length > 0
+
+                        onClicked: {
+                            root.terminalError = "";
+                            if (Models.Workspace.activateSession(root.sessionId) && !Models.TerminalSurfaces.retry(terminal, root.sessionId))
+                                root.terminalError = qsTr("The terminal could not reconnect.");
+                        }
+                    }
+                }
+            }
+            PlainLabel {
+                anchors.bottom: parent.bottom
                 anchors.left: parent.left
                 anchors.right: parent.right
+                color: KodosiTheme.danger
+                padding: 8
+                text: root.terminalOperationError
                 visible: root.terminalOperationError.length > 0
-                implicitHeight: operationErrorRow.implicitHeight + 10
-                color: KodosiTheme.surfaceRaised
-                z: 3
-
-                RowLayout {
-                    id: operationErrorRow
-                    anchors.fill: parent
-                    anchors.leftMargin: KodosiTheme.spacing3
-                    anchors.rightMargin: KodosiTheme.spacing2
-                    spacing: KodosiTheme.spacing2
-
-                    PlainLabel {
-                        Layout.fillWidth: true
-                        text: root.terminalOperationError
-                        color: KodosiTheme.danger
-                        font.pixelSize: KodosiTheme.fontCaption
-                        wrapMode: Text.Wrap
-                    }
-
-                    KIconButton {
-                        objectName: "stage.tile." + root.sessionId
-                            + ".operationError.dismiss"
-                        Accessible.id: objectName
-                        glyph: "close"
-                        size: 24
-                        Accessible.name:
-                            qsTr("Dismiss terminal operation error")
-                        onClicked: root.terminalOperationError = ""
-                    }
-                }
-            }
-
-            ColumnLayout {
-                anchors.centerIn: parent
-                width: Math.min(360, parent.width - 24)
-                spacing: KodosiTheme.spacing3
-                visible: !terminal.terminalReady
-                    || root.terminalError.length > 0
-
-                KBusyIndicator {
-                    objectName:
-                        "stage.tile." + root.sessionId + ".connecting"
-                    Accessible.id: objectName
-                    Accessible.name: qsTr("Connecting terminal")
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
-                    Layout.alignment: Qt.AlignHCenter
-                    visible: root.terminalError.length === 0
-                    running: visible
-                    implicitWidth: 24
-                    implicitHeight: 24
-                }
-
-                KIcon {
-                    Accessible.ignored: true
-                    Layout.alignment: Qt.AlignHCenter
-                    visible: root.terminalError.length > 0
-                    Layout.preferredWidth: 24
-                    Layout.preferredHeight: 24
-                    name: "terminal"
-                    color: KodosiTheme.danger
-                }
-
-                PlainLabel {
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
-                    Layout.fillWidth: true
-                    text: root.terminalError.length > 0
-                        ? qsTr("Terminal unavailable")
-                        : qsTr("Connecting terminal")
-                    color: KodosiTheme.textPrimary
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    horizontalAlignment: Text.AlignHCenter
-                }
-
-                PlainLabel {
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
-                    Layout.fillWidth: true
-                    visible: root.terminalError.length > 0
-                    text: root.terminalError
-                    color: KodosiTheme.textSecondary
-                    font.pixelSize: 10
-                    wrapMode: Text.Wrap
-                    horizontalAlignment: Text.AlignHCenter
-                }
-
-                KButton {
-                    objectName:
-                        "stage.tile." + root.sessionId + ".retry"
-                    Accessible.id: objectName
-                    Accessible.ignored:
-                        root.accessibilitySuppressed || !visible
-                    Layout.alignment: Qt.AlignHCenter
-                    visible: root.terminalError.length > 0
-                    text: qsTr("Retry")
-                    variant: "directional"
-                    iconName: "refresh"
-                    Accessible.name: qsTr("Retry terminal connection")
-                    onClicked: {
-                        root.terminalError = ""
-                        if (root.kind === "remote"
-                                && root.canRetainPresentation
-                                && !root.isStageReady) {
-                            if (!Models.SessionActions.restoreRemote(
-                                    root.sessionId)) {
-                                root.terminalError =
-                                    Models.SessionActions.lastError
-                            } else if (!Models.TerminalSurfaces.retry(
-                                           terminal,
-                                           root.sessionId)) {
-                                root.terminalError = qsTr(
-                                    "This session is no longer available.")
-                            }
-                        } else if (!Models.TerminalSurfaces.retry(
-                                       terminal,
-                                       root.sessionId)) {
-                            root.terminalError = qsTr(
-                                "This session is no longer available.")
-                        }
-                    }
-                }
-
+                wrapMode: Text.WordWrap
             }
         }
+    }
+    KMenu {
+        id: context
 
-        Rectangle {
-            visible: root.approval.identityToken !== undefined
-            Layout.fillWidth: true
-            implicitHeight: approvalColumn.implicitHeight + 10
-            color: KodosiTheme.surfaceRaised
+        KMenuItem {
+            Accessible.id: objectName
+            enabled: terminal.hasSelection
+            objectName: "panel.terminalTile.copy"
+            text: qsTr("Copy")
 
-            ColumnLayout {
-                id: approvalColumn
-                anchors.fill: parent
-                anchors.leftMargin: KodosiTheme.spacing3
-                anchors.rightMargin: KodosiTheme.spacing3
-                spacing: 2
+            onTriggered: terminal.copySelectionToClipboard()
+        }
+        KMenuItem {
+            Accessible.id: objectName
+            enabled: terminal.terminalReady
+            objectName: "panel.terminalTile.paste"
+            text: qsTr("Paste")
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: KodosiTheme.spacing2
+            onTriggered: terminal.pasteFromClipboard()
+        }
+    }
+    KDialog {
+        id: stopConfirmation
 
-                    Rectangle {
-                        Layout.preferredWidth: 7
-                        Layout.preferredHeight: 7
-                        radius: 4
-                        color: root.approval.risk === "destructive"
-                            || root.approval.risk === "credential"
-                            ? KodosiTheme.danger
-                            : root.approval.risk === "unknown"
-                              ? KodosiTheme.warning
-                              : KodosiTheme.accent
-                    }
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        title: qsTr("Close %1?").arg(root.sessionName)
 
-                    PlainLabel {
-                        Layout.fillWidth: true
-                        text: root.approval.toolName || qsTr("Tool approval")
-                        color: KodosiTheme.textPrimary
-                        font.pixelSize: 10
-                        font.weight: Font.DemiBold
-                        elide: Text.ElideRight
-                    }
+        onAccepted: Models.Workspace.stopSession(root.sessionId)
 
-                    PlainLabel {
-                        visible: root.chromeTier >= 2
-                            && (root.approval.toolInputSummary || "").length > 0
-                        Layout.maximumWidth: 220
-                        text: root.approval.toolInputSummary || ""
-                        color: KodosiTheme.textSecondary
-                        font.pixelSize: KodosiTheme.fontCaption
-                        elide: Text.ElideMiddle
-                    }
-
-                    PlainLabel {
-                        visible: (root.approval.queuedCount || 0) > 0
-                        text: "+" + root.approval.queuedCount
-                        color: KodosiTheme.textSecondary
-                        font.pixelSize: KodosiTheme.fontCaption
-                    }
-
-                    PlainLabel {
-                        visible: root.chromeTier > 0
-                            && root.approvalCountdown().length > 0
-                        text: root.approvalCountdown()
-                        color: KodosiTheme.textSecondary
-                        font.pixelSize: KodosiTheme.fontCaption
-                    }
-
-                    KButton {
-                        objectName: "stage.tile." + root.sessionId
-                            + ".approval.deny"
-                        Accessible.id: objectName
-                        text: qsTr("Deny")
-                        compact: true
-                        enabled: root.approval.actionable === true
-                        onClicked: Models.PendingPermissions.deny(
-                            root.approval.identityToken)
-                    }
-
-                    KButton {
-                        objectName: "stage.tile." + root.sessionId
-                            + ".approval.approve"
-                        Accessible.id: objectName
-                        text: root.chromeTier < 2
-                            || (root.approval.risk !== "safe" && root.approval.risk !== "network")
-                            ? qsTr("Review") : qsTr("Approve")
-                        compact: true
-                        variant: "primary"
-                        enabled: root.approval.actionable === true
-                        onClicked: {
-                            if (root.chromeTier < 2
-                                    || (root.approval.risk !== "safe"
-                                        && root.approval.risk !== "network"))
-                                root.inspectSessionRequested(root.sessionId, root.sessionName)
-                            else
-                                Models.PendingPermissions.approve(root.approval.identityToken)
-                        }
-                    }
-                }
-
-                PlainLabel {
-                    visible: (root.approval.decisionMessage || "").length > 0
-                    Layout.fillWidth: true
-                    text: root.approval.decisionMessage || ""
-                    color: root.approval.actionable === true
-                        ? KodosiTheme.danger
-                        : KodosiTheme.textSecondary
-                    font.pixelSize: KodosiTheme.fontCaption
-                    elide: Text.ElideRight
-                }
-            }
+        PlainLabel {
+            color: KodosiTheme.textPrimary
+            text: qsTr("This ends the process on its host computer.")
         }
     }
 }

@@ -65,4 +65,4 @@ struct TerminalFrame {
     }
 };
 
-} // namespace kodosi
+}

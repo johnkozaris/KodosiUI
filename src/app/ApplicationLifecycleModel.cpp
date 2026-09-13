@@ -27,7 +27,7 @@ QString fallbackForFailure(const RuntimeFailure::Code code)
     return QStringLiteral("Kodosi could not start its runtime.");
 }
 
-} // namespace
+}
 
 ApplicationLifecycleModel::ApplicationLifecycleModel(
     RuntimeBridge& runtime,
@@ -35,7 +35,7 @@ ApplicationLifecycleModel::ApplicationLifecycleModel(
     : ApplicationLifecycleModel(
           runtime,
           [&runtime](Completion completion) {
-              completion(runtime.start());
+              runtime.startAsync(std::move(completion));
           },
           [&runtime] { runtime.stop(); },
           parent)
@@ -232,4 +232,4 @@ QString ApplicationLifecycleModel::boundedText(
     return text.trimmed() + QChar(0x2026);
 }
 
-} // namespace kodosi
+}

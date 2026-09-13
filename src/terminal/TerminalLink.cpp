@@ -33,7 +33,7 @@ bool containsUnsafeCodepoint(const QString& value)
     return false;
 }
 
-} // namespace
+}
 
 std::optional<QUrl> validatedTerminalLink(const QString& value)
 {
@@ -66,4 +66,4 @@ std::optional<QUrl> validatedTerminalLink(const QString& value)
     return url;
 }
 
-} // namespace kodosi
+}

@@ -94,6 +94,8 @@ class ReleaseIntegrityTests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
+        parity["release"] = {"publishable": True}
+        parity["baseline"]["state"] = "isolated-release-test"
         parity["baseline"]["runtimeCommit"] = self.head(self.runtime)
         self.parity = temporary / "desktop-client-parity.json"
         self.write_json(self.parity, parity)
@@ -211,6 +213,7 @@ class ReleaseIntegrityTests(unittest.TestCase):
             self.run_command(
                 [
                     "dpkg-deb",
+                    "-Zxz",
                     "--build",
                     "--root-owner-group",
                     str(deb_root),
@@ -345,6 +348,8 @@ class ReleaseIntegrityTests(unittest.TestCase):
             [
                 "python3",
                 str(PIN_VERIFIER),
+                "--client-root",
+                str(self.source),
                 "--dependencies",
                 str(self.dependencies),
                 "--runtime-root",

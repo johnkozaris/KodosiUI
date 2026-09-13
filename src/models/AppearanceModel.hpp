@@ -104,4 +104,4 @@ private:
     void handleReducedMotionValue(const QVariant& value);
 };
 
-} // namespace kodosi
+}

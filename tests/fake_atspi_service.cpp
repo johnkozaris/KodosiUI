@@ -72,7 +72,7 @@ const QDBusArgument& operator>>(
     return argument;
 }
 
-} // namespace fake_types
+}
 
 Q_DECLARE_METATYPE(fake_types::IntPair)
 Q_DECLARE_METATYPE(fake_types::PortalStream)
@@ -1002,7 +1002,7 @@ private:
     }
 };
 
-} // namespace
+}
 
 Q_DECLARE_METATYPE(ObjectReference)
 Q_DECLARE_METATYPE(ObjectReferences)

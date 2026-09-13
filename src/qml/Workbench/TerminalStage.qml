@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 
+import Kodosi 1.0
 import QtQuick
 import QtQuick.Layouts
 import Kodosi.Models 1.0 as Models
@@ -467,8 +468,8 @@ Item {
                           : Models.Sessions.count === 0
                             ? qsTr("Open a terminal for Claude, Copilot, or your shell.")
                             : root.sidebarOpen
-                              ? qsTr("Choose a live session in My Agents to open its terminal.")
-                              : qsTr("Your sessions are still running. Show My Agents to open one.")
+                              ? qsTr("Choose a live session in Sessions to open its terminal.")
+                              : qsTr("Your sessions are still running. Show Sessions to open one.")
                     color: KodosiTheme.textSecondary
                     font.pixelSize: 12
                     wrapMode: Text.Wrap
@@ -485,7 +486,7 @@ Item {
                     iconName: "refresh"
                     text: qsTr("Retry")
                     Accessible.name: qsTr("Retry loading sessions")
-                    onClicked: Models.SessionActions.refresh()
+                    onClicked: Models.Workspace.refresh()
                 }
 
                 KButton {
@@ -512,17 +513,17 @@ Item {
                         && !root.catalogLoading
                         && Models.Sessions.count > 0
                         && !root.sidebarOpen
-                    text: qsTr("Show My Agents")
+                    text: qsTr("Show Sessions")
                     variant: "secondary"
                     iconName: "sidebar"
-                    Accessible.name: qsTr("Show My Agents sidebar")
+                    Accessible.name: qsTr("Show Sessions sidebar")
                     onClicked: root.showSidebarRequested()
                 }
             }
         }
 
         Rectangle {
-            visible: Models.SessionActions.lastError.length > 0
+            visible: Models.Workspace.error.length > 0
                 || Models.DesktopState.lastError.length > 0
             Layout.fillWidth: true
             implicitHeight: visible ? sessionError.implicitHeight + 14 : 0
@@ -538,7 +539,7 @@ Item {
                     Accessible.ignored: !visible
                     Layout.fillWidth: true
                     text: [
-                        Models.SessionActions.lastError,
+                        Models.Workspace.error,
                         Models.DesktopState.lastError
                     ].filter(function(message) {
                         return message.length > 0
@@ -554,7 +555,7 @@ Item {
                     text: qsTr("Dismiss")
                     Accessible.name: text
                     onClicked: {
-                        Models.SessionActions.clearError()
+                        Models.Workspace.clearError()
                         Models.DesktopState.clearError()
                     }
                 }

@@ -440,11 +440,6 @@ std::optional<QJsonObject> encodeActivation(
         object.insert(
             QStringLiteral("sessionId"),
             activation.destination->sessionId);
-        if (activation.destination->toolUseId) {
-            object.insert(
-                QStringLiteral("toolUseId"),
-                *activation.destination->toolUseId);
-        }
     } else if (activation.kind
         == ApplicationActivation::Kind::InvalidRoute) {
         object.insert(
@@ -530,8 +525,7 @@ std::optional<ApplicationActivation> decodeActivation(
         };
     }
     if (kind != QStringLiteral("route")
-        || object.size() < 4 + tokenFieldCount
-        || object.size() > 5 + tokenFieldCount
+        || object.size() != 4 + tokenFieldCount
         || !std::ranges::all_of(
             object.keys(),
             [](const QString& key) {
@@ -539,24 +533,15 @@ std::optional<ApplicationActivation> decodeActivation(
                     || key == QStringLiteral("requestId")
                     || key == QStringLiteral("kind")
                     || key == QStringLiteral("sessionId")
-                    || key == QStringLiteral("toolUseId")
                     || key
                         == QStringLiteral("activationToken");
             })) {
         return std::nullopt;
     }
     DeepLinkDestination destination {
-        .sessionId =
-            object.value(QStringLiteral("sessionId")).toString(),
-        .toolUseId = std::nullopt,
+        .sessionId = object.value(QStringLiteral("sessionId")).toString(),
     };
-    if (object.contains(QStringLiteral("toolUseId"))) {
-        destination.toolUseId =
-            object.value(QStringLiteral("toolUseId")).toString();
-    }
-    if (!DeepLinkRouter::isSafeIdentity(destination.sessionId)
-        || (destination.toolUseId
-            && !DeepLinkRouter::isSafeIdentity(*destination.toolUseId))) {
+    if (!DeepLinkRouter::isSafeIdentity(destination.sessionId)) {
         return std::nullopt;
     }
     return ApplicationActivation {
@@ -568,7 +553,7 @@ std::optional<ApplicationActivation> decodeActivation(
     };
 }
 
-} // namespace
+}
 
 class SingleInstanceGuard::Private final {
 public:
@@ -1223,4 +1208,4 @@ void SingleInstanceGuard::withActivationToken(
     action();
 }
 
-} // namespace kodosi
+}

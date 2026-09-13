@@ -1,6 +1,8 @@
 #include "attention/TerminalNotifications.hpp"
 
 #include <QByteArray>
+#include <QJsonDocument>
+#include "SessionFixture.hpp"
 #include <QSignalSpy>
 #include <QtTest/QTest>
 
@@ -48,18 +50,11 @@ private slots:
 
 namespace {
 
-QByteArray auth()
+QJsonObject sessions(const QString& incarnation)
 {
-    return QByteArrayLiteral(
-        R"({"type":"auth.ready","userId":"account","accountEpoch":1})");
-}
-
-QByteArray sessions(const QString& incarnation)
-{
-    return QStringLiteral(
-        R"({"authority":"accountContext","accountUserId":"account","accountEpoch":1,"type":"session.list","sessions":[{"kind":"local","id":"session-1","incarnationId":"%1","name":"Session","project":"/repo","mode":"normal","status":"active","recovery":"live","scope":"justMe","access":"approve"}]})")
-        .arg(incarnation)
-        .toUtf8();
+    auto entry=test::session(1);
+    entry.insert(QStringLiteral("incarnationId"),incarnation);
+    return test::snapshot({entry});
 }
 
 struct Fixture {
@@ -72,18 +67,17 @@ struct Fixture {
 
     Fixture()
     {
-        sessionsModel.ingestAuthEvent(auth());
-        sessionsModel.ingestSessionEvent(
-            sessions(QStringLiteral("inc-1")));
+        sessionsModel.apply(
+            sessions(test::id(101)));
     }
 
     void post(
-        const QString& incarnation = QStringLiteral("inc-1"),
+        const QString& incarnation = test::id(101),
         const QString& title = QStringLiteral("Build complete"),
         const QString& body = QStringLiteral("All checks passed"))
     {
         notifications.receiveTerminalNotification({
-            .sessionId = QStringLiteral("session-1"),
+            .sessionId = test::id(1),
             .runtimeIncarnationId = incarnation,
             .title = title,
             .body = body,
@@ -91,7 +85,7 @@ struct Fixture {
     }
 };
 
-} // namespace
+}
 
 void TerminalNotificationsTest::postsAndActivatesCurrentSession()
 {
@@ -120,7 +114,7 @@ void TerminalNotificationsTest::postsAndActivatesCurrentSession()
     QCOMPARE(requests.size(), 1);
     QCOMPARE(
         requests.constFirst().at(0).toString(),
-        QStringLiteral("session-1"));
+        test::id(1));
     QCOMPARE(
         requests.constFirst().at(1).toString(),
         QStringLiteral("activation-token"));
@@ -135,8 +129,8 @@ void TerminalNotificationsTest::rejectsStaleSessionIncarnations()
 
     fixture.post();
     const auto key = fixture.driver.posted.constFirst().key;
-    fixture.sessionsModel.ingestSessionEvent(
-        sessions(QStringLiteral("inc-2")));
+    fixture.sessionsModel.apply(
+        sessions(test::id(102)));
     QVERIFY(fixture.driver.withdrawn.contains(key));
 
     QSignalSpy requests(
@@ -154,9 +148,9 @@ void TerminalNotificationsTest::routesOnlyTerminalNotificationKeys()
     fixture.post();
     const auto key = fixture.driver.posted.constFirst().key;
     fixture.driver.invoke(
-        QStringLiteral("approval:opaque"),
+        QStringLiteral("unrelated:opaque"),
         QStringLiteral("default"));
-    fixture.driver.invoke(key, QStringLiteral("approve"));
+    fixture.driver.invoke(key, QStringLiteral("unknown-action"));
     QVERIFY(fixture.driver.withdrawn.isEmpty());
 }
 
@@ -165,7 +159,7 @@ void TerminalNotificationsTest::boundsTrackedNotifications()
     Fixture fixture;
     for (auto index = 0; index < 257; ++index) {
         fixture.post(
-            QStringLiteral("inc-1"),
+            test::id(101),
             QStringLiteral("Terminal"),
             QString::number(index));
     }

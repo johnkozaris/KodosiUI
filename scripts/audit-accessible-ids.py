@@ -180,9 +180,7 @@ def main() -> int:
                 accessible_id = ACCESSIBLE_ID.search(block.body)
                 assert object_name is not None
                 assert accessible_id is not None
-                expression = block.body[
-                    object_name.end() : accessible_id.start()
-                ]
+                expression = block.body[object_name.end() :].split("\n", 1)[0]
                 if "+" not in expression:
                     failures.append(
                         f"{relative}:{block.line}: delegate "

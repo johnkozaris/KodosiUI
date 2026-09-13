@@ -8,81 +8,56 @@ adaptive
 
 ## Stack
 
-Qt Quick 6.11.2 and C++23 over the existing Kodosi Rust C ABI. The shipping
-Swift client remains the product and interaction baseline.
+Qt Quick 6.11.2 and C++23 over the Kodosi Rust runtime, desktop protocol 39 and
+C ABI 6. Swift is the macOS client; Qt is the Linux client.
 
 ## Users
 
-Kodosi is for developers who run several coding agents locally and need to
-supervise their work, terminals, approvals, and collaboration from one place.
-The primary desktop use case is a long-running engineering session on Linux or
-macOS with frequent switching between active agents and Missions.
+Developers running real local terminals and coding agents who want to reach their
+work from another approved device or share selected terminals with trusted people.
 
 ## Product Purpose
 
-Kodosi is mission control for coding agents. It keeps execution local while
-letting a user observe and steer concurrent sessions, approve sensitive work,
-and collaborate with trusted people through end-to-end encrypted Missions.
-Success means the user can understand what every agent needs and act without
-leaving the workbench.
-
-## Positioning
-
-The Rust runtime remains the authority for execution, identity, encryption,
-permissions, ordering, and reconciliation. Desktop clients are native
-presentation adapters over that same local-first authority rather than separate
-implementations of security or session rules.
+A small terminal workbench: local terminals, approved personal devices, explicit
+full-control friend sharing, and Missions as named project groups with people and
+attached terminals. Native provider history supplies conversation preview/resume.
+Configuration files open in the user's existing editor; Kodosi does not manage or
+erase provider memory, history, or configuration.
 
 ## Operating Context
 
-- Long-lived local and shared terminal sessions.
-- Several agents visible at once, with one selected interaction target.
-- Time-sensitive permission requests and attention states.
-- Account, device, trust, and Mission state that can change while the app runs.
-- GNOME and KDE desktops under Wayland or X11; macOS remains represented by the
-  shipping Swift client.
+- Local processes continue when a view or window closes; explicit Stop or Quit ends them.
+- A shared shell runs with the host OS user's capabilities, not a project sandbox.
+- Terminal control does not confer identity, device, friend-set, or Mission administration.
+- Mission membership is independent of terminal sharing.
+- Agent-to-agent messaging and task-board design are future work, not dormant UI.
+- Linux GNOME/KDE use Wayland or X11; macOS uses the native Swift client.
 
 ## Capabilities and Constraints
 
-- Preserve the established product terms **My Agents**, **Missions**, and
-  **Stage**.
-- Raw wire JSON, terminal bytes, account epochs, and session incarnations never
-  enter QML.
-- Every action resolves a stable native identity immediately before dispatch.
-- Linux must retain feature and visual parity with the Swift client.
-- The terminal is rendered natively with the pinned Ghostty VT implementation.
-- Third-party runtime dependencies must be established, maintained projects;
-  low-confidence packages are not acceptable.
+Keep **Sessions**, **Missions**, and **Stage**. Preserve native terminal input,
+checkpoint ordering, screen-reader text, IME, window behavior, and adaptive tiling.
+Keep execution and cryptographic authority in Rust. QML is presentation only.
+
+Do not reintroduce access tiers, semantic steering, approval interception,
+Agent Intelligence/Attention dashboards, provider catalogs, Mission chat/tasks,
+or compatibility with the removed product. No old feature should remain as a
+hidden button, reserved schema, or no-op command.
 
 ## Brand Commitments
 
-The visual identity is the shipping Swift client: warm near-black surfaces,
-restrained copper accents, compact native controls, subtle seams, and a
-workbench rather than dashboard character. Kodosi should feel focused and
-crafted, not like a generic administration console.
-
-## Evidence on Hand
-
-- Swift visual authority: `../kodosiSwift/Sources/DesignSystem/AppTheme.swift`
-- Shipping shell: `../kodosiSwift/Sources/Features/Shell/AppShell.swift`
-- Session rail: `../kodosiSwift/Sources/Features/Sidebar/SessionSidebarView.swift`
-- Terminal tile: `../kodosiSwift/Sources/Features/Sessions/SessionTileView.swift`
-- Brand assets: `../kodosiSwift/Resources/Assets.xcassets`
-
-No testimonials, usage metrics, or commercial claims are available and none
-should be fabricated.
-
-## Product Principles
-
-- Keep execution local and security authority in Rust.
-- Make urgent work visible without turning the whole interface into an alert.
-- Preserve context while moving between agents, people, and Missions.
-- Prefer exact, recoverable state over optimistic presentation.
-- Match platform conventions without losing Kodosi's visual identity.
+Warm near-black surfaces, restrained copper accents, compact authored controls,
+subtle seams, and a workbench rather than administration-dashboard character.
+Follow `UI-DONTS.md`; do not use the reduction as an unrelated redesign.
 
 ## Accessibility & Inclusion
 
-Keyboard navigation, screen-reader semantics, visible focus, reduced-motion
-compatibility, and sufficient text contrast are release requirements. Terminal
-content uses a native accessible text interface rather than a visual-only QML
-representation.
+Keyboard navigation, screen-reader semantics, stable accessible IDs, visible
+focus, reduced motion, and sufficient contrast remain requirements. Terminal
+content uses its native accessible text interface, never a QML copy.
+
+## Evidence
+
+The product is unlaunched. Do not invent usage, release, parity, or live-desktop
+validation claims. Source/model checks, native compiled tests, and real desktop
+interaction evidence are separate.

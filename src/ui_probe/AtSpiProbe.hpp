@@ -213,4 +213,4 @@ private:
     bool interactive,
     int timeoutMs);
 
-} // namespace kodosi::ui_probe
+}

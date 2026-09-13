@@ -137,7 +137,9 @@ def main() -> None:
 
     if dependencies.get("schemaVersion") != 1:
         fail("unsupported dependency lock schema")
-    if parity.get("schemaVersion") != 1:
+    if parity.get("release", {}).get("publishable") is False:
+        fail(parity["release"]["reason"])
+    if parity.get("schemaVersion") != 2:
         fail("unsupported parity schema")
     runtime = dependencies["kodosi"]
     ghostty = dependencies["ghostty"]

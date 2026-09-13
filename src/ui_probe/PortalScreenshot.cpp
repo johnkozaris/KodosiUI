@@ -111,7 +111,7 @@ QDBusMessage portalCall(
     return reply;
 }
 
-} // namespace
+}
 
 QJsonObject takePortalScreenshot(
     const QString& absoluteOutputPath,
@@ -338,6 +338,6 @@ QJsonObject takePortalScreenshot(
     };
 }
 
-} // namespace kodosi::ui_probe
+}
 
 #include "PortalScreenshot.moc"

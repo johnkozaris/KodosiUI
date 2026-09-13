@@ -2,48 +2,21 @@
 
 #include <QByteArray>
 #include <QByteArrayView>
+#include <QJsonObject>
 #include <QObject>
 #include <QString>
 
 #include <atomic>
 #include <cstdint>
 #include <expected>
+#include <functional>
+#include <memory>
+#include <mutex>
 
 namespace kodosi {
 
-enum class EventLane {
-    Auth,
-    Sessions,
-    System,
-    Friends,
-    Devices,
-    AgentIntel,
-    AgentGlobal,
-    Trust,
-    Rooms,
-};
-
-enum class CommandLane {
-    Terminal,
-    System,
-    Auth,
-    Friends,
-    Devices,
-    Trust,
-    Rooms,
-    Sessions,
-    AgentIntel,
-};
-
 struct RuntimeFailure {
-    enum class Code {
-        ContractMismatch,
-        StartRejected,
-        RuntimeStopped,
-        InvalidArgument,
-        FfiRejected,
-    };
-
+    enum class Code { ContractMismatch, StartRejected, RuntimeStopped, InvalidArgument, FfiRejected };
     Code code;
     std::int32_t ffiResult;
     QString message;
@@ -52,10 +25,8 @@ struct RuntimeFailure {
 class CommandDispatcher {
 public:
     using Result = std::expected<void, RuntimeFailure>;
-
     virtual ~CommandDispatcher() = default;
-
-    [[nodiscard]] virtual Result send(CommandLane lane, QByteArrayView json) = 0;
+    [[nodiscard]] virtual Result send(QByteArrayView json) = 0;
 };
 
 struct TerminalSubscription {
@@ -63,23 +34,19 @@ struct TerminalSubscription {
     QString subscriptionId;
     std::uint64_t generation;
 };
-
 struct TerminalData {
     TerminalSubscription subscription;
     std::uint64_t sequence;
     QByteArray bytes;
 };
-
 struct TerminalControl {
     TerminalSubscription subscription;
     QByteArray json;
 };
-
 struct TerminalConnectResult {
     TerminalSubscription subscription;
     std::int32_t result;
 };
-
 struct TerminalSemanticCheckpoint {
     TerminalSubscription subscription;
     std::uint64_t nextSequence;
@@ -90,131 +57,81 @@ struct TerminalSemanticCheckpoint {
 
 class TerminalCommandDispatcher : public CommandDispatcher {
 public:
-    ~TerminalCommandDispatcher() override = default;
-
     [[nodiscard]] virtual bool isRunning() const noexcept = 0;
-    [[nodiscard]] virtual Result connectTerminal(
-        const TerminalSubscription& subscription) = 0;
-    [[nodiscard]] virtual Result refreshTerminal(
-        const TerminalSubscription& subscription) = 0;
-    [[nodiscard]] virtual Result disconnectTerminal(
-        const TerminalSubscription& subscription) = 0;
-    [[nodiscard]] virtual Result sendTerminalInput(
-        const TerminalSubscription& subscription,
-        const QString& expectedRuntimeIncarnationId,
-        QByteArrayView bytes) = 0;
+    [[nodiscard]] virtual Result connectTerminal(const TerminalSubscription& subscription) = 0;
+    [[nodiscard]] virtual Result refreshTerminal(const TerminalSubscription& subscription) = 0;
+    [[nodiscard]] virtual Result disconnectTerminal(const TerminalSubscription& subscription) = 0;
+    [[nodiscard]] virtual Result sendTerminalInput(const TerminalSubscription& subscription,
+        const QString& expectedRuntimeIncarnationId, QByteArrayView bytes)
+        = 0;
 };
 
 class TerminalEventSink {
 public:
     virtual ~TerminalEventSink() = default;
-
     virtual void receiveData(TerminalData data) noexcept = 0;
     virtual void receiveControl(TerminalControl control) noexcept = 0;
     virtual void receiveConnectResult(TerminalConnectResult result) noexcept = 0;
 
-    // This runs synchronously on the Rust callback thread. The implementation
-    // must install the checkpoint before returning and must not enter QML.
-    [[nodiscard]] virtual bool installSemanticCheckpoint(
-        TerminalSemanticCheckpoint checkpoint) noexcept = 0;
+    [[nodiscard]] virtual bool installSemanticCheckpoint(TerminalSemanticCheckpoint checkpoint) noexcept = 0;
 };
 
 class RuntimeBridge : public QObject, public TerminalCommandDispatcher {
     Q_OBJECT
-
 public:
     using Result = CommandDispatcher::Result;
-
     explicit RuntimeBridge(QObject* parent = nullptr);
     RuntimeBridge(TerminalEventSink& terminalSink, QObject* parent = nullptr);
     ~RuntimeBridge() override;
-
     RuntimeBridge(const RuntimeBridge&) = delete;
     RuntimeBridge& operator=(const RuntimeBridge&) = delete;
-    RuntimeBridge(RuntimeBridge&&) = delete;
-    RuntimeBridge& operator=(RuntimeBridge&&) = delete;
 
     [[nodiscard]] bool isRunning() const noexcept override;
     [[nodiscard]] Result start();
+    void startAsync(std::function<void(Result)> completion);
     void stop() noexcept;
-
-    [[nodiscard]] Result send(CommandLane lane, QByteArrayView json) override;
-    [[nodiscard]] Result connectTerminal(
-        const TerminalSubscription& subscription) override;
-    [[nodiscard]] Result refreshTerminal(
-        const TerminalSubscription& subscription) override;
-    [[nodiscard]] Result disconnectTerminal(
-        const TerminalSubscription& subscription) override;
-    [[nodiscard]] Result sendTerminalInput(
-        const TerminalSubscription& subscription,
-        const QString& expectedRuntimeIncarnationId,
-        QByteArrayView bytes) override;
+    [[nodiscard]] Result send(QByteArrayView json) override;
+    [[nodiscard]] Result connectTerminal(const TerminalSubscription& subscription) override;
+    [[nodiscard]] Result refreshTerminal(const TerminalSubscription& subscription) override;
+    [[nodiscard]] Result disconnectTerminal(const TerminalSubscription& subscription) override;
+    [[nodiscard]] Result sendTerminalInput(const TerminalSubscription& subscription,
+        const QString& expectedRuntimeIncarnationId, QByteArrayView bytes) override;
 
 signals:
-    void eventReceived(kodosi::EventLane lane, QByteArray json);
+    void eventReceived(QJsonObject event);
     void runningChanged(bool running);
+    void eventError(QString message);
 
 private:
+    struct CallbackContext {
+        std::recursive_mutex mutex;
+        RuntimeBridge* bridge = nullptr;
+    };
+    std::shared_ptr<CallbackContext> m_callbacks = std::make_shared<CallbackContext>();
+    bool m_starting = false;
+    QList<QByteArray> m_startupEvents;
     void* m_handle = nullptr;
     TerminalEventSink* m_terminalSink = nullptr;
-    std::atomic<std::uint64_t> m_activeGeneration {0};
+    std::atomic<std::uint64_t> m_activeGeneration { 0 };
+    std::atomic<qsizetype> m_queuedBytes { 0 };
+    std::atomic<int> m_queuedEvents { 0 };
+    std::atomic<bool> m_queueFailed { false };
     std::uint64_t m_nextGeneration = 0;
-
+    QString m_accountUserId;
+    qint64 m_accountEpoch = 0;
     [[nodiscard]] Result requireRunning() const;
     [[nodiscard]] Result terminalOperationResult(std::int32_t result, QString operation) const;
-    void queueEvent(EventLane lane, const std::uint8_t* json, std::uintptr_t length);
-
+    void queueEvent(const std::uint8_t* json, std::uintptr_t length);
+    void deliverEvent(const QByteArray& payload);
     static RuntimeBridge* resolve(void* userdata) noexcept;
-    static void authEvent(const std::uint8_t* json, std::uintptr_t length, void* userdata) noexcept;
-    static void sessionEvent(
-        const std::uint8_t* json, std::uintptr_t length, void* userdata) noexcept;
-    static void systemEvent(
-        const std::uint8_t* json, std::uintptr_t length, void* userdata) noexcept;
-    static void friendsEvent(
-        const std::uint8_t* json, std::uintptr_t length, void* userdata) noexcept;
-    static void devicesEvent(
-        const std::uint8_t* json, std::uintptr_t length, void* userdata) noexcept;
-    static void agentIntelEvent(
-        const std::uint8_t* json, std::uintptr_t length, void* userdata) noexcept;
-    static void agentGlobalEvent(
-        const std::uint8_t* json, std::uintptr_t length, void* userdata) noexcept;
-    static void trustEvent(
-        const std::uint8_t* json, std::uintptr_t length, void* userdata) noexcept;
-    static void roomEvent(
-        const std::uint8_t* json, std::uintptr_t length, void* userdata) noexcept;
-    static void terminalData(
-        const char* sessionId,
-        const char* subscriptionId,
-        std::uint64_t subscriptionGeneration,
-        std::uint64_t sequence,
-        const std::uint8_t* bytes,
-        std::uintptr_t length,
-        void* userdata) noexcept;
+    static void event(const std::uint8_t* json, std::uintptr_t length, void* userdata) noexcept;
+    static void terminalData(const char*, const char*, std::uint64_t, std::uint64_t, const std::uint8_t*,
+        std::uintptr_t, void*) noexcept;
     static void terminalControl(
-        const char* sessionId,
-        const char* subscriptionId,
-        std::uint64_t subscriptionGeneration,
-        const std::uint8_t* json,
-        std::uintptr_t length,
-        void* userdata) noexcept;
-    static void terminalConnectResult(
-        const char* sessionId,
-        const char* subscriptionId,
-        std::uint64_t subscriptionGeneration,
-        std::int32_t result,
-        void* userdata) noexcept;
-    static std::int32_t terminalSemanticCheckpoint(
-        const char* sessionId,
-        const char* subscriptionId,
-        std::uint64_t subscriptionGeneration,
-        std::uint64_t nextSequence,
-        std::uint16_t rows,
-        std::uint16_t columns,
-        const std::uint8_t* semanticJson,
-        std::uintptr_t semanticJsonLength,
-        void* userdata) noexcept;
+        const char*, const char*, std::uint64_t, const std::uint8_t*, std::uintptr_t, void*) noexcept;
+    static void terminalConnectResult(const char*, const char*, std::uint64_t, std::int32_t, void*) noexcept;
+    static std::int32_t terminalSemanticCheckpoint(const char*, const char*, std::uint64_t, std::uint64_t,
+        std::uint16_t, std::uint16_t, const std::uint8_t*, std::uintptr_t, void*) noexcept;
 };
 
-} // namespace kodosi
-
-Q_DECLARE_METATYPE(kodosi::EventLane)
+}

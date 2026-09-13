@@ -136,8 +136,8 @@ public:
     GhosttyTerminalKernel(GhosttyTerminalKernel&&) = delete;
     GhosttyTerminalKernel& operator=(GhosttyTerminalKernel&&) = delete;
 
-    // Checkpoint installation is transactional. Failure preserves the prior
-    // terminal and frame, so RuntimeBridge can reject admission safely.
+
+
     [[nodiscard]] Result installCheckpoint(const TerminalSemanticCheckpoint& checkpoint);
     [[nodiscard]] Result applyData(const TerminalData& data);
     [[nodiscard]] Result applyResize(
@@ -188,4 +188,4 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace kodosi
+}

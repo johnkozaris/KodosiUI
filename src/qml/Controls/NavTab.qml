@@ -1,3 +1,4 @@
+import Kodosi 1.0
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -38,7 +39,7 @@ Button {
             color: root.selected
                 ? KodosiTheme.textPrimary
                 : KodosiTheme.textSecondary
-            font.pixelSize: 12
+            font.pixelSize: 14
             font.weight: Font.DemiBold
         }
     }

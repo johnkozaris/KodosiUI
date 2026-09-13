@@ -4,4 +4,4 @@ namespace kodosi {
 
 void installTerminalAccessibility();
 
-} // namespace kodosi
+}

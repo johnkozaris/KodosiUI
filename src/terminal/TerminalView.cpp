@@ -379,7 +379,7 @@ bool isPasteShortcut(const QKeyEvent* event)
     return terminalShortcut || platformShortcut;
 }
 
-} // namespace
+}
 
 void detail::TerminalFrameMailbox::reset(const std::uint64_t incarnation)
 {
@@ -473,14 +473,14 @@ QSizeF TerminalView::gridSize() const
 qreal TerminalView::viewportScale() const
 {
     const auto grid = gridSize();
-    if (!m_fitToView || m_canResize || grid.isEmpty() || width() <= 0 || height() <= 0)
+    if (m_canResize || grid.isEmpty() || width() <= 0 || height() <= 0)
         return 1.0;
     return std::min({1.0, width() / grid.width(), height() / grid.height()});
 }
 
 QPointF TerminalView::viewportOffset() const
 {
-    return m_fitToView || m_canResize ? QPointF {} : -m_pan;
+    return {};
 }
 
 QPointF TerminalView::gridPoint(const QPointF& point) const
@@ -490,50 +490,8 @@ QPointF TerminalView::gridPoint(const QPointF& point) const
 
 void TerminalView::updateViewport()
 {
-    const auto grid = gridSize();
-    if (m_fitToView || m_canResize) {
-        m_pan = {};
-    } else {
-        m_pan.setX(std::clamp(m_pan.x(), 0.0, std::max(0.0, grid.width() - width())));
-        m_pan.setY(std::clamp(m_pan.y(), 0.0, std::max(0.0, grid.height() - height())));
-    }
     emit viewportChanged();
     update();
-}
-
-void TerminalView::setFitToView(const bool fit)
-{
-    if (m_fitToView == fit) return;
-    m_fitToView = fit;
-    emit fitToViewChanged();
-    updateViewport();
-    if (!fit) revealCursor();
-}
-
-void TerminalView::setPanX(const qreal value)
-{
-    if (!std::isfinite(value) || m_pan.x() == value) return;
-    m_pan.setX(value);
-    updateViewport();
-}
-
-void TerminalView::setPanY(const qreal value)
-{
-    if (!std::isfinite(value) || m_pan.y() == value) return;
-    m_pan.setY(value);
-    updateViewport();
-}
-
-void TerminalView::revealCursor()
-{
-    if (!m_frame || m_fitToView || m_canResize) return;
-    const auto cell = TerminalRasterizer::cellSize(m_font, m_lineHeight);
-    const QPointF cursor(m_frame->cursor.column * cell.width(), m_frame->cursor.row * cell.height());
-    if (cursor.x() < m_pan.x()) m_pan.setX(cursor.x());
-    else if (cursor.x() + cell.width() > m_pan.x() + width()) m_pan.setX(cursor.x() + cell.width() - width());
-    if (cursor.y() < m_pan.y()) m_pan.setY(cursor.y());
-    else if (cursor.y() + cell.height() > m_pan.y() + height()) m_pan.setY(cursor.y() + cell.height() - height());
-    updateViewport();
 }
 
 QString TerminalView::fontFamily() const
@@ -604,16 +562,6 @@ bool TerminalView::terminalReady() const noexcept
 bool TerminalView::canSendInput() const noexcept
 {
     return m_canSendInput;
-}
-
-bool TerminalView::canRetainFocus() const noexcept
-{
-    return m_canRetainFocus;
-}
-
-bool TerminalView::canSendFocus() const noexcept
-{
-    return m_canSendFocus;
 }
 
 bool TerminalView::canResize() const noexcept
@@ -925,33 +873,26 @@ void TerminalView::setPreeditForeground(const QColor& color)
     update();
 }
 
-void TerminalView::setTerminalCapabilities(
+void TerminalView::setTerminalInteraction(
     const bool canSendInput,
-    const bool canRetainFocus,
-    const bool canSendFocus,
     const bool canResize)
 {
     Q_ASSERT(thread() == QThread::currentThread());
     if (m_canSendInput == canSendInput
-        && m_canRetainFocus == canRetainFocus
-        && m_canSendFocus == canSendFocus
         && m_canResize == canResize) {
         return;
     }
     const auto wasReadOnly = readOnly();
     const auto desiredFocus = m_desiredFocus;
     const auto releaseFocus =
-        ((m_canRetainFocus && !canRetainFocus)
-            || (m_canSendFocus && !canSendFocus))
+        (m_canSendInput && !canSendInput)
         && (m_focusClaimed || !m_pendingFocusRequestId.isEmpty()
             || desiredFocus);
     const auto gainedFocus =
-        !m_canSendFocus && canSendFocus && desiredFocus;
+        !m_canSendInput && canSendInput && desiredFocus;
     const auto gainedResize =
         !m_canResize && canResize;
     m_canSendInput = canSendInput;
-    m_canRetainFocus = canRetainFocus;
-    m_canSendFocus = canSendFocus;
     m_canResize = canResize;
     if (!m_canSendInput) {
         m_inputQueue.clear();
@@ -1696,16 +1637,6 @@ void TerminalView::wheelEvent(QWheelEvent* event)
         QQuickItem::wheelEvent(event);
         return;
     }
-    if (!m_canResize && !m_fitToView
-        && (event->modifiers().testFlag(Qt::ShiftModifier)
-            || event->pixelDelta().x() != 0 || event->angleDelta().x() != 0)) {
-        const auto dx = event->pixelDelta().x() != 0 ? event->pixelDelta().x()
-            : event->angleDelta().x() != 0 ? event->angleDelta().x() / 3
-            : event->pixelDelta().y() != 0 ? event->pixelDelta().y() : event->angleDelta().y() / 3;
-        setPanX(m_pan.x() - dx);
-        event->accept();
-        return;
-    }
     const auto delta = event->pixelDelta().y() != 0
         ? event->pixelDelta().y()
         : event->angleDelta().y();
@@ -2063,7 +1994,7 @@ void TerminalView::dispatchFocus(const FocusOperation operation)
     if (operation == FocusOperation::None) {
         return;
     }
-    if (focused && !m_canSendFocus) {
+    if (focused && !m_canSendInput) {
         return;
     }
     if (m_runtime == nullptr || !m_runtime->isRunning()) {
@@ -2079,6 +2010,8 @@ void TerminalView::dispatchFocus(const FocusOperation operation)
     command += jsonString(m_subscription.sessionId);
     command += QByteArrayLiteral(",\"clientId\":");
     command += jsonString(m_subscription.subscriptionId);
+    command += QByteArrayLiteral(",\"subscriptionGeneration\":");
+    command += QByteArray::number(m_subscription.generation);
     if (focused) {
         m_pendingFocusRequestId =
             QUuid::createUuidV7().toString(QUuid::WithoutBraces);
@@ -2088,7 +2021,7 @@ void TerminalView::dispatchFocus(const FocusOperation operation)
     command += QByteArrayLiteral(",\"expectedRuntimeIncarnationId\":");
     command += jsonString(m_expectedRuntimeIncarnationId);
     command += '}';
-    if (auto result = m_runtime->send(CommandLane::Terminal, command); !result) {
+    if (auto result = m_runtime->send(command); !result) {
         if (focused) {
             m_pendingFocusRequestId.clear();
         }
@@ -2106,7 +2039,7 @@ void TerminalView::dispatchFocus(const FocusOperation operation)
     if (!focused) {
         m_focusClaimed = false;
         m_pendingFocusRequestId.clear();
-        if (m_desiredFocus && m_canSendFocus) {
+        if (m_desiredFocus && m_canSendInput) {
             sendFocus(true);
         }
     }
@@ -2298,7 +2231,7 @@ void TerminalView::dispatchResize()
         ? QByteArrayLiteral(",\"claim\":true}")
         : QByteArrayLiteral(",\"claim\":false}");
     m_pendingResize = std::move(pending);
-    if (auto result = m_runtime->send(CommandLane::Terminal, command); !result) {
+    if (auto result = m_runtime->send(command); !result) {
         m_pendingResize.reset();
         if (result.error().ffiResult == KODOSI_FFI_BUSY) {
             scheduleResizeRetry();
@@ -2533,4 +2466,4 @@ void TerminalView::invalidateMetrics()
     }
 }
 
-} // namespace kodosi
+}

@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - feature/linux-support
   workflow_dispatch:
 
 permissions:
@@ -27,45 +26,45 @@ jobs:
 
     steps:
       - name: Check out KodosiQT
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: KodosiQT
           persist-credentials: false
 
       - name: Check out pinned Rust runtime
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: johnkozaris/Kodosi
-          ref: 25fb76cab7ab084f24a80a30899a368e00752789
+          ref: a9b1d830a08da6d4329326bd47a9aaea9489bc6a
           token: ${{ secrets.KODOSI_REPOSITORY_TOKEN }}
           path: Kodosi
           persist-credentials: false
 
       - name: Check out pinned Swift parity baseline
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: johnkozaris/kodosiSwift
-          ref: 6f566b813e320b0f0ee81b1537011b148b6afcfc
+          ref: 5f7d86b6c5de6f7c34785a67975c77bd9c0fbf18
           token: ${{ secrets.KODOSI_REPOSITORY_TOKEN }}
           path: kodosiSwift
           persist-credentials: false
 
       - name: Check out pinned Ghostty package
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: johnkozaris/kodosi-ghostty
-          ref: 23c0d994ae371eefef2d6c9f3f111d4ede92e8e1
+          ref: c1ab17147bcf1780f1f473e75205892328e98218
           token: ${{ secrets.KODOSI_REPOSITORY_TOKEN }}
           path: kodosi-ghostty
           persist-credentials: false
 
       - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.14"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
         with:
           version: "0.12.7"
           enable-cache: true

@@ -9,7 +9,6 @@ namespace kodosi {
 
 struct DeepLinkDestination {
     QString sessionId;
-    std::optional<QString> toolUseId;
 
     bool operator==(const DeepLinkDestination&) const = default;
 };
@@ -48,4 +47,4 @@ private:
         DeepLinkParseError& error);
 };
 
-} // namespace kodosi
+}

@@ -18,4 +18,4 @@ public:
         TerminalNotificationEvent notification) = 0;
 };
 
-} // namespace kodosi
+}

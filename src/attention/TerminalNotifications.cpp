@@ -149,4 +149,4 @@ bool TerminalNotifications::owns(const QString& key)
     return key.startsWith(QStringLiteral("terminal:"));
 }
 
-} // namespace kodosi
+}

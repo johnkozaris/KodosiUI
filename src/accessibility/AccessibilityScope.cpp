@@ -64,7 +64,7 @@ QAccessibleInterface* scopeFactory(const QString&, QObject* object)
     return scope == nullptr ? nullptr : new ScopeAccessible(scope);
 }
 
-} // namespace
+}
 
 AccessibilityScope::AccessibilityScope(QQuickItem* parent)
     : QQuickItem(parent)
@@ -74,8 +74,8 @@ AccessibilityScope::AccessibilityScope(QQuickItem* parent)
         return true;
     }();
     Q_UNUSED(installed);
-    // Qt flattens ignored items into their parent's accessible children. The
-    // boundary must remain enrolled even when it exposes no descendants.
+
+
     auto* accessible = qobject_cast<QQuickAccessibleAttached*>(
         qmlAttachedPropertiesObject<QQuickAccessibleAttached>(this, true));
     accessible->setRole(QAccessible::Grouping);
@@ -130,4 +130,4 @@ void AccessibilityScope::publishAccessibilityChange()
     QAccessible::updateAccessibility(&children);
 }
 
-} // namespace kodosi
+}

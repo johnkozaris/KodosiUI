@@ -1,4 +1,9 @@
 /.cache/
+.claude/worktrees/
+.claude/settings.local.json
+.DS_Store
+.env
+.env.*.local
 /.tools/
 /build/
 /aqtinstall.log

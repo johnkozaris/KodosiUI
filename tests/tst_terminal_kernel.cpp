@@ -7,6 +7,7 @@
 #include "terminal/TerminalSurfaceController.hpp"
 #include "terminal/TerminalView.hpp"
 #include "models/SessionCatalogModel.hpp"
+#include "SessionFixture.hpp"
 
 #include <QAccessible>
 #include <QByteArray>
@@ -57,12 +58,8 @@ public:
     }
 
     Result send(
-        const kodosi::CommandLane lane,
         const QByteArrayView json) override
     {
-        if (lane != kodosi::CommandLane::Terminal) {
-            return {};
-        }
         const auto document =
             QJsonDocument::fromJson(json.toByteArray());
         if (document.isObject()) {
@@ -152,7 +149,6 @@ public:
     }
 
     Result send(
-        kodosi::CommandLane,
         QByteArrayView) override
     {
         return {};
@@ -295,7 +291,7 @@ void completeResize(
     QCoreApplication::processEvents();
 }
 
-} // namespace
+}
 
 class TerminalKernelTest final : public QObject {
     Q_OBJECT
@@ -974,7 +970,7 @@ void TerminalKernelTest::terminalViewRoutesTrackedMouseToPty()
     };
     view.setWidth(400);
     view.setHeight(160);
-    view.setTerminalCapabilities(true, true, true, true);
+    view.setTerminalInteraction(true, true);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -1030,7 +1026,7 @@ void TerminalKernelTest::remoteGridFitsPansAndMapsAccessibleMouseCoordinates()
     window.resize(400, 220);
     kodosi::TerminalView view(window.contentItem());
     view.setSize(QSizeF(400, 220));
-    view.setTerminalCapabilities(true, true, true, false);
+    view.setTerminalInteraction(true, false);
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("remote"), QStringLiteral("remote-view"), 1};
     QVERIFY(view.attach(registry, dispatcher, subscription, QStringLiteral("remote-incarnation")));
@@ -1068,26 +1064,7 @@ void TerminalKernelTest::remoteGridFitsPansAndMapsAccessibleMouseCoordinates()
         return command.value(QStringLiteral("type")) == QStringLiteral("terminal.resize");
     }));
 
-    view.setFitToView(false);
-    QCOMPARE(view.viewportScale(), 1.0);
-    QVERIFY(pane.contains(view.accessibleCharacterRect(bottom + 5).center()));
-    view.setPanX(0);
-    view.setPanY(0);
-    QVERIFY(!pane.contains(view.accessibleCharacterRect(right).center()));
-    view.setPanX(1e6);
-    QCOMPARE(view.panX(), view.gridSize().width() - view.width());
-    QVERIFY(pane.contains(view.accessibleCharacterRect(right).center()));
-    QCOMPARE(view.accessibleOffsetAt(view.accessibleCharacterRect(right).center()), right);
-    click(right);
-    QCOMPARE(dispatcher.inputCommands.constLast(), QByteArrayLiteral("\x1b[<0;116;1m"));
-    view.setPanY(1e6);
-    QCOMPARE(view.panY(), view.gridSize().height() - view.height());
-    QVERIFY(pane.contains(view.accessibleCharacterRect(bottom + 5).center()));
-    view.setFitToView(true);
-    QCOMPARE(view.panX(), 0.0);
-    QCOMPARE(view.panY(), 0.0);
-    QVERIFY(pane.contains(view.accessibleCharacterRect(right).center()));
-    QVERIFY(pane.contains(view.accessibleCharacterRect(bottom + 5).center()));
+
 }
 
 void TerminalKernelTest::pasteEncodingUsesRestoredTerminalModes()
@@ -1338,7 +1315,7 @@ void TerminalKernelTest::terminalViewExposesNativeAccessibleTextInterface()
     QVERIFY(accessible->state().readOnly);
     QVERIFY(!accessible->state().editable);
 
-    view.setTerminalCapabilities(true, true, true, true);
+    view.setTerminalInteraction(true, true);
     QVERIFY(!accessible->state().readOnly);
     QVERIFY(accessible->state().editable);
 }
@@ -1388,7 +1365,7 @@ void TerminalKernelTest::terminalViewGatesDeniedCommandsAndRevocation()
     };
     view.setWidth(800);
     view.setHeight(400);
-    view.setTerminalCapabilities(false, false, false, false);
+    view.setTerminalInteraction(false, false);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -1418,7 +1395,7 @@ void TerminalKernelTest::terminalViewGatesDeniedCommandsAndRevocation()
     QCOMPARE(dispatcher.inputCommands.size(), 0);
     QCOMPARE(dispatcher.terminalCommands.size(), 0);
 
-    view.setTerminalCapabilities(true, true, true, false);
+    view.setTerminalInteraction(true, false);
     QCOMPARE(dispatcher.terminalCommands.size(), 1);
     QCOMPARE(
         dispatcher.terminalCommands.constLast()
@@ -1442,15 +1419,15 @@ void TerminalKernelTest::terminalViewGatesDeniedCommandsAndRevocation()
         QStringLiteral("session.focus"));
 
     const auto inputAttempts = dispatcher.inputCommands.size();
-    view.setTerminalCapabilities(false, false, false, false);
+    view.setTerminalInteraction(false, false);
     QCOMPARE(
         dispatcher.terminalCommands.constLast()
             .value(QStringLiteral("type"))
             .toString(),
         QStringLiteral("session.blur"));
     QVERIFY(view.readOnly());
-    QVERIFY(!view.canRetainFocus());
-    view.setTerminalCapabilities(true, true, true, false);
+    QVERIFY(!view.canSendInput());
+    view.setTerminalInteraction(true, false);
     QCOMPARE(
         dispatcher.terminalCommands.constLast()
             .value(QStringLiteral("type"))
@@ -1460,7 +1437,7 @@ void TerminalKernelTest::terminalViewGatesDeniedCommandsAndRevocation()
     QTest::qWait(40);
     QCOMPARE(dispatcher.inputCommands.size(), inputAttempts);
     QVERIFY(!view.readOnly());
-    QVERIFY(view.canRetainFocus());
+    QVERIFY(view.canSendInput());
 }
 
 void TerminalKernelTest::terminalViewPastesClipboardThroughBoundedAuthority()
@@ -1475,7 +1452,7 @@ void TerminalKernelTest::terminalViewPastesClipboardThroughBoundedAuthority()
     };
     view.setWidth(800);
     view.setHeight(400);
-    view.setTerminalCapabilities(false, false, false, false);
+    view.setTerminalInteraction(false, false);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -1493,7 +1470,7 @@ void TerminalKernelTest::terminalViewPastesClipboardThroughBoundedAuthority()
     QCoreApplication::sendEvent(&view, &denied);
     QCOMPARE(dispatcher.inputCommands.size(), 0);
 
-    view.setTerminalCapabilities(true, true, true, false);
+    view.setTerminalInteraction(true, false);
     clipboard->setText(QStringLiteral("accepted"), QClipboard::Clipboard);
     QKeyEvent accepted(
         QEvent::KeyPress,
@@ -1575,7 +1552,7 @@ void TerminalKernelTest::terminalViewTracksShiftInsertPasteReleaseExactly()
     };
     view.setWidth(400);
     view.setHeight(160);
-    view.setTerminalCapabilities(true, true, true, false);
+    view.setTerminalInteraction(true, false);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -1598,7 +1575,7 @@ void TerminalKernelTest::terminalViewTracksShiftInsertPasteReleaseExactly()
 
     QFocusEvent focusOut(QEvent::FocusOut);
     QCoreApplication::sendEvent(&view, &focusOut);
-    view.setTerminalCapabilities(false, false, false, false);
+    view.setTerminalInteraction(false, false);
     QKeyEvent unrelatedVRelease(
         QEvent::KeyRelease,
         Qt::Key_V,
@@ -1620,7 +1597,7 @@ void TerminalKernelTest::terminalOriginatedClipboardCommandsCannotReachHostClipb
         QStringLiteral("osc-clipboard-subscription"),
         25,
     };
-    view.setTerminalCapabilities(true, true, true, false);
+    view.setTerminalInteraction(true, false);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -1654,7 +1631,7 @@ void TerminalKernelTest::terminalViewWheelUpdatesFrameWithoutPtyInput()
     };
     view.setWidth(400);
     view.setHeight(160);
-    view.setTerminalCapabilities(true, true, true, false);
+    view.setTerminalInteraction(true, false);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -1738,7 +1715,7 @@ void TerminalKernelTest::terminalViewAcceptedInputReturnsViewportToBottom()
     };
     view.setWidth(400);
     view.setHeight(160);
-    view.setTerminalCapabilities(true, true, true, false);
+    view.setTerminalInteraction(true, false);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -1811,7 +1788,7 @@ void TerminalKernelTest::terminalViewAcceptedInputReturnsViewportToBottom()
     verifyAtBottom();
 
     scrollToTop();
-    view.setTerminalCapabilities(false, false, false, false);
+    view.setTerminalInteraction(false, false);
     const auto inputCount = dispatcher.inputCommands.size();
     QKeyEvent denied(
         QEvent::KeyPress,
@@ -1836,7 +1813,7 @@ void TerminalKernelTest::terminalViewSelectionAnchorSurvivesPresentedScroll()
     };
     view.setWidth(400);
     view.setHeight(160);
-    view.setTerminalCapabilities(false, false, false, false);
+    view.setTerminalInteraction(false, false);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -1936,7 +1913,7 @@ void TerminalKernelTest::terminalViewCancelsSelectionAgainstStaleDisplayedViewpo
     };
     view.setWidth(400);
     view.setHeight(160);
-    view.setTerminalCapabilities(false, false, false, false);
+    view.setTerminalInteraction(false, false);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -2049,7 +2026,7 @@ void TerminalKernelTest::terminalViewActivatesOnlySafeGhosttyLinks()
     };
     view.setWidth(400);
     view.setHeight(160);
-    view.setTerminalCapabilities(true, true, true, false);
+    view.setTerminalInteraction(true, false);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -2109,12 +2086,12 @@ void TerminalKernelTest::terminalViewActivatesOnlySafeGhosttyLinks()
         capture.values.constFirst(),
         QUrl(QStringLiteral("https://example.com/safe")));
 
-    view.setTerminalCapabilities(false, false, false, false);
+    view.setTerminalInteraction(false, false);
     QCoreApplication::sendEvent(&view, &press);
     QCoreApplication::sendEvent(&view, &release);
     QTest::qWait(20);
     QCOMPARE(capture.values.size(), 1);
-    view.setTerminalCapabilities(true, true, true, false);
+    view.setTerminalInteraction(true, false);
 
     const QPointF filePoint(cell.width() * 6.5, cell.height() * 0.5);
     QHoverEvent unsafeHover(
@@ -2158,7 +2135,7 @@ void TerminalKernelTest::terminalViewCannotActivateLinkFromUndisplayedFrame()
     };
     view.setWidth(400);
     view.setHeight(160);
-    view.setTerminalCapabilities(false, false, false, false);
+    view.setTerminalInteraction(false, false);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -2225,7 +2202,7 @@ void TerminalKernelTest::terminalViewCancelsLinkReleaseOutsideBounds()
     };
     view.setWidth(400);
     view.setHeight(160);
-    view.setTerminalCapabilities(false, false, false, false);
+    view.setTerminalInteraction(false, false);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -2289,7 +2266,7 @@ void TerminalKernelTest::terminalViewCopySelectionStillUsesHostClipboard()
     };
     view.setWidth(400);
     view.setHeight(160);
-    view.setTerminalCapabilities(false, false, false, false);
+    view.setTerminalInteraction(false, false);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -2351,7 +2328,7 @@ void TerminalKernelTest::terminalViewRetriesRevocationBlurBeforeRefocus()
     };
     view.setWidth(800);
     view.setHeight(400);
-    view.setTerminalCapabilities(true, true, true, false);
+    view.setTerminalInteraction(true, false);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -2363,8 +2340,8 @@ void TerminalKernelTest::terminalViewRetriesRevocationBlurBeforeRefocus()
     QCoreApplication::sendEvent(&view, &focus);
     QCOMPARE(dispatcher.terminalCommands.size(), 1);
     dispatcher.busyTerminalCommands = 1;
-    view.setTerminalCapabilities(false, false, false, false);
-    view.setTerminalCapabilities(true, true, true, false);
+    view.setTerminalInteraction(false, false);
+    view.setTerminalInteraction(true, false);
     QCOMPARE(dispatcher.terminalCommands.size(), 2);
 
     QTRY_COMPARE_WITH_TIMEOUT(
@@ -2404,7 +2381,7 @@ void TerminalKernelTest::terminalViewClaimsFocusedResizeExactly()
     };
     view.setWidth(800);
     view.setHeight(400);
-    view.setTerminalCapabilities(false, false, false, true);
+    view.setTerminalInteraction(false, true);
     view.setFocusedSizeAuthority(true);
     QVERIFY(view.attach(
         registry,
@@ -2435,7 +2412,7 @@ void TerminalKernelTest::terminalViewClaimsFocusedResizeExactly()
     kodosi::TerminalView denied;
     denied.setWidth(800);
     denied.setHeight(400);
-    denied.setTerminalCapabilities(false, false, false, false);
+    denied.setTerminalInteraction(false, false);
     denied.setFocusedSizeAuthority(true);
     const kodosi::TerminalSubscription deniedSubscription {
         QStringLiteral("denied"),
@@ -2451,7 +2428,7 @@ void TerminalKernelTest::terminalViewClaimsFocusedResizeExactly()
     makeTerminalReady(registry, deniedSubscription);
     QTest::qWait(20);
     QCOMPARE(dispatcher.terminalCommands.size(), beforeDenied);
-    denied.setTerminalCapabilities(false, false, false, true);
+    denied.setTerminalInteraction(false, true);
     QTRY_COMPARE_WITH_TIMEOUT(
         dispatcher.terminalCommands.size(),
         beforeDenied + 1,
@@ -2464,7 +2441,7 @@ void TerminalKernelTest::terminalViewClaimsFocusedResizeExactly()
     kodosi::TerminalView grid;
     grid.setWidth(800);
     grid.setHeight(400);
-    grid.setTerminalCapabilities(false, false, false, false);
+    grid.setTerminalInteraction(false, false);
     const kodosi::TerminalSubscription gridSubscription {
         QStringLiteral("grid"),
         QStringLiteral("grid-subscription"),
@@ -2478,7 +2455,7 @@ void TerminalKernelTest::terminalViewClaimsFocusedResizeExactly()
     makeTerminalReady(registry, gridSubscription);
     QTest::qWait(20);
     QCOMPARE(gridDispatcher.terminalCommands.size(), 0);
-    grid.setTerminalCapabilities(false, false, false, true);
+    grid.setTerminalInteraction(false, true);
     QTRY_COMPARE_WITH_TIMEOUT(
         gridDispatcher.terminalCommands.size(),
         1,
@@ -2500,7 +2477,7 @@ void TerminalKernelTest::terminalViewPreservesClaimAcrossInflightResize()
     };
     view.setWidth(800);
     view.setHeight(400);
-    view.setTerminalCapabilities(false, false, false, true);
+    view.setTerminalInteraction(false, true);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -2548,7 +2525,7 @@ void TerminalKernelTest::terminalViewDefersResizeWhileEffectivelyHidden()
     };
     view.setWidth(800);
     view.setHeight(400);
-    view.setTerminalCapabilities(false, false, false, true);
+    view.setTerminalInteraction(false, true);
     QVERIFY(view.attach(
         registry,
         dispatcher,
@@ -2588,25 +2565,20 @@ void TerminalKernelTest::surfaceControllerFencesSessionIncarnations()
         &controller,
         &kodosi::TerminalSurfaceController::attachmentRejected);
 
-    sessions.ingestAuthEvent(
-        QByteArrayLiteral(
-            R"({"type":"auth.ready","userId":"user","accountEpoch":1})"));
-    sessions.ingestSessionEvent(QByteArrayLiteral(
-        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.list","sessions":[{"kind":"local","id":"session","incarnationId":"inc-1","name":"One","project":"/repo","mode":"normal","status":"active","recovery":"live","scope":"justMe","access":"inject"}]})"));
+    sessions.apply(QJsonDocument::fromJson(QByteArrayLiteral(R"({"type":"sessions.snapshot","sessions":[{"id":"0198aaaa-0000-7000-8000-000000000001","incarnationId":"0198aaaa-0000-7000-8000-000000000065","name":"One","kind":"local","status":"running","connectionState":"local","isOwner":true,"sharedWith":[]}]})")).object());
 
     QVERIFY(controller.bind(
         &view,
-        QStringLiteral("session")));
+        QStringLiteral("0198aaaa-0000-7000-8000-000000000001")));
     QVERIFY(controller.retry(
         &view,
-        QStringLiteral("session")));
+        QStringLiteral("0198aaaa-0000-7000-8000-000000000001")));
     QVERIFY(!controller.bind(
         &view,
         QString {}));
     QCOMPARE(rejected.count(), 1);
 
-    sessions.ingestSessionEvent(QByteArrayLiteral(
-        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.removed","sessionId":"session"})"));
+    sessions.apply(QJsonDocument::fromJson(QByteArrayLiteral(R"({"type":"sessions.snapshot","sessions":[]})")).object());
     QCOMPARE(rejected.count(), 2);
     QVERIFY(!view.terminalReady());
 }
@@ -2623,25 +2595,20 @@ void TerminalKernelTest::surfaceControllerKeepsBindingsIndependent()
         &controller,
         &kodosi::TerminalSurfaceController::attachmentRejected);
 
-    sessions.ingestAuthEvent(QByteArrayLiteral(
-        R"({"type":"auth.ready","userId":"user","accountEpoch":1})"));
-    sessions.ingestSessionEvent(QByteArrayLiteral(
-        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.list","sessions":[{"kind":"local","id":"first","incarnationId":"inc-1","name":"First","project":"/repo","mode":"normal","status":"active","recovery":"live","scope":"justMe","access":"inject"},{"kind":"local","id":"second","incarnationId":"inc-2","name":"Second","project":"/repo","mode":"normal","status":"active","recovery":"live","scope":"justMe","access":"inject"}]})"));
+    sessions.apply(QJsonDocument::fromJson(QByteArrayLiteral(R"({"type":"sessions.snapshot","sessions":[{"id":"0198aaaa-0000-7000-8000-000000000002","incarnationId":"0198aaaa-0000-7000-8000-000000000065","name":"First","kind":"local","status":"running","connectionState":"local","isOwner":true,"sharedWith":[]},{"id":"0198aaaa-0000-7000-8000-000000000003","incarnationId":"0198aaaa-0000-7000-8000-000000000066","name":"Second","kind":"local","status":"running","connectionState":"local","isOwner":true,"sharedWith":[]}]})")).object());
 
-    QVERIFY(controller.bind(&firstView, QStringLiteral("first")));
-    QVERIFY(controller.bind(&secondView, QStringLiteral("second")));
+    QVERIFY(controller.bind(&firstView, QStringLiteral("0198aaaa-0000-7000-8000-000000000002")));
+    QVERIFY(controller.bind(&secondView, QStringLiteral("0198aaaa-0000-7000-8000-000000000003")));
     QCOMPARE(runtime.connectCount, 2);
     QVERIFY(firstView.canSendInput());
     QVERIFY(secondView.canSendInput());
 
-    sessions.ingestSessionEvent(QByteArrayLiteral(
-        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.upsert","session":{"kind":"remote","id":"second","incarnationId":"inc-2","name":"Second","project":"/repo","mode":"normal","status":"active","scope":"room","access":"view","ownerUserId":"owner","permissions":1,"connectionState":"connected","accessState":"ready"}})"));
+    sessions.apply(QJsonDocument::fromJson(QByteArrayLiteral(R"({"type":"sessions.snapshot","sessions":[{"id":"0198aaaa-0000-7000-8000-000000000002","incarnationId":"0198aaaa-0000-7000-8000-000000000065","name":"First","kind":"local","status":"running","connectionState":"local","isOwner":true,"sharedWith":[]},{"id":"0198aaaa-0000-7000-8000-000000000003","incarnationId":"0198aaaa-0000-7000-8000-000000000066","name":"Second","kind":"remote","status":"running","connectionState":"connected","isOwner":false,"sharedWith":[]}]})")).object());
     QVERIFY(firstView.canSendInput());
-    QVERIFY(secondView.readOnly());
+    QVERIFY(secondView.canSendInput());
     QCOMPARE(runtime.connectCount, 2);
 
-    sessions.ingestSessionEvent(QByteArrayLiteral(
-        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.upsert","session":{"kind":"remote","id":"second","incarnationId":"inc-2","name":"Second","project":"/repo","mode":"normal","status":"active","scope":"room","access":"inject","permissions":15,"connectionState":"connected","accessState":"ready"}})"));
+    sessions.apply(QJsonDocument::fromJson(QByteArrayLiteral(R"({"type":"sessions.snapshot","sessions":[{"id":"0198aaaa-0000-7000-8000-000000000002","incarnationId":"0198aaaa-0000-7000-8000-000000000065","name":"First","kind":"local","status":"running","connectionState":"local","isOwner":true,"sharedWith":[]},{"id":"0198aaaa-0000-7000-8000-000000000003","incarnationId":"0198aaaa-0000-7000-8000-000000000066","name":"Second","kind":"remote","status":"running","connectionState":"connected","isOwner":false,"sharedWith":[]}]})")).object());
     QVERIFY(firstView.canSendInput());
     QVERIFY(secondView.canSendInput());
     QVERIFY(secondView.canResize());
@@ -2649,21 +2616,18 @@ void TerminalKernelTest::surfaceControllerKeepsBindingsIndependent()
     controller.detach(&firstView);
     QCOMPARE(runtime.disconnectCount, 1);
 
-    sessions.ingestSessionEvent(QByteArrayLiteral(
-        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.removed","sessionId":"first"})"));
+    sessions.apply(QJsonDocument::fromJson(QByteArrayLiteral(R"({"type":"sessions.snapshot","sessions":[{"id":"0198aaaa-0000-7000-8000-000000000003","incarnationId":"0198aaaa-0000-7000-8000-000000000066","name":"Second","kind":"remote","status":"running","connectionState":"connected","isOwner":false,"sharedWith":[]}]})")).object());
     QCOMPARE(rejected.count(), 0);
 
-    sessions.ingestSessionEvent(QByteArrayLiteral(
-        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.upsert","session":{"kind":"local","id":"second","incarnationId":"inc-3","name":"Second","project":"/repo","mode":"normal","status":"active","recovery":"live","scope":"justMe","access":"inject"}})"));
+    sessions.apply(QJsonDocument::fromJson(QByteArrayLiteral(R"({"type":"sessions.snapshot","sessions":[{"id":"0198aaaa-0000-7000-8000-000000000003","incarnationId":"0198aaaa-0000-7000-8000-000000000067","name":"Second","kind":"local","status":"running","connectionState":"local","isOwner":true,"sharedWith":[]}]})")).object());
     QCOMPARE(rejected.count(), 0);
     QCOMPARE(runtime.connectCount, 3);
 
-    sessions.ingestSessionEvent(QByteArrayLiteral(
-        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.removed","sessionId":"second"})"));
+    sessions.apply(QJsonDocument::fromJson(QByteArrayLiteral(R"({"type":"sessions.snapshot","sessions":[]})")).object());
     QCOMPARE(rejected.count(), 1);
     QCOMPARE(
         rejected.constFirst().at(1).toString(),
-        QStringLiteral("second"));
+        QStringLiteral("0198aaaa-0000-7000-8000-000000000003"));
     QVERIFY(!firstView.terminalReady());
     QVERIFY(!secondView.terminalReady());
 }
@@ -2696,12 +2660,9 @@ void TerminalKernelTest::surfaceControllerKeepsSameSessionSurfacesIndependent()
         &stageView,
         &kodosi::TerminalView::frameChanged);
 
-    sessions.ingestAuthEvent(QByteArrayLiteral(
-        R"({"type":"auth.ready","userId":"user","accountEpoch":1})"));
-    sessions.ingestSessionEvent(QByteArrayLiteral(
-        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.list","sessions":[{"kind":"local","id":"shared","incarnationId":"inc-shared","name":"Shared","project":"/repo","mode":"normal","status":"active","recovery":"live","scope":"justMe","access":"inject"}]})"));
+    sessions.apply(QJsonDocument::fromJson(QByteArrayLiteral(R"({"type":"sessions.snapshot","sessions":[{"id":"0198aaaa-0000-7000-8000-000000000004","incarnationId":"0198aaaa-0000-7000-8000-000000000068","name":"Shared","kind":"local","status":"running","connectionState":"local","isOwner":true,"sharedWith":[]}]})")).object());
 
-    QVERIFY(controller.bind(&stageView, QStringLiteral("shared")));
+    QVERIFY(controller.bind(&stageView, QStringLiteral("0198aaaa-0000-7000-8000-000000000004")));
     QCOMPARE(runtime.connectedSubscriptions.size(), 1);
     const auto stageSubscription = runtime.connectedSubscriptions.constFirst();
 
@@ -2785,7 +2746,7 @@ void TerminalKernelTest::surfaceControllerKeepsSameSessionSurfacesIndependent()
                     checkpointFor(output, 12, 5),
                 });
         };
-    QVERIFY(controller.bind(&focusView, QStringLiteral("shared")));
+    QVERIFY(controller.bind(&focusView, QStringLiteral("0198aaaa-0000-7000-8000-000000000004")));
     QCOMPARE(runtime.refreshedSubscriptions.size(), 1);
     const auto focusSubscription = runtime.refreshedSubscriptions.constFirst();
     QCOMPARE(stageSubscription.sessionId, focusSubscription.sessionId);
@@ -2803,7 +2764,7 @@ void TerminalKernelTest::surfaceControllerKeepsSameSessionSurfacesIndependent()
     registry.receiveControl({
         stageSubscription,
         QByteArrayLiteral(
-            R"({"type":"term.notification","sessionId":"shared","title":"Stage","body":"stage-only"})"),
+            R"({"type":"term.notification","sessionId":"0198aaaa-0000-7000-8000-000000000004","title":"Stage","body":"stage-only"})"),
     });
     QCoreApplication::processEvents();
     QCOMPARE(stageNotifications.size(), 1);
@@ -2811,6 +2772,10 @@ void TerminalKernelTest::surfaceControllerKeepsSameSessionSurfacesIndependent()
     QCOMPARE(stageNotifications.constFirst().at(1).toString(), QStringLiteral("stage-only"));
 
     controller.detach(&focusView);
+    runtime.refreshHandler = {};
+    QVERIFY(controller.bind(&focusView, QStringLiteral("0198aaaa-0000-7000-8000-000000000004")));
+    controller.detach(&focusView);
+    QVERIFY(registry.installSemanticCheckpoint({ stageSubscription, 1, 5, 12, checkpointFor(output, 12, 5) }));
     QCOMPARE(runtime.disconnectedSubscriptions.size(), 0);
     QVERIFY(!focusView.terminalReady());
     QVERIFY(stageView.terminalReady());
@@ -2826,7 +2791,7 @@ void TerminalKernelTest::surfaceControllerKeepsSameSessionSurfacesIndependent()
     registry.receiveControl({
         stageSubscription,
         QByteArrayLiteral(
-            R"({"type":"term.notification","sessionId":"shared","title":"Focus","body":"focus-only"})"),
+            R"({"type":"term.notification","sessionId":"0198aaaa-0000-7000-8000-000000000004","title":"Focus","body":"focus-only"})"),
     });
     QCoreApplication::processEvents();
 
@@ -2855,19 +2820,16 @@ void TerminalKernelTest::surfaceControllerRetriesFailedSeedRefresh()
     secondView.setWidth(400);
     secondView.setHeight(160);
 
-    sessions.ingestAuthEvent(QByteArrayLiteral(
-        R"({"type":"auth.ready","userId":"user","accountEpoch":1})"));
-    sessions.ingestSessionEvent(QByteArrayLiteral(
-        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.list","sessions":[{"kind":"local","id":"shared","incarnationId":"inc-shared","name":"Shared","project":"/repo","mode":"normal","status":"active","recovery":"live","scope":"justMe","access":"inject"}]})"));
+    sessions.apply(QJsonDocument::fromJson(QByteArrayLiteral(R"({"type":"sessions.snapshot","sessions":[{"id":"0198aaaa-0000-7000-8000-000000000004","incarnationId":"0198aaaa-0000-7000-8000-000000000068","name":"Shared","kind":"local","status":"running","connectionState":"local","isOwner":true,"sharedWith":[]}]})")).object());
 
-    QVERIFY(controller.bind(&firstView, QStringLiteral("shared")));
+    QVERIFY(controller.bind(&firstView, QStringLiteral("0198aaaa-0000-7000-8000-000000000004")));
     QCOMPARE(runtime.connectedSubscriptions.size(), 1);
     const auto subscription = runtime.connectedSubscriptions.constFirst();
     makeTerminalReady(registry, subscription);
     QVERIFY(firstView.terminalReady());
 
     runtime.refreshFailures = 1;
-    QVERIFY(controller.bind(&secondView, QStringLiteral("shared")));
+    QVERIFY(controller.bind(&secondView, QStringLiteral("0198aaaa-0000-7000-8000-000000000004")));
     QCOMPARE(runtime.refreshCount, 1);
     QVERIFY(firstView.terminalReady());
     QVERIFY(!secondView.terminalReady());
@@ -2884,7 +2846,7 @@ void TerminalKernelTest::surfaceControllerRetriesFailedSeedRefresh()
                     checkpointFor(QByteArrayLiteral("retry"), 80, 24),
                 });
         };
-    QVERIFY(controller.retry(&secondView, QStringLiteral("shared")));
+    QVERIFY(controller.retry(&secondView, QStringLiteral("0198aaaa-0000-7000-8000-000000000004")));
     QCOMPARE(runtime.refreshCount, 2);
     QVERIFY(refreshCheckpointInstalled);
     QCoreApplication::processEvents();
@@ -2914,17 +2876,14 @@ void TerminalKernelTest::surfaceControllerTimesOutAcceptedSeedRefresh()
         &controller,
         &kodosi::TerminalSurfaceController::attachmentRejected);
 
-    sessions.ingestAuthEvent(QByteArrayLiteral(
-        R"({"type":"auth.ready","userId":"user","accountEpoch":1})"));
-    sessions.ingestSessionEvent(QByteArrayLiteral(
-        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.list","sessions":[{"kind":"local","id":"shared","incarnationId":"inc-shared","name":"Shared","project":"/repo","mode":"normal","status":"active","recovery":"live","scope":"justMe","access":"inject"}]})"));
+    sessions.apply(QJsonDocument::fromJson(QByteArrayLiteral(R"({"type":"sessions.snapshot","sessions":[{"id":"0198aaaa-0000-7000-8000-000000000004","incarnationId":"0198aaaa-0000-7000-8000-000000000068","name":"Shared","kind":"local","status":"running","connectionState":"local","isOwner":true,"sharedWith":[]}]})")).object());
 
-    QVERIFY(controller.bind(&firstView, QStringLiteral("shared")));
+    QVERIFY(controller.bind(&firstView, QStringLiteral("0198aaaa-0000-7000-8000-000000000004")));
     const auto subscription = runtime.connectedSubscriptions.constFirst();
     makeTerminalReady(registry, subscription);
     QVERIFY(firstView.terminalReady());
 
-    QVERIFY(controller.bind(&secondView, QStringLiteral("shared")));
+    QVERIFY(controller.bind(&secondView, QStringLiteral("0198aaaa-0000-7000-8000-000000000004")));
     QCOMPARE(runtime.refreshCount, 1);
     QVERIFY(firstView.terminalReady());
     QVERIFY(!secondView.terminalReady());
@@ -2947,7 +2906,7 @@ void TerminalKernelTest::surfaceControllerTimesOutAcceptedSeedRefresh()
                     checkpointFor(QByteArrayLiteral("retry"), 80, 24),
                 });
         };
-    QVERIFY(controller.retry(&secondView, QStringLiteral("shared")));
+    QVERIFY(controller.retry(&secondView, QStringLiteral("0198aaaa-0000-7000-8000-000000000004")));
     QCOMPARE(runtime.refreshCount, 2);
     QVERIFY(refreshCheckpointInstalled);
     QCoreApplication::processEvents();
@@ -2991,19 +2950,16 @@ void TerminalKernelTest::surfaceControllerScopesAttachmentOutcomes()
             }
         });
 
-    sessions.ingestAuthEvent(QByteArrayLiteral(
-        R"({"type":"auth.ready","userId":"user","accountEpoch":1})"));
-    sessions.ingestSessionEvent(QByteArrayLiteral(
-        R"({"authority":"accountContext","accountUserId":"user","accountEpoch":1,"type":"session.list","sessions":[{"kind":"local","id":"shared","incarnationId":"inc-shared","name":"Shared","project":"/repo","mode":"normal","status":"active","recovery":"live","scope":"justMe","access":"inject"}]})"));
+    sessions.apply(QJsonDocument::fromJson(QByteArrayLiteral(R"({"type":"sessions.snapshot","sessions":[{"id":"0198aaaa-0000-7000-8000-000000000004","incarnationId":"0198aaaa-0000-7000-8000-000000000068","name":"Shared","kind":"local","status":"running","connectionState":"local","isOwner":true,"sharedWith":[]}]})")).object());
 
-    QVERIFY(controller.bind(&firstView, QStringLiteral("shared")));
+    QVERIFY(controller.bind(&firstView, QStringLiteral("0198aaaa-0000-7000-8000-000000000004")));
     const auto subscription = runtime.connectedSubscriptions.constFirst();
     makeTerminalReady(registry, subscription);
     QCOMPARE(firstState, QStringLiteral("ready"));
 
     firstState = QStringLiteral("healthy");
     runtime.refreshFailures = 1;
-    QVERIFY(controller.bind(&secondView, QStringLiteral("shared")));
+    QVERIFY(controller.bind(&secondView, QStringLiteral("0198aaaa-0000-7000-8000-000000000004")));
     QCOMPARE(firstState, QStringLiteral("healthy"));
     QCOMPARE(
         secondState,
@@ -3168,7 +3124,7 @@ void TerminalKernelTest::registryConsumesNormativeControlWireWithoutLosingU64Pre
     registry.receiveControl({
         subscription,
         QByteArrayLiteral(
-            R"({"type":"Resize","rows":4,"cols":24,"at_sequence":9007199254740993})"),
+            R"({"type":"term.resize","rows":4,"cols":24,"atSequence":9007199254740993})"),
     });
     QVERIFY(currentFrame);
     QCOMPARE(currentFrame->rows, 4);
@@ -3215,7 +3171,7 @@ void TerminalKernelTest::registryConsumesNormativeControlWireWithoutLosingU64Pre
     registry.receiveControl({
         subscription,
         QByteArrayLiteral(
-            R"({"type":"Closed","reason":"session ended","finalSequence":9007199254740993})"),
+            R"({"type":"term.closed","reason":"session ended","finalSequence":9007199254740993})"),
     });
     QVERIFY(closed);
 }

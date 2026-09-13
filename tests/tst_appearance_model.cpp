@@ -78,7 +78,7 @@ signals:
         QDBusVariant value);
 };
 
-} // namespace
+}
 
 class AppearanceModelTest final : public QObject {
     Q_OBJECT

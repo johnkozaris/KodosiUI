@@ -10,8 +10,8 @@
   </developer>
   <description>
     <p>
-      Supervise local and remote coding-agent sessions, terminal activity,
-      approvals, steering, and Missions from one native desktop application.
+      Run local terminals, reach them from approved devices, share selected
+      sessions with trusted friends, and organize project groups in Missions.
     </p>
   </description>
   <launchable type="desktop-id">com.kodosi.Kodosi.desktop</launchable>

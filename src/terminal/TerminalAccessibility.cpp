@@ -185,7 +185,7 @@ QAccessibleInterface* terminalFactory(const QString&, QObject* object)
     return view == nullptr ? nullptr : new TerminalAccessible(view);
 }
 
-} // namespace
+}
 
 void installTerminalAccessibility()
 {
@@ -196,4 +196,4 @@ void installTerminalAccessibility()
     Q_UNUSED(installed);
 }
 
-} // namespace kodosi
+}

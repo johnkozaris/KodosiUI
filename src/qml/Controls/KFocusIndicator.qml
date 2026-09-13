@@ -1,3 +1,4 @@
+import Kodosi 1.0
 import QtQuick
 
 Rectangle {

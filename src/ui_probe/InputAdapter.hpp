@@ -96,4 +96,4 @@ void recordPortalInputStartupFailure(
     const ProbeError& error,
     const QString& startupToken) noexcept;
 
-} // namespace kodosi::ui_probe
+}

@@ -188,4 +188,4 @@ private:
         qreal height) const;
 };
 
-} // namespace kodosi
+}

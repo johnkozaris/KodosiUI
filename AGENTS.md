@@ -1,60 +1,44 @@
 # KodosiQT agent guide
 
-Read `README.md`, `dependencies.lock.json`, and
-`protocol/desktop-client-parity.json` before changing architecture,
-dependencies, runtime integration, or feature coverage.
+Read `README.md`, `PRODUCT.md`, `dependencies.lock.json`, and
+`../Kodosi/protocol/desktop-runtime-authority.json` before changing runtime integration.
+Read `UI-DONTS.md` before visual changes.
 
 ## Ownership
 
-- `../Kodosi` owns runtime authority, PTYs, process lifecycle, identity, E2E
-  encryption, sharing, Missions, agent supervision, terminal ordering, and the
-  generated C ABI.
-- This repository owns Qt presentation, typed C++ adapters, QML, the native
-  terminal render item, accessibility, localization, and desktop integration.
-- `../kodosiSwift` is the shipping parity baseline until every required feature
-  in `protocol/desktop-client-parity.json` has a passing Qt test.
+Rust in `../Kodosi` owns PTYs, process lifecycle, terminal ordering, identity,
+encryption, sharing, and Mission metadata. Swift on macOS and Qt on Linux are
+native presentation clients of the same reduced protocol.
 
-## Architecture rules
+Qt owns windows, typed presentation models, QML, native terminal rendering/input,
+accessibility, localization, file picking, and desktop notifications.
 
-- QML is presentation only. Do not decode wire JSON, retain FFI pointers,
-  decide permissions, retry commands, reconcile mutations, or own security
-  state in QML.
-- C++ copies borrowed callback memory before returning and marshals typed values
-  to the GUI thread.
-- Keep raw terminal bytes and semantic checkpoints out of QML and ordinary Qt
-  models.
-- Semantic checkpoint installation is synchronous and must finish before raw
-  continuation is admitted.
-- Preserve FFI ABI 5 and desktop protocol 38.
-- Add a shared Rust projection interface only in `../Kodosi`, additively, after
-  shadow parity against Swift. Do not invent a Qt-only projection authority.
-- Use stable IDs plus account/session incarnation identity. Never use a QML row
-  index as command authority.
+## Rules
 
-## Dependencies
-
-- Build with the exact versions in `dependencies.lock.json`.
-- The shipped Linux VT source authority is
-  `../kodosi-ghostty/LinuxGhostty.ref`; never infer it from the macOS pin or a
-  compatibility alias.
-- Before changing a framework or library, review its latest release and the
-  preceding 6-7 months of primary release notes.
-- Do not add direct dependencies from obscure or low-confidence projects or
-  repositories with fewer than 100 stars.
-- Low-adoption Qt Ghostty projects may inform design but are not dependencies.
-- Prefer Qt modules and the C++ standard library over third-party packages.
-
-## Layout
-
-- `src/app`: application composition and lifecycle.
-- `src/bridge`: C ABI ownership and typed Qt models.
-- `src/terminal`: native libghostty render/input adapter.
-- `src/qml`: presentation, design system, and feature surfaces.
-- `protocol`: parity and generated-contract authorities.
-- `scripts`: deterministic bootstrap and validation.
-- `tests`: interface, model, QML, accessibility, and parity tests.
+- Desktop protocol 39 and C ABI 6 only. No old event/command lanes or compatibility.
+- QML never decodes raw wire JSON or receives terminal bytes, checkpoints, FFI
+  pointers, credentials, or cryptographic authority. Commands re-resolve the
+  current session incarnation in native code.
+- Copy borrowed callback memory before returning. GUI model changes happen on
+  the Qt thread. Semantic checkpoint installation is synchronous before raw
+  continuation; retain subscription/incarnation fencing.
+- One full-control terminal sharing mode. Controllers cannot administer Kodosi
+  identity or sharing. Only the host edits a session's shared friend set.
+- Missions contain people and terminal attachments, not tasks/chat/agent dispatch.
+- Provider conversation/configuration reads are on demand. Never mutate or erase
+  provider files, memory, or history.
+- Use the pinned Linux VT archive from `../kodosi-ghostty/LinuxGhostty.ref`.
+  Ghostty remains unchanged; do not infer its source from the macOS pin.
+- Keep explanatory comments out of source; preserve functional tool directives and license notices.
+- Dependencies stay project-local. Prefer Qt and the standard library.
+- The dirty-runtime development override is not release provenance. Immutable
+  source hashes must be real commits before packaging can pass.
 
 ## Gates
 
-Run `just check`. New interactive QML objects require a stable dotted
-`objectName` and an accessible name. User-visible strings use `qsTr`.
+Run `just check` on Linux x86-64. Report unavailable environments and failing
+release/source-pin gates honestly. Retained native terminal and platform tests
+must not be replaced with no-op production paths.
+
+Interactive QML objects need stable dotted `objectName`, matching `Accessible.id`
+where supported, and an accessible name. User-visible text uses `qsTr`.

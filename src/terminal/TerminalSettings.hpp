@@ -42,4 +42,4 @@ struct TerminalKernelSettings {
     bool operator==(const TerminalKernelSettings&) const = default;
 };
 
-} // namespace kodosi
+}

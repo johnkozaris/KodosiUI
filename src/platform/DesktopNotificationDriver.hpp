@@ -32,4 +32,4 @@ signals:
     void deliveryError(QString key, QString message);
 };
 
-} // namespace kodosi
+}

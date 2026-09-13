@@ -76,7 +76,7 @@ qreal roleReal(
     return model.data(model.index(row), role).toReal();
 }
 
-} // namespace
+}
 
 void TerminalTilingLayoutModelTest::laysOutOneThroughSixSessions_data()
 {

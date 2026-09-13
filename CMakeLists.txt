@@ -135,7 +135,7 @@ add_custom_target(kodosi-rust-ffi-build
     BYPRODUCTS
         "${KODOSI_RUNTIME_ARCHIVE}"
         "${KODOSI_RUNTIME_HEADER_DIR}/kodosi_runtime.h"
-    COMMENT "Building the pinned Kodosi ABI-5 runtime"
+    COMMENT "Building the Kodosi ABI-6 runtime"
     WORKING_DIRECTORY "${KODOSI_RUNTIME_ROOT}"
     VERBATIM
 )
@@ -381,3 +381,5 @@ set(CPACK_ARCHIVE_FILE_NAME
 )
 set(CPACK_THREADS 1)
 include(CPack)
+
+install(DIRECTORY packaging/licenses/provider-icons/ DESTINATION share/licenses/kodosi-qt/provider-icons)

@@ -38,4 +38,4 @@ QString notificationPlainText(
     return result.trimmed();
 }
 
-} // namespace kodosi
+}

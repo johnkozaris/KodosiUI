@@ -46,8 +46,8 @@ struct TerminalSurfaceIdentity {
 class TerminalSessionRegistry final : public TerminalEventSink {
 public:
     struct Listener {
-        // Callbacks run on Rust terminal callback threads. They must marshal
-        // UI work and must not re-enter this registry.
+
+
         std::function<void(GhosttyTerminalKernel::Frame)> frameChanged;
         std::function<void(GhosttyTerminalKernel::Failure)> failed;
         std::function<void(std::int32_t)> connectionCompleted;
@@ -167,4 +167,4 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace kodosi
+}

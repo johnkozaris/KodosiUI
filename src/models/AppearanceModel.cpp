@@ -92,7 +92,7 @@ AppearanceModel::StyleHooks applicationStyleHooks()
     };
 }
 
-} // namespace
+}
 
 AppearanceModel::AppearanceModel(QObject* parent)
     : AppearanceModel(
@@ -385,4 +385,4 @@ void AppearanceModel::handleReducedMotionValue(const QVariant& value)
     setReducedMotion(value.value<quint32>() == 1U);
 }
 
-} // namespace kodosi
+}

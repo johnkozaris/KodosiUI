@@ -4,8 +4,8 @@
 
 namespace kodosi {
 
-// A native accessible-tree boundary; suppression never rewrites descendants'
-// Accessible.ignored properties or their QML bindings.
+
+
 class AccessibilityScope : public QQuickItem {
     Q_OBJECT
     Q_PROPERTY(bool suppressed READ suppressed WRITE setSuppressed NOTIFY suppressedChanged)
@@ -25,4 +25,4 @@ private:
     void publishAccessibilityChange();
 };
 
-} // namespace kodosi
+}

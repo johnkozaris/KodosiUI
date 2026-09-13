@@ -800,7 +800,7 @@ QJsonObject execute(QStringList arguments)
         QStringLiteral("Unknown command '%1'; use --help").arg(command));
 }
 
-} // namespace
+}
 
 int main(int argc, char* argv[])
 {

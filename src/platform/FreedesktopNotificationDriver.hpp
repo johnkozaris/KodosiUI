@@ -36,4 +36,4 @@ private:
     void forget(uint id);
 };
 
-} // namespace kodosi
+}

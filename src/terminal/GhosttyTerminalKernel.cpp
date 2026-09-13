@@ -659,7 +659,7 @@ GhosttyTerminalKernel::ConfigureResult applySettings(
     return {};
 }
 
-} // namespace
+}
 
 class GhosttyTerminalKernel::Impl final {
 public:
@@ -1810,4 +1810,4 @@ GhosttyTerminalKernel::Frame GhosttyTerminalKernel::frame() const
     return m_impl->currentFrame;
 }
 
-} // namespace kodosi
+}

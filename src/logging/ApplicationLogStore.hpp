@@ -92,8 +92,6 @@ private:
 };
 
 enum class PerformanceCategory {
-    EventLane,
-    FfiDecode,
     Terminal,
 };
 
@@ -118,4 +116,4 @@ private:
     QElapsedTimer m_timer;
 };
 
-} // namespace kodosi
+}

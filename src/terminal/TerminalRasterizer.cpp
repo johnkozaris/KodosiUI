@@ -66,7 +66,7 @@ void drawDecoration(
     }
 }
 
-} // namespace
+}
 
 QSizeF TerminalRasterizer::logicalSize(const TerminalFrame& frame, const QFont& font)
 {
@@ -283,4 +283,4 @@ QImage TerminalRasterizer::render(
     return image;
 }
 
-} // namespace kodosi
+}

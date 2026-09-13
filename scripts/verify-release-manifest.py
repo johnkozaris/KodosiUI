@@ -281,6 +281,8 @@ def main() -> None:
         fail("manifest product version differs from source")
 
     parity, _ = load_json(arguments.parity)
+    if parity.get("release", {}).get("publishable") is False:
+        fail(parity["release"]["reason"])
     runtime = dependencies["kodosi"]
     ghostty = dependencies["ghostty"]
     baseline = parity["baseline"]

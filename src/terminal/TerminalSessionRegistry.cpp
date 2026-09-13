@@ -177,7 +177,7 @@ void deactivate(const std::shared_ptr<Entry>& entry)
     entry->active = false;
 }
 
-} // namespace
+}
 
 class TerminalSessionRegistry::Impl final {
 public:
@@ -873,11 +873,11 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
     }
     const auto object = document.object();
     const auto type = object.value(QStringLiteral("type")).toString();
-    if (type == QStringLiteral("Resize")) {
+    if (type == QStringLiteral("term.resize")) {
         const auto rows = unsignedJsonField(control.json, QByteArrayLiteral("rows"));
         const auto columns = unsignedJsonField(control.json, QByteArrayLiteral("cols"));
         const auto atSequence =
-            unsignedJsonField(control.json, QByteArrayLiteral("at_sequence"));
+            unsignedJsonField(control.json, QByteArrayLiteral("atSequence"));
         if (!rows || !columns || !atSequence || *rows == 0
             || *rows > std::numeric_limits<std::uint16_t>::max()
             || *columns == 0
@@ -900,7 +900,7 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
                 static_cast<std::uint16_t>(*rows),
                 static_cast<std::uint16_t>(*columns)));
         }
-    } else if (type == QStringLiteral("Closed")) {
+    } else if (type == QStringLiteral("term.closed")) {
         const auto finalSequence =
             unsignedJsonField(control.json, QByteArrayLiteral("finalSequence"));
         if (!finalSequence) {
@@ -1099,7 +1099,7 @@ bool TerminalSessionRegistry::installSemanticCheckpoint(
         return false;
     }
     if (targets->entries.empty()) {
-        return targets->seedOnly;
+        return true;
     }
     bool allAccepted = true;
     bool anyCurrent = false;
@@ -1143,4 +1143,4 @@ bool TerminalSessionRegistry::installSemanticCheckpoint(
     return allAccepted && anyCurrent;
 }
 
-} // namespace kodosi
+}

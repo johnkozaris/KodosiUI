@@ -75,7 +75,7 @@ kodosi::ApplicationLogStore::Options options(
     };
 }
 
-} // namespace
+}
 
 class ApplicationLogStoreTest final : public QObject {
     Q_OBJECT
@@ -93,7 +93,7 @@ private slots:
     void scopedPerformanceSpansPersistOnlyBoundedMetadata();
     void reportsWritePathFailuresWithoutRecursion();
     void keepsExplicitRootsIsolated();
-    void diagnosticsDoesNotExposeLogStorage();
+    void shellDoesNotExposeLogStorage();
 };
 
 void ApplicationLogStoreTest::createsPrivateFilesAndRedactsStructuredLines()
@@ -485,11 +485,11 @@ void ApplicationLogStoreTest::keepsExplicitRootsIsolated()
     QVERIFY(second.path().startsWith(secondRoot.path()));
 }
 
-void ApplicationLogStoreTest::diagnosticsDoesNotExposeLogStorage()
+void ApplicationLogStoreTest::shellDoesNotExposeLogStorage()
 {
     QFile drawer(
         QStringLiteral(KODOSI_SOURCE_DIR)
-        + QStringLiteral("/src/qml/Diagnostics/DiagnosticsDrawer.qml"));
+        + QStringLiteral("/src/qml/Main.qml"));
     QVERIFY(drawer.open(QIODevice::ReadOnly));
     const auto source = drawer.readAll();
     QVERIFY(!source.contains("title: qsTr(\"Logging\")"));

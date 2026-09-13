@@ -42,7 +42,7 @@ private:
     bool m_drainQueued = false;
 };
 
-} // namespace detail
+}
 
 class TerminalView : public QQuickItem {
     Q_OBJECT
@@ -57,15 +57,10 @@ class TerminalView : public QQuickItem {
     Q_PROPERTY(QColor preeditBackground READ preeditBackground WRITE setPreeditBackground NOTIFY preeditBackgroundChanged)
     Q_PROPERTY(QColor preeditForeground READ preeditForeground WRITE setPreeditForeground NOTIFY preeditForegroundChanged)
     Q_PROPERTY(QString terminalTitle READ terminalTitle NOTIFY terminalTitleChanged)
-    Q_PROPERTY(bool fitToView READ fitToView WRITE setFitToView NOTIFY fitToViewChanged)
     Q_PROPERTY(qreal viewportScale READ viewportScale NOTIFY viewportChanged)
-    Q_PROPERTY(qreal panX READ panX WRITE setPanX NOTIFY viewportChanged)
-    Q_PROPERTY(qreal panY READ panY WRITE setPanY NOTIFY viewportChanged)
     Q_PROPERTY(QSizeF gridSize READ gridSize NOTIFY viewportChanged)
     Q_PROPERTY(bool terminalReady READ terminalReady NOTIFY terminalReadyChanged)
     Q_PROPERTY(bool canSendInput READ canSendInput NOTIFY capabilitiesChanged)
-    Q_PROPERTY(bool canRetainFocus READ canRetainFocus NOTIFY capabilitiesChanged)
-    Q_PROPERTY(bool canSendFocus READ canSendFocus NOTIFY capabilitiesChanged)
     Q_PROPERTY(bool canResize READ canResize NOTIFY capabilitiesChanged)
     Q_PROPERTY(bool readOnly READ readOnly NOTIFY capabilitiesChanged)
     Q_PROPERTY(bool hasSelection READ hasSelection NOTIFY frameChanged)
@@ -90,19 +85,10 @@ public:
     [[nodiscard]] QColor preeditBackground() const;
     [[nodiscard]] QColor preeditForeground() const;
     [[nodiscard]] QString terminalTitle() const { return m_terminalTitle; }
-    [[nodiscard]] bool fitToView() const noexcept { return m_fitToView; }
     [[nodiscard]] qreal viewportScale() const;
     [[nodiscard]] QSizeF gridSize() const;
-    [[nodiscard]] qreal panX() const noexcept { return m_pan.x(); }
-    [[nodiscard]] qreal panY() const noexcept { return m_pan.y(); }
-    void setFitToView(bool fit);
-    void setPanX(qreal value);
-    void setPanY(qreal value);
-    Q_INVOKABLE void revealCursor();
     [[nodiscard]] bool terminalReady() const noexcept;
     [[nodiscard]] bool canSendInput() const noexcept;
-    [[nodiscard]] bool canRetainFocus() const noexcept;
-    [[nodiscard]] bool canSendFocus() const noexcept;
     [[nodiscard]] bool canResize() const noexcept;
     [[nodiscard]] bool readOnly() const noexcept;
     [[nodiscard]] bool hasSelection() const;
@@ -122,11 +108,7 @@ public:
     void setSelectionForeground(const QColor& color);
     void setPreeditBackground(const QColor& color);
     void setPreeditForeground(const QColor& color);
-    void setTerminalCapabilities(
-        bool canSendInput,
-        bool canRetainFocus,
-        bool canSendFocus,
-        bool canResize);
+    void setTerminalInteraction(bool canSendInput, bool canResize);
     void setFocusedSizeAuthority(bool focused);
 
     [[nodiscard]] bool attach(
@@ -150,7 +132,6 @@ signals:
     void selectionForegroundChanged();
     void preeditBackgroundChanged();
     void preeditForegroundChanged();
-    void fitToViewChanged();
     void viewportChanged();
     void terminalTitleChanged();
     void terminalBell();
@@ -209,8 +190,6 @@ private:
         bool claim = false;
     };
 
-    bool m_fitToView = true;
-    QPointF m_pan;
     [[nodiscard]] QPointF viewportOffset() const;
     [[nodiscard]] QPointF gridPoint(const QPointF& point) const;
     void updateViewport();
@@ -247,8 +226,6 @@ private:
     bool m_resizeRetryQueued = false;
     bool m_desiredFocus = false;
     bool m_canSendInput = false;
-    bool m_canRetainFocus = false;
-    bool m_canSendFocus = false;
     bool m_canResize = false;
     bool m_focusedSizeAuthority = false;
     bool m_resizeClaimPending = false;
@@ -312,4 +289,4 @@ private:
     void invalidateMetrics();
 };
 
-} // namespace kodosi
+}

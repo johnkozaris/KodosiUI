@@ -1,32 +1,56 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-31T09:22:07.158+01:00",
-  "title": "Design System: Kodosi Warm Command Deck",
+  "generatedAt": "2026-09-13T12:00:00+01:00",
+  "title": "Kodosi Qt native terminal design",
   "extensions": {
     "colorMeta": {
       "canvas": {
         "role": "neutral",
         "displayName": "Warm Black",
         "canonical": "#120f0d",
-        "tonalRamp": ["#0b0908", "#120f0d", "#201915", "#28211d", "#eee7e2"]
+        "tonalRamp": [
+          "#0b0908",
+          "#120f0d",
+          "#201915",
+          "#28211d",
+          "#eee7e2"
+        ]
       },
       "primary": {
         "role": "primary",
         "displayName": "Signal Copper",
         "canonical": "#d5845e",
-        "tonalRamp": ["#4e2c20", "#92563d", "#d5845e", "#e89a72", "#f6c8af"]
+        "tonalRamp": [
+          "#4e2c20",
+          "#92563d",
+          "#d5845e",
+          "#e89a72",
+          "#f6c8af"
+        ]
       },
       "tertiary": {
         "role": "tertiary",
         "displayName": "Trusted Green",
         "canonical": "#62997c",
-        "tonalRamp": ["#1d3d2c", "#3f7458", "#62997c", "#91bea5", "#d8eadf"]
+        "tonalRamp": [
+          "#1d3d2c",
+          "#3f7458",
+          "#62997c",
+          "#91bea5",
+          "#d8eadf"
+        ]
       },
       "destructive": {
         "role": "tertiary",
         "displayName": "Blocked Red",
         "canonical": "#d65d5d",
-        "tonalRamp": ["#4a2020", "#913d3d", "#d65d5d", "#ea8d8d", "#f8d1d1"]
+        "tonalRamp": [
+          "#4a2020",
+          "#913d3d",
+          "#d65d5d",
+          "#ea8d8d",
+          "#f8d1d1"
+        ]
       }
     },
     "typographyMeta": {
@@ -54,20 +78,19 @@
       {
         "name": "state-settle",
         "value": "150-200ms exponential ease-out",
-        "purpose": "Communicates selection and approval-rail state without delaying input."
+        "purpose": "Communicates selection and transient panels without delaying terminal input."
       }
     ],
     "breakpoints": [
       {
         "name": "minimum-desktop",
         "value": "820px",
-        "purpose": "Preserves a 252px session rail and a usable terminal stage."
+        "purpose": "Preserves a 230px session sidebar and a usable terminal stage."
       }
     ],
     "componentNotes": {
       "terminal-stage": "Terminal pixels use the deepest surface and are never overlaid by persistent chrome.",
-      "session-rail": "Compact rows use state dots, one title line, one metadata line, and tonal selection.",
-      "approval-rail": "Urgent decisions remain bounded below the terminal and dispatch by opaque native identity."
+      "session-rail": "Folder groups contain compact stable-name rows with direct hover actions."
     },
     "rules": [
       "Keep execution and security authority in Rust and native C++.",

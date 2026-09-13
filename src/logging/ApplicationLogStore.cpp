@@ -94,10 +94,6 @@ QString severityName(const QtMsgType type)
 QString performanceCategoryName(const PerformanceCategory category)
 {
     switch (category) {
-    case PerformanceCategory::EventLane:
-        return QStringLiteral("event-lane");
-    case PerformanceCategory::FfiDecode:
-        return QStringLiteral("ffi-decode");
     case PerformanceCategory::Terminal:
         return QStringLiteral("terminal");
     }
@@ -249,7 +245,7 @@ void redactNamedSecrets(QString& value)
     }
 }
 
-} // namespace
+}
 
 void applicationQtMessageHandler(
     const QtMsgType type,
@@ -960,4 +956,4 @@ void ScopedPerformanceSpan::setOutcome(QStringView outcome)
     m_outcome = outcome.left(32).toString();
 }
 
-} // namespace kodosi
+}

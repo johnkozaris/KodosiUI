@@ -84,4 +84,4 @@ private:
         QString fallback);
 };
 
-} // namespace kodosi
+}

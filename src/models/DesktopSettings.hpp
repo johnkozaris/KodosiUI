@@ -1,14 +1,9 @@
 #pragma once
-
 #include <QObject>
 #include <QSettings>
 #include <QString>
-
 #include <memory>
-#include <optional>
-
 namespace kodosi {
-
 class DesktopSettings final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString fontFamily READ fontFamily NOTIFY settingsChanged)
@@ -17,98 +12,37 @@ class DesktopSettings final : public QObject {
     Q_PROPERTY(double lineHeight READ lineHeight NOTIFY settingsChanged)
     Q_PROPERTY(int scrollbackLines READ scrollbackLines NOTIFY settingsChanged)
     Q_PROPERTY(bool cursorBlink READ cursorBlink NOTIFY settingsChanged)
-    Q_PROPERTY(
-        bool toolApprovalAlerts
-        READ toolApprovalAlerts
-        NOTIFY settingsChanged)
-    Q_PROPERTY(
-        QString lastWorkingDirectory
-        READ lastWorkingDirectory
-        NOTIFY settingsChanged)
-    Q_PROPERTY(
-        QString effectiveWorkingDirectory
-        READ effectiveWorkingDirectory
-        NOTIFY settingsChanged)
+    Q_PROPERTY(QString effectiveWorkingDirectory READ effectiveWorkingDirectory NOTIFY settingsChanged)
     Q_PROPERTY(QString settingsError READ settingsError NOTIFY settingsErrorChanged)
-    Q_PROPERTY(int minimumFontSize READ minimumFontSize CONSTANT)
-    Q_PROPERTY(int maximumFontSize READ maximumFontSize CONSTANT)
-    Q_PROPERTY(double minimumLineHeight READ minimumLineHeight CONSTANT)
-    Q_PROPERTY(double maximumLineHeight READ maximumLineHeight CONSTANT)
-    Q_PROPERTY(int minimumScrollbackLines READ minimumScrollbackLines CONSTANT)
-    Q_PROPERTY(int maximumScrollbackLines READ maximumScrollbackLines CONSTANT)
-
 public:
-    enum class CursorStyle {
-        Block = 0,
-        Bar = 1,
-        Underline = 2,
-    };
+    enum CursorStyle { Block, Bar, Underline };
     Q_ENUM(CursorStyle)
-
-    struct Values {
-        QString fontFamily;
-        int fontSize;
-        CursorStyle cursorStyle;
-        double lineHeight;
-        int scrollbackLines;
-        bool cursorBlink;
-        bool toolApprovalAlerts;
-        std::optional<QString> lastWorkingDirectory;
-
-        bool operator==(const Values&) const = default;
-    };
-
     explicit DesktopSettings(QObject* parent = nullptr);
-    explicit DesktopSettings(
-        std::unique_ptr<QSettings> settings,
-        QObject* parent = nullptr);
-
-    [[nodiscard]] QString fontFamily() const;
-    [[nodiscard]] int fontSize() const noexcept;
-    [[nodiscard]] CursorStyle cursorStyle() const noexcept;
-    [[nodiscard]] double lineHeight() const noexcept;
-    [[nodiscard]] int scrollbackLines() const noexcept;
-    [[nodiscard]] bool cursorBlink() const noexcept;
-    [[nodiscard]] bool toolApprovalAlerts() const noexcept;
-    [[nodiscard]] QString lastWorkingDirectory() const;
-    [[nodiscard]] QString effectiveWorkingDirectory() const;
-    [[nodiscard]] QString settingsError() const;
-
-    [[nodiscard]] static constexpr int minimumFontSize() noexcept { return 8; }
-    [[nodiscard]] static constexpr int maximumFontSize() noexcept { return 32; }
-    [[nodiscard]] static constexpr double minimumLineHeight() noexcept { return 0.8; }
-    [[nodiscard]] static constexpr double maximumLineHeight() noexcept { return 2.0; }
-    [[nodiscard]] static constexpr int minimumScrollbackLines() noexcept { return 100; }
-    [[nodiscard]] static constexpr int maximumScrollbackLines() noexcept { return 100'000; }
-    [[nodiscard]] static Values defaultValues();
-
-    Q_INVOKABLE [[nodiscard]] bool apply(
-        const QString& fontFamily,
-        int fontSize,
-        int cursorStyle,
-        double lineHeight,
-        int scrollbackLines,
-        bool cursorBlink,
-        bool toolApprovalAlerts,
-        const QString& lastWorkingDirectory);
-    Q_INVOKABLE [[nodiscard]] bool reset();
-    Q_INVOKABLE [[nodiscard]] bool resetTerminal();
+    DesktopSettings(std::unique_ptr<QSettings> settings, QObject* parent = nullptr);
+    QString fontFamily() const { return m_fontFamily; }
+    int fontSize() const { return m_fontSize; }
+    CursorStyle cursorStyle() const { return m_cursor; }
+    double lineHeight() const { return m_lineHeight; }
+    int scrollbackLines() const { return m_scrollback; }
+    bool cursorBlink() const { return m_blink; }
+    QString effectiveWorkingDirectory() const;
+    QString settingsError() const { return m_error; }
+    Q_INVOKABLE bool apply(
+        const QString& family, int size, int cursor, double lineHeight, int scrollback, bool blink);
+    Q_INVOKABLE void setWorkingDirectory(const QString& path);
+    Q_INVOKABLE void resetTerminal();
     Q_INVOKABLE void clearError();
-
 signals:
     void settingsChanged();
     void settingsErrorChanged();
 
 private:
     std::unique_ptr<QSettings> m_settings;
-    Values m_values = defaultValues();
-    QString m_settingsError;
-
-    void load();
-    [[nodiscard]] bool persist(const Values& values);
-    [[nodiscard]] bool commit(const Values& values);
-    void setError(QString error);
-    void removeLegacyValues();
+    QString m_fontFamily = QStringLiteral("monospace"), m_directory, m_error;
+    int m_fontSize = 13, m_scrollback = 10000;
+    CursorStyle m_cursor = Block;
+    double m_lineHeight = 1.0;
+    bool m_blink = false;
+    bool persist();
 };
-
-} // namespace kodosi
+}

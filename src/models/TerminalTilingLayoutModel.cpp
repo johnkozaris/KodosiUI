@@ -46,7 +46,7 @@ bool validExtent(const qreal value)
     return std::isfinite(value) && value >= 0;
 }
 
-} // namespace
+}
 
 TerminalTilingLayoutModel::TerminalTilingLayoutModel(QObject* parent)
     : QAbstractListModel(parent)
@@ -819,4 +819,4 @@ void TerminalTilingLayoutModel::synchronizeEntries(QVector<Entry> entries)
     }
 }
 
-} // namespace kodosi
+}

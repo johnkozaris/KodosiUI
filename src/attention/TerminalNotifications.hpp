@@ -49,4 +49,4 @@ private:
     [[nodiscard]] static bool owns(const QString& key);
 };
 
-} // namespace kodosi
+}

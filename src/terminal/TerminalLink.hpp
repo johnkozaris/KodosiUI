@@ -9,4 +9,4 @@ namespace kodosi {
 
 [[nodiscard]] std::optional<QUrl> validatedTerminalLink(const QString& value);
 
-} // namespace kodosi
+}

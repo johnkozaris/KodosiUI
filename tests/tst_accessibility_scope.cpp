@@ -29,7 +29,7 @@ QSet<QString> accessibleNames(QAccessibleInterface* root)
 class TerminalDispatcher final : public kodosi::TerminalCommandDispatcher {
 public:
     bool isRunning() const noexcept override { return true; }
-    Result send(kodosi::CommandLane, QByteArrayView) override { return {}; }
+    Result send(QByteArrayView) override { return {}; }
     Result connectTerminal(const kodosi::TerminalSubscription&) override { return {}; }
     Result refreshTerminal(const kodosi::TerminalSubscription&) override { return {}; }
     Result disconnectTerminal(const kodosi::TerminalSubscription&) override { return {}; }
@@ -61,7 +61,7 @@ QByteArray checkpoint()
     return result == GHOSTTY_SUCCESS ? bytesOut : QByteArray {};
 }
 
-} // namespace
+}
 
 class AccessibilityScopeTest final : public QObject {
     Q_OBJECT

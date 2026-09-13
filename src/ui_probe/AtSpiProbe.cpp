@@ -520,7 +520,7 @@ QString standardRoleName(const quint32 role)
         : QString {};
 }
 
-} // namespace
+}
 
 ProbeError::ProbeError(
     const ExitCode code,
@@ -2017,4 +2017,4 @@ QJsonObject AtSpiProbe::doctor()
     };
 }
 
-} // namespace kodosi::ui_probe
+}

@@ -66,7 +66,7 @@ bool isHexDigit(const QChar value)
         || (value >= u'A' && value <= u'F');
 }
 
-} // namespace
+}
 
 DeepLinkParseResult DeepLinkRouter::parse(const QStringView rawUrl)
 {
@@ -99,13 +99,10 @@ DeepLinkParseResult DeepLinkRouter::parse(const QStringView rawUrl)
     }
     remainder = remainder.sliced(slash + 1);
 
-    QStringView encodedSession = remainder;
-    QStringView query;
-    const auto queryIndex = remainder.indexOf(u'?');
-    if (queryIndex >= 0) {
-        encodedSession = remainder.first(queryIndex);
-        query = remainder.sliced(queryIndex + 1);
+    if (remainder.contains(u'?')) {
+        return failure(DeepLinkParseError::InvalidQuery);
     }
+    const QStringView encodedSession = remainder;
     if (encodedSession.isEmpty() || encodedSession.contains(u'/')) {
         return failure(DeepLinkParseError::UnsupportedRoute);
     }
@@ -116,28 +113,9 @@ DeepLinkParseResult DeepLinkRouter::parse(const QStringView rawUrl)
         return failure(decodeError);
     }
 
-    std::optional<QString> toolUseId;
-    if (queryIndex >= 0) {
-        constexpr QStringView key = u"toolUseId=";
-        if (!query.startsWith(key)
-            || query.size() == key.size()
-            || query.contains(u'&')
-            || query.indexOf(u'=', key.size()) >= 0) {
-            return failure(DeepLinkParseError::InvalidQuery);
-        }
-        auto decodedTool = decodeComponent(
-            query.sliced(key.size()),
-            decodeError);
-        if (!decodedTool) {
-            return failure(decodeError);
-        }
-        toolUseId = std::move(*decodedTool);
-    }
-
     return {
         .destination = DeepLinkDestination {
             .sessionId = std::move(*sessionId),
-            .toolUseId = std::move(toolUseId),
         },
     };
 }
@@ -202,4 +180,4 @@ std::optional<QString> DeepLinkRouter::decodeComponent(
     return decoded;
 }
 
-} // namespace kodosi
+}

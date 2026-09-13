@@ -60,6 +60,7 @@ private:
         bool retryPending = false;
         bool retryExhausted = false;
         bool attached = false;
+        bool runtimeConnected = false;
     };
 
     TerminalSessionRegistry& m_registry;
@@ -87,4 +88,4 @@ private:
         QString body);
 };
 
-} // namespace kodosi
+}

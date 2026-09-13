@@ -99,11 +99,7 @@ bool TerminalSurfaceController::bind(
                     std::move(title),
                     std::move(body));
             });
-        view->setTerminalCapabilities(
-            presentation && presentation->canSendInput,
-            presentation && presentation->canRetainFocus,
-            presentation && presentation->canSendFocus,
-            presentation && presentation->canResize);
+        view->setTerminalInteraction(presentation && presentation->canControl, presentation && presentation->canControl);
         connect(view, &QObject::destroyed, this, [this, view] {
             for (auto binding = m_bindings.begin();
                  binding != m_bindings.end();) {
@@ -184,11 +180,7 @@ bool TerminalSurfaceController::bind(
         return true;
     }
     if (found->sessionId == sessionId) {
-        found->view->setTerminalCapabilities(
-            presentation && presentation->canSendInput,
-            presentation && presentation->canRetainFocus,
-            presentation && presentation->canSendFocus,
-            presentation && presentation->canResize);
+        found->view->setTerminalInteraction(presentation && presentation->canControl, presentation && presentation->canControl);
         tryAttach(*found);
         return true;
     }
@@ -202,11 +194,7 @@ bool TerminalSurfaceController::bind(
     found->retryPending = false;
     found->retryExhausted = false;
     found->attached = false;
-    found->view->setTerminalCapabilities(
-        presentation && presentation->canSendInput,
-        presentation && presentation->canRetainFocus,
-        presentation && presentation->canSendFocus,
-        presentation && presentation->canResize);
+    found->view->setTerminalInteraction(presentation && presentation->canControl, presentation && presentation->canControl);
     tryAttach(*found);
     return true;
 }
@@ -243,11 +231,7 @@ bool TerminalSurfaceController::retry(
     found->retryPending = false;
     found->retryExhausted = false;
     found->attached = false;
-    found->view->setTerminalCapabilities(
-        presentation->canSendInput,
-        presentation->canRetainFocus,
-        presentation->canSendFocus,
-        presentation->canResize);
+    found->view->setTerminalInteraction(presentation->canControl, presentation->canControl);
     tryAttach(*found);
     return true;
 }
@@ -311,11 +295,7 @@ void TerminalSurfaceController::reconcile()
         for (auto& binding : m_bindings) {
             cancelCheckpointTimeout(binding);
             if (binding.view != nullptr) {
-                binding.view->setTerminalCapabilities(
-                    false,
-                    false,
-                    false,
-                    false);
+                binding.view->setTerminalInteraction(false, false);
                 binding.view->detach();
             }
             binding.runtimeIncarnationId.clear();
@@ -351,11 +331,20 @@ void TerminalSurfaceController::reconcile()
             binding = m_bindings.erase(binding);
             continue;
         }
-        binding->view->setTerminalCapabilities(
-            presentation->canSendInput,
-            presentation->canRetainFocus,
-            presentation->canSendFocus,
-            presentation->canResize);
+        binding->view->setTerminalInteraction(presentation->canControl, presentation->canControl);
+        const auto connected = !presentation->isRemoteConnectable || presentation->canControl;
+        if (connected != binding->runtimeConnected) {
+            binding->runtimeConnected = connected;
+            binding->retryAttempts = 0;
+            binding->retryPending = false;
+            binding->retryExhausted = false;
+            if (!connected) {
+                cancelCheckpointTimeout(*binding);
+                binding->view->detach();
+                binding->attached = false;
+                binding->subscription = {};
+            }
+        }
         if (binding->runtimeIncarnationId != *currentIncarnation) {
             cancelCheckpointTimeout(*binding);
             binding->view->detach();
@@ -383,6 +372,10 @@ void TerminalSurfaceController::reconcile()
 
 void TerminalSurfaceController::tryAttach(Binding& binding)
 {
+    const auto presentation = m_sessions.presentationSession(binding.sessionId);
+    if (presentation && presentation->isRemoteConnectable && !presentation->canControl) {
+        return;
+    }
     if (binding.attached || binding.retryPending || binding.retryExhausted
         || binding.view == nullptr || !m_runtime.isRunning()
         || m_waitingForFreshCatalog || binding.runtimeIncarnationId.isEmpty()) {
@@ -575,4 +568,4 @@ void TerminalSurfaceController::forwardNotification(
     });
 }
 
-} // namespace kodosi
+}

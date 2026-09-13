@@ -98,7 +98,7 @@ bool sendRaw(const QString& endpoint, const QByteArray& bytes)
         && !socket.readAll().isEmpty();
 }
 
-} // namespace
+}
 
 class SingleInstanceTest final : public QObject {
     Q_OBJECT
@@ -125,7 +125,7 @@ void SingleInstanceTest::endpointNamespaceMatchesEffectiveRustDataRoot()
     EnvironmentGuard productionRoot("KODOSI_PRODUCTION_DATA_ROOT");
     EnvironmentGuard configHome("XDG_CONFIG_HOME");
     QTemporaryDir directory(
-        QDir::current().filePath(
+        QDir::temp().filePath(
             QStringLiteral("single-instance-namespace-XXXXXX")));
     QVERIFY(directory.isValid());
 
@@ -183,7 +183,7 @@ void SingleInstanceTest::endpointNamespaceRejectsUnsafeIsolatedRoots()
     EnvironmentGuard dataRoot("KODOSI_DATA_ROOT");
     EnvironmentGuard productionRoot("KODOSI_PRODUCTION_DATA_ROOT");
     QTemporaryDir directory(
-        QDir::current().filePath(
+        QDir::temp().filePath(
             QStringLiteral("single-instance-roots-XXXXXX")));
     QVERIFY(directory.isValid());
     const auto production = QDir(directory.path()).filePath(
@@ -240,7 +240,7 @@ void SingleInstanceTest::
     EnvironmentGuard dataRoot("KODOSI_DATA_ROOT");
     EnvironmentGuard productionRoot("KODOSI_PRODUCTION_DATA_ROOT");
     QTemporaryDir directory(
-        QDir::current().filePath(
+        QDir::temp().filePath(
             QStringLiteral("single-instance-core-alias-XXXXXX")));
     QVERIFY(directory.isValid());
 
@@ -283,7 +283,7 @@ void SingleInstanceTest::
     delaysEndpointUntilOwnerReadinessAndDeliversExactlyOnce()
 {
     QTemporaryDir directory(
-        QDir::current().filePath(
+        QDir::temp().filePath(
             QStringLiteral("single-instance-readiness-XXXXXX")));
     QVERIFY(directory.isValid());
     auto owner = std::make_unique<kodosi::SingleInstanceGuard>();
@@ -376,7 +376,7 @@ void SingleInstanceTest::
 void SingleInstanceTest::contenderUsesOneAbsoluteReadinessTimeout()
 {
     QTemporaryDir directory(
-        QDir::current().filePath(
+        QDir::temp().filePath(
             QStringLiteral("single-instance-timeout-XXXXXX")));
     QVERIFY(directory.isValid());
     kodosi::SingleInstanceGuard owner;
@@ -416,7 +416,7 @@ void SingleInstanceTest::contenderUsesOneAbsoluteReadinessTimeout()
 void SingleInstanceTest::forwardsAcknowledgesAndDeduplicates()
 {
     QTemporaryDir directory(
-        QDir::current().filePath(
+        QDir::temp().filePath(
             QStringLiteral("single-instance-XXXXXX")));
     QVERIFY(directory.isValid());
     kodosi::SingleInstanceGuard owner;
@@ -481,7 +481,7 @@ void SingleInstanceTest::forwardsAcknowledgesAndDeduplicates()
 void SingleInstanceTest::forwardsBoundedActivationTokensForEveryKind()
 {
     QTemporaryDir directory(
-        QDir::current().filePath(
+        QDir::temp().filePath(
             QStringLiteral("single-instance-token-XXXXXX")));
     QVERIFY(directory.isValid());
     const auto token = QString(
@@ -603,7 +603,7 @@ void SingleInstanceTest::rejectsUnsafeActivationTokensAndScopesOwnerHook()
     QVERIFY(!qEnvironmentVariableIsSet("XDG_ACTIVATION_TOKEN"));
 
     QTemporaryDir directory(
-        QDir::current().filePath(
+        QDir::temp().filePath(
             QStringLiteral("si-invalid-token-XXXXXX")));
     QVERIFY(directory.isValid());
     kodosi::SingleInstanceGuard rejected;
@@ -680,7 +680,7 @@ void SingleInstanceTest::rejectsUnsafeActivationTokensAndScopesOwnerHook()
 void SingleInstanceTest::rejectsMalformedAndOversizedFrames()
 {
     QTemporaryDir directory(
-        QDir::current().filePath(
+        QDir::temp().filePath(
             QStringLiteral("single-instance-malformed-XXXXXX")));
     QVERIFY(directory.isValid());
     kodosi::SingleInstanceGuard owner;
@@ -726,7 +726,7 @@ void SingleInstanceTest::rejectsMalformedAndOversizedFrames()
 void SingleInstanceTest::boundsIncompleteAcceptedClients()
 {
     QTemporaryDir directory(
-        QDir::current().filePath(
+        QDir::temp().filePath(
             QStringLiteral("single-instance-cap-XXXXXX")));
     QVERIFY(directory.isValid());
     kodosi::SingleInstanceGuard owner;
@@ -863,7 +863,7 @@ void SingleInstanceTest::shortEndpointNamesFitPortableUnixSocketPaths()
 void SingleInstanceTest::removesOnlyUnlockedStaleEndpoint()
 {
     QTemporaryDir directory(
-        QDir::current().filePath(
+        QDir::temp().filePath(
             QStringLiteral("single-instance-stale-XXXXXX")));
     QVERIFY(directory.isValid());
     QVERIFY(::chmod(

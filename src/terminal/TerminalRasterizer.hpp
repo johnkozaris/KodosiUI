@@ -65,4 +65,4 @@ public:
         const Options& options);
 };
 
-} // namespace kodosi
+}

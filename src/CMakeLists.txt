@@ -6,8 +6,6 @@ set_source_files_properties(
 qt_add_library(kodosi-runtime-bridge STATIC
     app/ApplicationLifecycleModel.cpp
     app/ApplicationLifecycleModel.hpp
-    app/DeepLinkController.cpp
-    app/DeepLinkController.hpp
     app/DeepLinkRouter.cpp
     app/DeepLinkRouter.hpp
     app/SingleInstanceGuard.cpp
@@ -16,64 +14,20 @@ qt_add_library(kodosi-runtime-bridge STATIC
     bridge/RuntimeBridge.hpp
     logging/ApplicationLogStore.cpp
     logging/ApplicationLogStore.hpp
-    models/AccountContextFence.cpp
-    models/AccountContextFence.hpp
-    models/AgentConversationModel.cpp
-    models/AgentConversationModel.hpp
-    models/AgentAutoModeRulesModel.cpp
-    models/AgentAutoModeRulesModel.hpp
-    models/AgentCustomAgentsModel.cpp
-    models/AgentCustomAgentsModel.hpp
-    models/AgentMemoryModel.cpp
-    models/AgentMemoryModel.hpp
-    models/AgentGlobalModel.cpp
-    models/AgentGlobalModel.hpp
-    models/AgentSessionIntelModel.cpp
-    models/AgentSessionIntelModel.hpp
+    models/Workspace.cpp
+    models/Workspace.hpp
+    models/ProviderTools.cpp
+    models/ProviderTools.hpp
     models/AppearanceModel.cpp
     models/AppearanceModel.hpp
-    models/AttentionModel.cpp
-    models/AttentionModel.hpp
-    models/AuthStateModel.cpp
-    models/AuthStateModel.hpp
-    models/AuthActions.cpp
-    models/AuthActions.hpp
-    models/DevicesModel.cpp
-    models/DevicesModel.hpp
-    models/DeviceActions.cpp
-    models/DeviceActions.hpp
     models/DesktopSettings.cpp
     models/DesktopSettings.hpp
     models/DesktopStateModel.cpp
     models/DesktopStateModel.hpp
-    models/MissionDirectoryModel.cpp
-    models/MissionDirectoryModel.hpp
-    models/MissionDetailModel.cpp
-    models/MissionDetailModel.hpp
-    models/MissionActions.cpp
-    models/MissionActions.hpp
-    models/PeopleModel.cpp
-    models/PeopleModel.hpp
-    models/PeopleActions.cpp
-    models/PeopleActions.hpp
-    models/RuntimeDiagnosticsModel.cpp
-    models/RuntimeDiagnosticsModel.hpp
-    models/PendingPermissionsModel.cpp
-    models/PendingPermissionsModel.hpp
     models/SessionCatalogModel.cpp
     models/SessionCatalogModel.hpp
-    models/SessionAccess.cpp
-    models/SessionAccess.hpp
-    models/SessionActions.cpp
-    models/SessionActions.hpp
-    models/SessionShareScope.cpp
-    models/SessionShareScope.hpp
-    models/SteeringModel.cpp
-    models/SteeringModel.hpp
     models/TerminalTilingLayoutModel.cpp
     models/TerminalTilingLayoutModel.hpp
-    models/TrustModel.cpp
-    models/TrustModel.hpp
 )
 
 target_include_directories(kodosi-runtime-bridge
@@ -92,8 +46,6 @@ target_link_libraries(kodosi-runtime-bridge
 )
 
 qt_add_library(kodosi-desktop-integration STATIC
-    attention/ApprovalNotifications.cpp
-    attention/ApprovalNotifications.hpp
     attention/TerminalNotifications.cpp
     attention/TerminalNotifications.hpp
     platform/DesktopNotificationDriver.hpp
@@ -103,12 +55,6 @@ qt_add_library(kodosi-desktop-integration STATIC
     platform/FreedesktopNotificationDriver.hpp
     platform/NotificationText.cpp
     platform/NotificationText.hpp
-    models/ExternalDiscoveryModel.cpp
-    models/ExternalDiscoveryModel.hpp
-    models/ProjectIntelligenceModel.cpp
-    models/ProjectIntelligenceModel.hpp
-    models/ProviderConversationsModel.cpp
-    models/ProviderConversationsModel.hpp
 )
 
 target_include_directories(kodosi-desktop-integration
@@ -262,20 +208,21 @@ target_link_libraries(kodosi-ui-probe
         kodosi-ui-probe-core
 )
 
-qt_add_qml_module(kodosi-qt
+qt_add_library(kodosi-ui STATIC)
+qt_add_qml_module(kodosi-ui
     URI Kodosi
+    RESOURCE_PREFIX /qt/qml
+    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Kodosi"
     VERSION 1.0
     DEPENDENCIES
         Kodosi.Models
     QML_FILES
         qml/Main.qml
-        qml/Auth/AuthOverlay.qml
-        qml/Auth/AuthErrorBanner.qml
-        qml/Auth/AuthGate.qml
-        qml/Appearance/AppearanceMenu.qml
-        qml/AgentIntel/AgentCustomAgentsSurface.qml
-        qml/AgentIntel/AgentIntelDrawer.qml
-        qml/AgentIntel/ProjectIntelligenceModal.qml
+        qml/Workspace/PeopleView.qml
+        qml/Workspace/MissionsView.qml
+        qml/Workspace/SettingsView.qml
+        qml/Workbench/SessionDetails.qml
+        qml/Controls/ProviderIcon.qml
         qml/Controls/NavTab.qml
         qml/Controls/KButton.qml
         qml/Controls/KFocusIndicator.qml
@@ -294,36 +241,29 @@ qt_add_qml_module(kodosi-qt
         qml/Controls/KScrollBar.qml
         qml/Controls/KScrollView.qml
         qml/Controls/KSegmentedBar.qml
-        qml/Controls/KSlider.qml
         qml/Controls/KSpinBox.qml
-        qml/Controls/KSwitch.qml
-        qml/Controls/KTextArea.qml
         qml/Controls/KTextField.qml
         qml/Controls/PlainLabel.qml
-        qml/Controls/StatusPill.qml
-        qml/Controls/SurfaceCard.qml
-        qml/Devices/DevicesView.qml
-        qml/Devices/AgentIntegrationsPanel.qml
-        qml/Devices/TrustPanel.qml
-        qml/Diagnostics/DiagnosticsDrawer.qml
-        qml/Diagnostics/RuntimeHealthBanner.qml
-        qml/People/PeopleView.qml
-        qml/People/MissionDetailView.qml
-        qml/People/TaskDueDateField.qml
-        qml/Settings/SettingsDrawer.qml
-        qml/Settings/AgentsSettingsSurface.qml
-        qml/Shell/KeyboardShortcutsOverlay.qml
         qml/Startup/StartupOverlay.qml
         qml/Theme/KodosiTheme.qml
         qml/Workbench/SessionSidebar.qml
-        qml/Workbench/ResumeAgentWorkModal.qml
+        qml/Workbench/HistoryView.qml
         qml/Workbench/TerminalDivider.qml
         qml/Workbench/TerminalStage.qml
-        qml/Workbench/TerminalViewportControls.qml
         qml/Workbench/TerminalTile.qml
     RESOURCES
         qml/assets/kodosi-logo-dark.png
+        qml/assets/providers/claude-light.svg
+        qml/assets/providers/claude-dark.svg
+        qml/assets/providers/copilot-light.svg
+        qml/assets/providers/copilot-dark.svg
+        qml/assets/providers/codex-light.svg
+        qml/assets/providers/codex-dark.svg
+        qml/assets/providers/cursor-light.svg
+        qml/assets/providers/cursor-dark.svg
 )
+
+target_link_libraries(kodosi-ui PUBLIC Qt6::Quick Qt6::QuickControls2 kodosi-qml-modelsplugin)
 
 target_link_libraries(kodosi-qt
     PRIVATE
@@ -337,6 +277,7 @@ target_link_libraries(kodosi-qt
         kodosi-runtime-bridge
         kodosi-terminal-kernel
         kodosi-qml-modelsplugin
+        kodosi-uiplugin
 )
 
 target_compile_definitions(kodosi-runtime-bridge

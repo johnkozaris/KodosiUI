@@ -1,3 +1,4 @@
+import Kodosi 1.0
 import QtQuick
 
 Item {
@@ -19,7 +20,7 @@ Item {
         Math.round(percentage))
     Accessible.focusable: true
     activeFocusOnTab: visible
-    // Qt exposes these item properties through AT-SPI's Value interface.
+
     readonly property real value: percentage
     readonly property real minimumValue: 0
     readonly property real maximumValue: 100

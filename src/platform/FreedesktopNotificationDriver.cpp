@@ -21,7 +21,7 @@ QDBusMessage method(const QString& name)
     return QDBusMessage::createMethodCall(service, path, interface, name);
 }
 
-} // namespace
+}
 
 FreedesktopNotificationDriver::FreedesktopNotificationDriver(QObject* parent)
     : DesktopNotificationDriver(parent)
@@ -235,4 +235,4 @@ void FreedesktopNotificationDriver::forget(const uint id)
     m_activationTokens.remove(id);
 }
 
-} // namespace kodosi
+}

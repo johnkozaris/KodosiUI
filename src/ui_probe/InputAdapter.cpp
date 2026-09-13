@@ -2033,7 +2033,7 @@ private:
     bool m_closed = false;
 };
 
-} // namespace
+}
 
 int InputProtocol::keySym(const QString& name)
 {
@@ -3466,7 +3466,7 @@ std::optional<QJsonObject> readLifecycleFrame(
             "The input sidecar exited before startup committed"));
 }
 
-} // namespace
+}
 
 QJsonObject startPortalInput(const int timeoutMs)
 {
@@ -4102,6 +4102,6 @@ void recordPortalInputStartupFailure(
     }
 }
 
-} // namespace kodosi::ui_probe
+}
 
 #include "InputAdapter.moc"

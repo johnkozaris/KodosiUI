@@ -93,7 +93,7 @@ private:
     std::unique_ptr<Private> d;
 };
 
-} // namespace kodosi
+}
 
 Q_DECLARE_METATYPE(kodosi::DeepLinkDestination)
 Q_DECLARE_METATYPE(kodosi::DeepLinkParseError)
