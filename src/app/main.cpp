@@ -2,6 +2,7 @@
 #include "app/DeepLinkRouter.hpp"
 #include "app/QmlModelTypes.hpp"
 #include "app/SingleInstanceGuard.hpp"
+#include "app/RuntimeStorageBootstrap.hpp"
 #include "platform/TerminalNotifications.hpp"
 #include "bridge/RuntimeBridge.hpp"
 #include "logging/ApplicationLogStore.hpp"
@@ -56,6 +57,11 @@ int main(int argc, char* argv[])
     }
     auto activation = kodosi::SingleInstanceGuard::activation(route);
     qunsetenv("XDG_ACTIVATION_TOKEN");
+    const auto storage = kodosi::RuntimeStorageBootstrap::resolve();
+    if (!storage) {
+        qCritical().noquote() << storage.error();
+        return EXIT_FAILURE;
+    }
     const auto name = kodosi::SingleInstanceGuard::endpointNamespace();
     if (!name.valid()) {
         qCritical().noquote() << name.error;
@@ -71,30 +77,35 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    kodosi::ApplicationLogStore logs({ .directory = kodosi::ApplicationLogStore::standardLogDirectory() });
+    if (auto prepared = storage->prepare(); !prepared) {
+        qCritical().noquote() << prepared.error();
+        return EXIT_FAILURE;
+    }
+    kodosi::ApplicationLogStore logs({ .directory = storage->logDirectory });
+    if (!logs.healthy()) qWarning().noquote() << logs.lastError();
     kodosi::TerminalSessionRegistry terminalSessions;
     kodosi::RuntimeBridge runtime(terminalSessions);
     kodosi::ApplicationLifecycleModel lifecycle(runtime);
     kodosi::SessionCatalogModel sessions;
-    kodosi::DesktopStateModel desktop;
+    kodosi::DesktopStateModel desktop(storage->settings(), true);
     desktop.attachSessionCatalog(&sessions);
     kodosi::Workspace workspace(runtime, sessions, desktop);
     kodosi::ProviderTools providers(runtime);
-    kodosi::AppearanceModel appearance;
-    kodosi::DesktopSettings settings;
+    kodosi::AppearanceModel appearance(storage->settings());
+    kodosi::DesktopSettings settings(storage->settings());
     kodosi::DesktopFileIntegration files;
     kodosi::TerminalTilingLayoutModel tiling;
     kodosi::FreedesktopNotificationDriver notifications;
     kodosi::TerminalNotifications terminalNotifications(sessions, notifications);
     kodosi::TerminalSurfaceController surfaces(terminalSessions, runtime, sessions);
-    surfaces.setNotificationSink(&terminalNotifications);
     kodosi::installTerminalAccessibility();
 
-    QObject::connect(&runtime, &kodosi::RuntimeBridge::eventReceived, &app, [&](const QJsonObject& event) {
-        workspace.apply(event);
+    QObject::connect(&runtime, &kodosi::RuntimeBridge::eventReceived, &app, [&](const QJsonObject& event, quint64 accountEpoch, const QByteArray& payload) {
+        workspace.apply(event, accountEpoch);
+        terminalNotifications.apply(event);
         const auto type = event.value(QStringLiteral("type")).toString();
         if (type == QStringLiteral("provider.reply") || type == QStringLiteral("provider.error"))
-            providers.apply(event);
+            providers.apply(event, payload);
         if (type == QStringLiteral("auth.ready") || type == QStringLiteral("auth.required"))
             providers.reset();
     });

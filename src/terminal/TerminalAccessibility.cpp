@@ -4,6 +4,7 @@
 
 #include <QAccessible>
 #include <QAccessibleObject>
+#include <QCoreApplication>
 #include <QQuickWindow>
 
 #include <algorithm>
@@ -49,11 +50,11 @@ public:
         }
         switch (type) {
         case QAccessible::Name:
-            return QStringLiteral("Terminal session");
+            return QCoreApplication::translate("TerminalAccessible", "Terminal session");
         case QAccessible::Value:
             return view->accessibleText();
         case QAccessible::Description:
-            return QStringLiteral("Live coding-agent terminal");
+            return QCoreApplication::translate("TerminalAccessible", "Live terminal session");
         default:
             return {};
         }

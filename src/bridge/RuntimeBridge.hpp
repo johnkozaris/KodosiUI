@@ -98,7 +98,7 @@ public:
         const QString& expectedRuntimeIncarnationId, QByteArrayView bytes) override;
 
 signals:
-    void eventReceived(QJsonObject event);
+    void eventReceived(QJsonObject event, quint64 accountEpoch, QByteArray payload);
     void runningChanged(bool running);
     void eventError(QString message);
 
@@ -118,7 +118,7 @@ private:
     std::atomic<bool> m_queueFailed { false };
     std::uint64_t m_nextGeneration = 0;
     QString m_accountUserId;
-    qint64 m_accountEpoch = 0;
+    std::uint64_t m_accountEpoch = 0;
     [[nodiscard]] Result requireRunning() const;
     [[nodiscard]] Result terminalOperationResult(std::int32_t result, QString operation) const;
     void queueEvent(const std::uint8_t* json, std::uintptr_t length);

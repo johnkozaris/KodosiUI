@@ -1,6 +1,7 @@
 #include "platform/FreedesktopNotificationDriver.hpp"
 
 #include <QDBusConnection>
+#include <QDBusPendingCallWatcher>
 #include <QSignalSpy>
 #include <QtTest/QTest>
 
@@ -66,6 +67,7 @@ private slots:
     void initTestCase();
     void cleanupTestCase();
     void postsHandlesActionsAndWithdraws();
+    void pendingPostsRemainBoundedAfterWithdrawal();
 
 private:
     QDBusConnection m_bus = QDBusConnection::sessionBus();
@@ -106,12 +108,6 @@ void FreedesktopNotificationDriverTest::postsHandlesActionsAndWithdraws()
         .key = QStringLiteral("request-identity"),
         .title = QStringLiteral("Bash <Session>"),
         .body = QStringLiteral("<b>plain text</b>"),
-        .actions = {
-            QStringLiteral("default"),
-            QStringLiteral("Open Kodosi"),
-            QStringLiteral("approve"),
-            QStringLiteral("Approve"),
-        },
     });
 
     QTRY_COMPARE(m_service.notifications.size(), 1);
@@ -133,8 +129,6 @@ void FreedesktopNotificationDriverTest::postsHandlesActionsAndWithdraws()
         QStringList({
             QStringLiteral("default"),
             QStringLiteral("Open Kodosi"),
-            QStringLiteral("approve"),
-            QStringLiteral("Approve"),
         }));
     QCOMPARE(
         notification.hints.value(QStringLiteral("desktop-entry")).toString(),
@@ -161,6 +155,20 @@ void FreedesktopNotificationDriverTest::postsHandlesActionsAndWithdraws()
 
     driver.withdraw(QStringLiteral("request-identity"));
     QTRY_COMPARE(m_service.closed, QVector<uint> {42});
+}
+
+void FreedesktopNotificationDriverTest::pendingPostsRemainBoundedAfterWithdrawal()
+{
+    kodosi::FreedesktopNotificationDriver driver;
+    QSignalSpy errors(&driver, &kodosi::DesktopNotificationDriver::deliveryError);
+    for (int i = 0; i < 1000; ++i) {
+        const auto key = QString::number(i);
+        driver.post({key, QStringLiteral("Terminal"), QStringLiteral("Complete")});
+        driver.withdraw(key);
+    }
+    QCOMPARE(errors.count(), 968);
+    QVERIFY(driver.findChildren<QDBusPendingCallWatcher*>().size() <= 32);
+    QTRY_VERIFY(driver.findChildren<QDBusPendingCallWatcher*>().isEmpty());
 }
 
 QTEST_GUILESS_MAIN(FreedesktopNotificationDriverTest)

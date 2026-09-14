@@ -55,26 +55,22 @@ set(
     "Path to the verified kodosi-ghostty checkout"
 )
 set(KODOSI_RUNTIME_MANIFEST "${KODOSI_RUNTIME_ROOT}/rustProcess/Cargo.toml")
-set(KODOSI_RUNTIME_GENERATED_HEADER
-    "${KODOSI_RUNTIME_ROOT}/rustProcess/target/include/kodosi_runtime.h"
-)
-set(KODOSI_RUNTIME_HEADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/kodosi-runtime")
+set(KODOSI_RUNTIME_BUNDLE_ROOT "${CMAKE_CURRENT_BINARY_DIR}/rust-ffi")
+set(KODOSI_RUST_TARGET "x86_64-unknown-linux-gnu")
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(KODOSI_RUST_PROFILE "release")
-    set(KODOSI_RUST_PROFILE_ARGS --release)
 else()
-    set(KODOSI_RUST_PROFILE "debug")
-    set(KODOSI_RUST_PROFILE_ARGS)
+    set(KODOSI_RUST_PROFILE "dev")
 endif()
-set(
-    KODOSI_RUNTIME_ARCHIVE
-    "${KODOSI_RUNTIME_ROOT}/rustProcess/target/${KODOSI_RUST_PROFILE}/libkodosi_ffi_c.a"
-)
+set(KODOSI_RUNTIME_BUNDLE
+    "${KODOSI_RUNTIME_BUNDLE_ROOT}/${KODOSI_RUST_TARGET}/${KODOSI_RUST_PROFILE}/current")
+set(KODOSI_RUNTIME_HEADER_DIR "${KODOSI_RUNTIME_BUNDLE}/include")
+set(KODOSI_RUNTIME_ARCHIVE "${KODOSI_RUNTIME_BUNDLE}/libkodosi_ffi_c.a")
 set(
     KODOSI_RUNTIME_CLI
     "${KODOSI_RUNTIME_ROOT}/rustProcess/target/release/kodosi"
 )
-file(MAKE_DIRECTORY "${KODOSI_RUNTIME_HEADER_DIR}")
+file(MAKE_DIRECTORY "${KODOSI_RUNTIME_BUNDLE_ROOT}")
 set(
     KODOSI_GHOSTTY_VT_ARCHIVE
     "${KODOSI_GHOSTTY_ROOT}/Vendor/GhosttyVt/linux-x86_64/lib/libghostty-vt.a"
@@ -122,16 +118,12 @@ add_custom_target(kodosi-rust-ffi-build
         "${CMAKE_COMMAND}" -E env
         "KODOSI_GHOSTTY_DIR=${KODOSI_GHOSTTY_ROOT}"
         "SOURCE_DATE_EPOCH=${KODOSI_SOURCE_DATE_EPOCH}"
-        "${CARGO_EXECUTABLE}" build
-        --manifest-path "${KODOSI_RUNTIME_MANIFEST}"
-        --locked
-        ${KODOSI_RUST_PROFILE_ARGS}
-        -p kodosi-ffi-c
+        "${Python3_EXECUTABLE}" "${KODOSI_RUNTIME_ROOT}/scripts/build-ffi-artifact.py"
+        --manifest "${KODOSI_RUNTIME_MANIFEST}"
+        --output-dir "${KODOSI_RUNTIME_BUNDLE_ROOT}"
+        --target "${KODOSI_RUST_TARGET}"
+        --profile "${KODOSI_RUST_PROFILE}"
     COMMAND ${KODOSI_VERIFY_PINNED_SOURCES_COMMAND}
-    COMMAND
-        "${CMAKE_COMMAND}" -E copy_if_different
-        "${KODOSI_RUNTIME_GENERATED_HEADER}"
-        "${KODOSI_RUNTIME_HEADER_DIR}/kodosi_runtime.h"
     BYPRODUCTS
         "${KODOSI_RUNTIME_ARCHIVE}"
         "${KODOSI_RUNTIME_HEADER_DIR}/kodosi_runtime.h"
@@ -150,8 +142,8 @@ set_target_properties(kodosi-ghostty-vt PROPERTIES
 )
 set_target_properties(kodosi-rust-runtime PROPERTIES
     IMPORTED_LOCATION "${KODOSI_RUNTIME_ARCHIVE}"
-    INTERFACE_INCLUDE_DIRECTORIES "${KODOSI_RUNTIME_HEADER_DIR}"
 )
+include_directories("${KODOSI_RUNTIME_HEADER_DIR}")
 set_property(TARGET kodosi-rust-runtime PROPERTY INTERFACE_LINK_LIBRARIES
     "kodosi-ghostty-vt;Threads::Threads;${CMAKE_DL_LIBS};util;rt;m"
 )

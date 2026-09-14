@@ -48,6 +48,7 @@ public:
     };
 
     explicit AppearanceModel(QObject* parent = nullptr);
+    AppearanceModel(std::unique_ptr<QSettings> settings, QObject* parent = nullptr);
     AppearanceModel(
         std::unique_ptr<QSettings> settings,
         QDBusConnection bus,

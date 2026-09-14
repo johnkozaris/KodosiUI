@@ -316,6 +316,7 @@ Item {
                             width: layoutWidth
                             height: layoutHeight
                             visible: entryVisible
+                            suppressed: !root.interactionEnabled || !entryVisible
 
                             Loader {
                                 anchors.fill: parent
@@ -339,6 +340,7 @@ Item {
 
                                 TerminalTile {
                                     sessionId: layoutEntry.sessionId
+                                    interactionEnabled: root.interactionEnabled && layoutEntry.entryVisible
                                     accessibilitySuppressed:
                                         !layoutEntry.entryVisible
                                     focusedSizeAuthority:
@@ -363,6 +365,7 @@ Item {
                                 id: dividerComponent
 
                                 TerminalDivider {
+                                    enabled: root.interactionEnabled
                                     dividerId: layoutEntry.stableId
                                     orientation: layoutEntry.orientation
                                     percentage: layoutEntry.percentage

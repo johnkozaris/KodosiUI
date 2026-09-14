@@ -50,13 +50,12 @@ TerminalNotifications::TerminalNotifications(
     connect(&m_sessions, &QAbstractItemModel::dataChanged, this, pruneContexts);
 }
 
-void TerminalNotifications::receiveTerminalNotification(
-    TerminalNotificationEvent notification)
+void TerminalNotifications::apply(const QJsonObject& event)
 {
+    if (event.value(QStringLiteral("type")) != QStringLiteral("term.notification")) return;
     const Context context {
-        .sessionId = std::move(notification.sessionId),
-        .runtimeIncarnationId =
-            std::move(notification.runtimeIncarnationId),
+        .sessionId = event.value(QStringLiteral("sessionId")).toString(),
+        .runtimeIncarnationId = event.value(QStringLiteral("runtimeIncarnationId")).toString(),
     };
     if (!current(context)) {
         return;
@@ -70,8 +69,8 @@ void TerminalNotifications::receiveTerminalNotification(
 
     const auto key = QStringLiteral("terminal:")
         + QUuid::createUuidV7().toString(QUuid::WithoutBraces);
-    auto title = notificationPlainText(notification.title, 160);
-    auto body = notificationPlainText(notification.body, 240);
+    auto title = notificationPlainText(event.value(QStringLiteral("title")).toString(), 160);
+    auto body = notificationPlainText(event.value(QStringLiteral("body")).toString(), 240);
     if (title.isEmpty()) {
         title = tr("Terminal");
     }
@@ -84,10 +83,6 @@ void TerminalNotifications::receiveTerminalNotification(
         .key = key,
         .title = std::move(title),
         .body = std::move(body),
-        .actions = {
-            QStringLiteral("default"),
-            tr("Open Kodosi"),
-        },
     });
 }
 
@@ -139,9 +134,10 @@ void TerminalNotifications::prune()
 
 bool TerminalNotifications::current(const Context& context) const
 {
-    const auto incarnation =
-        m_sessions.incarnationForSession(context.sessionId);
-    return incarnation && *incarnation == context.runtimeIncarnationId;
+    const auto session = m_sessions.session(context.sessionId);
+    return m_sessions.hasAuthoritativeSnapshot() && session
+        && session->kind == QStringLiteral("local")
+        && session->incarnationId == context.runtimeIncarnationId;
 }
 
 bool TerminalNotifications::owns(const QString& key)

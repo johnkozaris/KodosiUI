@@ -1,4 +1,5 @@
 #include "bridge/RuntimeBridge.hpp"
+#include "bridge/JsonEnvelope.hpp"
 #include <kodosi_runtime.h>
 
 #include <QJsonDocument>
@@ -67,7 +68,7 @@ RuntimeBridge::Result RuntimeBridge::start()
     Q_ASSERT(thread() == QThread::currentThread());
     if (isRunning())
         return {};
-    if (kodosi_protocol_version() != 39 || kodosi_abi_version() != 6) {
+    if (kodosi_protocol_version() != 42 || kodosi_abi_version() != 6) {
         return std::unexpected(failure(RuntimeFailure::Code::ContractMismatch, KODOSI_FFI_DESER_FAILED,
             tr("The linked runtime is incompatible with this version of Kodosi.")));
     }
@@ -96,7 +97,7 @@ void RuntimeBridge::startAsync(std::function<void(Result)> completion)
 {
     Q_ASSERT(thread() == QThread::currentThread());
     if (isRunning()) { completion({}); return; }
-    if (m_starting || kodosi_protocol_version() != 39 || kodosi_abi_version() != 6) {
+    if (m_starting || kodosi_protocol_version() != 42 || kodosi_abi_version() != 6) {
         completion(std::unexpected(failure(RuntimeFailure::Code::StartRejected, KODOSI_FFI_RUNTIME_STOPPED,
             tr("The runtime is unavailable or still starting."))));
         return;
@@ -165,17 +166,27 @@ RuntimeBridge::Result RuntimeBridge::send(QByteArrayView json)
         return std::unexpected(failure(RuntimeFailure::Code::InvalidArgument, KODOSI_FFI_PAYLOAD_TOO_LARGE,
             tr("The command exceeds the runtime limit.")));
     }
-    QJsonParseError error;
-    const auto document = QJsonDocument::fromJson(QByteArray(json.data(), json.size()), &error);
-    if (error.error != QJsonParseError::NoError || !document.isObject()) {
-        return std::unexpected(failure(
-            RuntimeFailure::Code::InvalidArgument, KODOSI_FFI_DESER_FAILED, tr("The command is invalid.")));
+    const QByteArray command(json.data(), json.size());
+    const auto fields = jsonObjectFields(command);
+    if (!fields) {
+        return std::unexpected(failure(RuntimeFailure::Code::InvalidArgument,
+            KODOSI_FFI_DESER_FAILED, tr("The command is invalid or contains duplicate fields.")));
     }
-    auto envelope = document.object();
-    envelope.insert(QStringLiteral("accountUserId"),
-        m_accountUserId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(m_accountUserId));
-    envelope.insert(QStringLiteral("accountEpoch"), m_accountEpoch);
-    const auto bytes = QJsonDocument(envelope).toJson(QJsonDocument::Compact);
+    QByteArray bytes = QByteArrayLiteral("{\"accountUserId\":");
+    bytes += m_accountUserId.isEmpty() ? QByteArrayLiteral("null") : jsonStringBytes(m_accountUserId);
+    bytes += QByteArrayLiteral(",\"accountEpoch\":") + QByteArray::number(m_accountEpoch);
+    for (const auto& field : *fields) {
+        if (field.name == QStringLiteral("accountUserId") || field.name == QStringLiteral("accountEpoch")) {
+            return std::unexpected(failure(RuntimeFailure::Code::InvalidArgument,
+                KODOSI_FFI_DESER_FAILED, tr("The runtime owns the command account identity.")));
+        }
+        bytes += ',' + jsonStringBytes(field.name) + ':';
+        bytes.append(field.value.data(), field.value.size());
+    }
+    bytes += '}';
+    if (bytes.size() > maximumEventBytes)
+        return std::unexpected(failure(RuntimeFailure::Code::InvalidArgument,
+            KODOSI_FFI_PAYLOAD_TOO_LARGE, tr("The command exceeds the runtime limit.")));
     return terminalOperationResult(
         kodosi_send_command(m_handle, reinterpret_cast<const std::uint8_t*>(bytes.constData()),
             static_cast<std::uintptr_t>(bytes.size())),
@@ -313,23 +324,28 @@ void RuntimeBridge::deliverEvent(const QByteArray& payload)
     }
     const auto object = document.object();
     const auto type = object.value(QStringLiteral("type")).toString();
-    const auto epochValue = object.value(QStringLiteral("accountEpoch"));
-    const auto epoch = epochValue.toInteger(-1);
+    const auto fields = jsonObjectFields(payload);
+    std::optional<std::uint64_t> epoch;
+    if (fields) {
+        for (const auto& field : *fields) {
+            if (field.name == QStringLiteral("accountEpoch")) epoch = jsonUnsigned(field.value);
+        }
+    }
     const auto user = object.value(QStringLiteral("accountUserId")).toString();
-    if (epoch < 0 || epoch < m_accountEpoch)
+    if (!epoch || *epoch < m_accountEpoch)
         return;
-    if (epoch > m_accountEpoch && type != QStringLiteral("auth.ready")
+    if (*epoch > m_accountEpoch && type != QStringLiteral("auth.ready")
         && type != QStringLiteral("auth.required") && type != QStringLiteral("system.ready"))
         return;
-    if (epoch == m_accountEpoch && user != m_accountUserId && type != QStringLiteral("auth.ready")
+    if (*epoch == m_accountEpoch && user != m_accountUserId && type != QStringLiteral("auth.ready")
         && type != QStringLiteral("auth.required"))
         return;
     if (type == QStringLiteral("auth.ready") || type == QStringLiteral("auth.required")
         || type == QStringLiteral("system.ready")) {
-        m_accountEpoch = epoch;
+        m_accountEpoch = *epoch;
         m_accountUserId = user;
     }
-    emit eventReceived(object);
+    emit eventReceived(object, *epoch, payload);
 }
 RuntimeBridge* RuntimeBridge::resolve(void* userdata) noexcept
 {

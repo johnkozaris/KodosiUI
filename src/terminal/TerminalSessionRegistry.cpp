@@ -1,17 +1,16 @@
 #include "terminal/TerminalSessionRegistry.hpp"
+#include "bridge/JsonEnvelope.hpp"
 #include "logging/ApplicationLogStore.hpp"
 
 #include <QJsonDocument>
 #include <QJsonObject>
 
 #include <atomic>
-#include <charconv>
 #include <deque>
 #include <limits>
 #include <mutex>
 #include <optional>
 #include <ranges>
-#include <system_error>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -111,56 +110,6 @@ void publishValue(
     }
 }
 
-bool jsonWhitespace(const char value)
-{
-    return value == ' ' || value == '\t' || value == '\r' || value == '\n';
-}
-
-std::optional<std::uint64_t> unsignedJsonField(
-    const QByteArray& json,
-    const QByteArray& field)
-{
-    const auto needle = QByteArrayLiteral("\"") + field + QByteArrayLiteral("\"");
-    const auto key = json.indexOf(needle);
-    if (key < 0 || json.indexOf(needle, key + needle.size()) >= 0) {
-        return std::nullopt;
-    }
-
-    auto cursor = key + needle.size();
-    while (cursor < json.size() && jsonWhitespace(json[cursor])) {
-        ++cursor;
-    }
-    if (cursor >= json.size() || json[cursor] != ':') {
-        return std::nullopt;
-    }
-    ++cursor;
-    while (cursor < json.size() && jsonWhitespace(json[cursor])) {
-        ++cursor;
-    }
-    const auto start = cursor;
-    while (cursor < json.size() && json[cursor] >= '0' && json[cursor] <= '9') {
-        ++cursor;
-    }
-    if (cursor == start) {
-        return std::nullopt;
-    }
-
-    std::uint64_t value = 0;
-    const auto* first = json.constData() + start;
-    const auto* last = json.constData() + cursor;
-    const auto parsed = std::from_chars(first, last, value);
-    if (parsed.ec != std::errc {} || parsed.ptr != last) {
-        return std::nullopt;
-    }
-    while (cursor < json.size() && jsonWhitespace(json[cursor])) {
-        ++cursor;
-    }
-    if (cursor >= json.size() || (json[cursor] != ',' && json[cursor] != '}')) {
-        return std::nullopt;
-    }
-    return value;
-}
-
 std::optional<std::uint64_t> checkedProduct(
     const std::optional<std::uint64_t> left,
     const std::optional<std::uint64_t> right)
@@ -204,10 +153,6 @@ public:
             && sameIdentity(surface->second->identity, identity)) {
             return surface->second;
         }
-        if (identity.surfaceGeneration == 0
-            && session->second.surfaces.size() == 1) {
-            return session->second.surfaces.cbegin()->second;
-        }
         return {};
     }
 
@@ -226,23 +171,6 @@ public:
             entries.push_back(entry);
         }
         return entries;
-    }
-
-    std::shared_ptr<Entry> primary(
-        const TerminalSubscription& subscription)
-    {
-        std::scoped_lock lock(mutex);
-        const auto session = sessions.find(sessionKey(subscription.sessionId));
-        if (session == sessions.end()
-            || !sameSubscription(session->second.subscription, subscription)
-            || session->second.surfaces.empty()) {
-            return {};
-        }
-        const auto primary = std::ranges::min_element(
-            session->second.surfaces,
-            {},
-            [](const auto& value) { return value.first; });
-        return primary->second;
     }
 
     struct CheckpointTargets {
@@ -344,21 +272,6 @@ TerminalSessionRegistry::~TerminalSessionRegistry()
     }
 }
 
-bool TerminalSessionRegistry::registerSession(
-    TerminalSubscription subscription,
-    Listener listener,
-    TerminalKernelSettings settings)
-{
-    return registerSurface(
-        {
-            .subscription = std::move(subscription),
-            .surfaceGeneration = 0,
-        },
-        std::move(listener),
-        settings)
-        .has_value();
-}
-
 std::optional<TerminalSessionRegistry::SurfaceRegistration>
 TerminalSessionRegistry::registerSurface(
     TerminalSurfaceIdentity identity,
@@ -366,7 +279,7 @@ TerminalSessionRegistry::registerSurface(
     TerminalKernelSettings settings)
 {
     if (identity.subscription.sessionId.isEmpty()
-        || identity.subscription.subscriptionId.isEmpty()) {
+        || identity.subscription.subscriptionId.isEmpty() || identity.surfaceGeneration == 0) {
         return std::nullopt;
     }
     auto entry = std::make_shared<Entry>(
@@ -437,14 +350,6 @@ void TerminalSessionRegistry::cancelSurfaceRefresh(
         identity.surfaceGeneration);
 }
 
-void TerminalSessionRegistry::unregisterSession(const TerminalSubscription& subscription)
-{
-    (void)unregisterSurface({
-        .subscription = subscription,
-        .surfaceGeneration = 0,
-    });
-}
-
 bool TerminalSessionRegistry::unregisterSurface(
     const TerminalSurfaceIdentity& identity)
 {
@@ -493,19 +398,6 @@ TerminalSessionRegistry::encodeKey(
 }
 
 std::expected<QByteArray, GhosttyTerminalKernel::Failure>
-TerminalSessionRegistry::encodeKey(
-    const TerminalSubscription& subscription,
-    TerminalKeyEvent keyEvent)
-{
-    return encodeKey(
-        {
-            .subscription = subscription,
-            .surfaceGeneration = 0,
-        },
-        std::move(keyEvent));
-}
-
-std::expected<QByteArray, GhosttyTerminalKernel::Failure>
 TerminalSessionRegistry::encodePaste(
     const TerminalSurfaceIdentity& identity,
     QByteArray text)
@@ -519,19 +411,6 @@ TerminalSessionRegistry::encodePaste(
     }
     return entry->kernel.encodePaste(
         identity.subscription,
-        std::move(text));
-}
-
-std::expected<QByteArray, GhosttyTerminalKernel::Failure>
-TerminalSessionRegistry::encodePaste(
-    const TerminalSubscription& subscription,
-    QByteArray text)
-{
-    return encodePaste(
-        {
-            .subscription = subscription,
-            .surfaceGeneration = 0,
-        },
         std::move(text));
 }
 
@@ -552,19 +431,6 @@ TerminalSessionRegistry::encodeMouse(
         std::move(event));
 }
 
-std::expected<QByteArray, GhosttyTerminalKernel::Failure>
-TerminalSessionRegistry::encodeMouse(
-    const TerminalSubscription& subscription,
-    TerminalMouseEvent event)
-{
-    return encodeMouse(
-        {
-            .subscription = subscription,
-            .surfaceGeneration = 0,
-        },
-        std::move(event));
-}
-
 GhosttyTerminalKernel::Result TerminalSessionRegistry::scrollViewport(
     const TerminalSurfaceIdentity& identity,
     const int rows)
@@ -579,18 +445,6 @@ GhosttyTerminalKernel::Result TerminalSessionRegistry::scrollViewport(
     auto result = entry->kernel.scrollViewport(identity.subscription, rows);
     publishFrame(entry, result);
     return result;
-}
-
-GhosttyTerminalKernel::Result TerminalSessionRegistry::scrollViewport(
-    const TerminalSubscription& subscription,
-    const int rows)
-{
-    return scrollViewport(
-        {
-            .subscription = subscription,
-            .surfaceGeneration = 0,
-        },
-        rows);
 }
 
 GhosttyTerminalKernel::Result TerminalSessionRegistry::scrollViewportToBottom(
@@ -611,15 +465,6 @@ GhosttyTerminalKernel::Result TerminalSessionRegistry::scrollViewportToBottom(
     return result;
 }
 
-GhosttyTerminalKernel::Result TerminalSessionRegistry::scrollViewportToBottom(
-    const TerminalSubscription& subscription)
-{
-    return scrollViewportToBottom({
-        .subscription = subscription,
-        .surfaceGeneration = 0,
-    });
-}
-
 std::expected<QString, GhosttyTerminalKernel::Failure>
 TerminalSessionRegistry::linkAt(
     const TerminalSurfaceIdentity& identity,
@@ -636,23 +481,6 @@ TerminalSessionRegistry::linkAt(
     }
     return entry->kernel.linkAt(
         identity.subscription,
-        viewportRevision,
-        column,
-        row);
-}
-
-std::expected<QString, GhosttyTerminalKernel::Failure>
-TerminalSessionRegistry::linkAt(
-    const TerminalSubscription& subscription,
-    const std::uint64_t viewportRevision,
-    const std::uint16_t column,
-    const std::uint16_t row)
-{
-    return linkAt(
-        {
-            .subscription = subscription,
-            .surfaceGeneration = 0,
-        },
         viewportRevision,
         column,
         row);
@@ -684,24 +512,6 @@ GhosttyTerminalKernel::Result TerminalSessionRegistry::beginSelection(
     return result;
 }
 
-GhosttyTerminalKernel::Result TerminalSessionRegistry::beginSelection(
-    const TerminalSubscription& subscription,
-    const std::uint64_t viewportRevision,
-    const std::uint16_t column,
-    const std::uint16_t row,
-    const bool rectangular)
-{
-    return beginSelection(
-        {
-            .subscription = subscription,
-            .surfaceGeneration = 0,
-        },
-        viewportRevision,
-        column,
-        row,
-        rectangular);
-}
-
 GhosttyTerminalKernel::Result TerminalSessionRegistry::updateSelection(
     const TerminalSurfaceIdentity& identity,
     const std::uint64_t viewportRevision,
@@ -726,22 +536,6 @@ GhosttyTerminalKernel::Result TerminalSessionRegistry::updateSelection(
     return result;
 }
 
-GhosttyTerminalKernel::Result TerminalSessionRegistry::updateSelection(
-    const TerminalSubscription& subscription,
-    const std::uint64_t viewportRevision,
-    const std::uint16_t column,
-    const std::uint16_t row)
-{
-    return updateSelection(
-        {
-            .subscription = subscription,
-            .surfaceGeneration = 0,
-        },
-        viewportRevision,
-        column,
-        row);
-}
-
 GhosttyTerminalKernel::Result TerminalSessionRegistry::clearSelection(
     const TerminalSurfaceIdentity& identity)
 {
@@ -757,15 +551,6 @@ GhosttyTerminalKernel::Result TerminalSessionRegistry::clearSelection(
     return result;
 }
 
-GhosttyTerminalKernel::Result TerminalSessionRegistry::clearSelection(
-    const TerminalSubscription& subscription)
-{
-    return clearSelection({
-        .subscription = subscription,
-        .surfaceGeneration = 0,
-    });
-}
-
 std::expected<QString, GhosttyTerminalKernel::Failure>
 TerminalSessionRegistry::selectedText(const TerminalSurfaceIdentity& identity)
 {
@@ -777,15 +562,6 @@ TerminalSessionRegistry::selectedText(const TerminalSurfaceIdentity& identity)
         });
     }
     return entry->kernel.selectedText(identity.subscription);
-}
-
-std::expected<QString, GhosttyTerminalKernel::Failure>
-TerminalSessionRegistry::selectedText(const TerminalSubscription& subscription)
-{
-    return selectedText({
-        .subscription = subscription,
-        .surfaceGeneration = 0,
-    });
 }
 
 GhosttyTerminalKernel::ConfigureResult TerminalSessionRegistry::configure(
@@ -806,18 +582,6 @@ GhosttyTerminalKernel::ConfigureResult TerminalSessionRegistry::configure(
         publishFrame(entry, GhosttyTerminalKernel::Result {**result});
     }
     return result;
-}
-
-GhosttyTerminalKernel::ConfigureResult TerminalSessionRegistry::configure(
-    const TerminalSubscription& subscription,
-    TerminalKernelSettings settings)
-{
-    return configure(
-        {
-            .subscription = subscription,
-            .surfaceGeneration = 0,
-        },
-        settings);
 }
 
 void TerminalSessionRegistry::receiveData(TerminalData data) noexcept
@@ -871,13 +635,24 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
         });
         return;
     }
+    const auto fields = jsonObjectFields(control.json);
+    if (!fields) {
+        publishFailureToAll({GhosttyTerminalKernel::Failure::Code::GhosttyRejected,
+            QStringLiteral("Terminal control frame contains invalid or duplicate fields.")});
+        return;
+    }
+    const auto unsignedField = [&](const QByteArray& name) -> std::optional<std::uint64_t> {
+        for (const auto& field : *fields)
+            if (field.name == QString::fromLatin1(name)) return jsonUnsigned(field.value);
+        return std::nullopt;
+    };
     const auto object = document.object();
     const auto type = object.value(QStringLiteral("type")).toString();
     if (type == QStringLiteral("term.resize")) {
-        const auto rows = unsignedJsonField(control.json, QByteArrayLiteral("rows"));
-        const auto columns = unsignedJsonField(control.json, QByteArrayLiteral("cols"));
+        const auto rows = unsignedField( QByteArrayLiteral("rows"));
+        const auto columns = unsignedField( QByteArrayLiteral("cols"));
         const auto atSequence =
-            unsignedJsonField(control.json, QByteArrayLiteral("atSequence"));
+            unsignedField( QByteArrayLiteral("atSequence"));
         if (!rows || !columns || !atSequence || *rows == 0
             || *rows > std::numeric_limits<std::uint16_t>::max()
             || *columns == 0
@@ -902,7 +677,7 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
         }
     } else if (type == QStringLiteral("term.closed")) {
         const auto finalSequence =
-            unsignedJsonField(control.json, QByteArrayLiteral("finalSequence"));
+            unsignedField( QByteArrayLiteral("finalSequence"));
         if (!finalSequence) {
             publishFailureToAll({
                 GhosttyTerminalKernel::Failure::Code::GhosttyRejected,
@@ -953,19 +728,19 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
         const auto rejected = type == QStringLiteral("term.resizeRejected");
         const auto reason = object.value(QStringLiteral("reason"));
         const auto subscriptionGeneration =
-            unsignedJsonField(control.json, QByteArrayLiteral("subscriptionGeneration"));
+            unsignedField( QByteArrayLiteral("subscriptionGeneration"));
         const auto surfaceGeneration =
-            unsignedJsonField(control.json, QByteArrayLiteral("surfaceGeneration"));
-        const auto columns = unsignedJsonField(control.json, QByteArrayLiteral("cols"));
-        const auto rows = unsignedJsonField(control.json, QByteArrayLiteral("rows"));
+            unsignedField( QByteArrayLiteral("surfaceGeneration"));
+        const auto columns = unsignedField( QByteArrayLiteral("cols"));
+        const auto rows = unsignedField( QByteArrayLiteral("rows"));
         const auto widthPixels =
-            unsignedJsonField(control.json, QByteArrayLiteral("widthPixels"));
+            unsignedField( QByteArrayLiteral("widthPixels"));
         const auto heightPixels =
-            unsignedJsonField(control.json, QByteArrayLiteral("heightPixels"));
+            unsignedField( QByteArrayLiteral("heightPixels"));
         const auto cellWidthPixels =
-            unsignedJsonField(control.json, QByteArrayLiteral("cellWidthPixels"));
+            unsignedField( QByteArrayLiteral("cellWidthPixels"));
         const auto cellHeightPixels =
-            unsignedJsonField(control.json, QByteArrayLiteral("cellHeightPixels"));
+            unsignedField( QByteArrayLiteral("cellHeightPixels"));
         const auto widthProduct = checkedProduct(columns, cellWidthPixels);
         const auto heightProduct = checkedProduct(rows, cellHeightPixels);
         if (!sessionId.isString() || !requestId.isString()
@@ -1011,8 +786,7 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
                 .reason = rejected ? reason.toString() : QString {},
         };
         for (const auto& entry : entries) {
-            if (entry->identity.surfaceGeneration != 0
-                && entry->identity.surfaceGeneration != *surfaceGeneration) {
+            if (entry->identity.surfaceGeneration != *surfaceGeneration) {
                 continue;
             }
             publishValue(
@@ -1028,44 +802,6 @@ void TerminalSessionRegistry::receiveControl(TerminalControl control) noexcept
             publishFailureToAll({GhosttyTerminalKernel::Failure::Code::GhosttyRejected,
                 QStringLiteral("Terminal effect fields are invalid.")});
             return;
-        }
-        for (const auto& entry : entries) {
-            if (type == QStringLiteral("term.title")) {
-                auto text = title.toString().left(512);
-                text.removeIf([](QChar character) { return character.category() == QChar::Other_Control
-                    || character.category() == QChar::Other_Format; });
-                publishValue(entry, &TerminalSessionRegistry::Listener::titleChanged, text);
-            } else {
-                std::scoped_lock lock(entry->listenerMutex);
-                if (entry->active && entry->listener.bell) {
-                    entry->listener.bell();
-                }
-            }
-        }
-    } else if (type == QStringLiteral("term.notification")) {
-        const auto sessionId = object.value(QStringLiteral("sessionId"));
-        const auto title = object.value(QStringLiteral("title"));
-        const auto body = object.value(QStringLiteral("body"));
-        const auto optionalString = [](const QJsonValue& value) {
-            return value.isUndefined() || value.isNull() || value.isString();
-        };
-        if (!sessionId.isString()
-            || sessionId.toString() != control.subscription.sessionId
-            || !optionalString(title) || !optionalString(body)) {
-            publishFailureToAll({
-                GhosttyTerminalKernel::Failure::Code::GhosttyRejected,
-                QStringLiteral("Terminal notification fields are invalid."),
-            });
-            return;
-        }
-        if (const auto entry = m_impl->primary(control.subscription)) {
-            publishValue(
-                entry,
-                &TerminalSessionRegistry::Listener::notificationRequested,
-                TerminalNotification {
-                    .title = title.isString() ? title.toString() : QString {},
-                    .body = body.isString() ? body.toString() : QString {},
-                });
         }
     } else {
         publishFailureToAll({

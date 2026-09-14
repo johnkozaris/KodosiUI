@@ -8,10 +8,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLoggingCategory>
-#include <QPointer>
 #include <QRandomGenerator>
 #include <QRegularExpression>
-#include <QStandardPaths>
 #include <QThread>
 #include <QUrl>
 
@@ -278,11 +276,8 @@ void applicationQtMessageHandler(
     }
 }
 
-ApplicationLogStore::ApplicationLogStore(
-    Options options,
-    QObject* parent)
-    : QObject(parent)
-    , m_options(std::move(options))
+ApplicationLogStore::ApplicationLogStore(Options options)
+    : m_options(std::move(options))
     , m_path(QDir(m_options.directory).filePath(processLogName()))
 {
     initialize();
@@ -334,20 +329,6 @@ QString ApplicationLogStore::directory() const
     return m_options.directory;
 }
 
-bool ApplicationLogStore::directoryAvailable() const
-{
-#if defined(Q_OS_UNIX)
-    const auto nativeDirectory = QFile::encodeName(m_options.directory);
-    struct stat status {};
-    return ::lstat(nativeDirectory.constData(), &status) == 0
-        && S_ISDIR(status.st_mode)
-        && !S_ISLNK(status.st_mode)
-        && status.st_uid == ::geteuid();
-#else
-    return QFileInfo(m_options.directory).isDir();
-#endif
-}
-
 qint64 ApplicationLogStore::sizeBytes() const
 {
     const std::scoped_lock lock(m_mutex);
@@ -364,12 +345,6 @@ QString ApplicationLogStore::lastError() const
 {
     const std::scoped_lock lock(m_mutex);
     return m_lastError;
-}
-
-QString ApplicationLogStore::standardLogDirectory()
-{
-    return QDir(QStandardPaths::writableLocation(QStandardPaths::StateLocation))
-        .filePath(QStringLiteral("logs"));
 }
 
 QString ApplicationLogStore::redact(QString message)
@@ -464,27 +439,10 @@ void ApplicationLogStore::record(
     }
     line += '\n';
 
-    bool changed = false;
-    {
-        const std::scoped_lock lock(m_mutex);
-        if (!m_healthy || m_fileDescriptor < 0) {
-            return;
-        }
-        if (m_sizeBytes > 0
-            && m_sizeBytes + line.size() > m_options.rotationBytes) {
-            if (!rotate()) {
-                changed = true;
-            }
-        }
-        if (m_healthy && !writeAll(line)) {
-            changed = true;
-        } else if (m_healthy) {
-            changed = true;
-        }
-    }
-    if (changed) {
-        scheduleStateChanged();
-    }
+    const std::scoped_lock lock(m_mutex);
+    if (!m_healthy || m_fileDescriptor < 0) return;
+    if (m_sizeBytes > 0 && m_sizeBytes + line.size() > m_options.rotationBytes && !rotate()) return;
+    if (m_healthy) (void)writeAll(line);
 }
 
 void ApplicationLogStore::initialize()
@@ -905,24 +863,6 @@ void ApplicationLogStore::refreshArchiveCountLocked()
             ++m_rotationCount;
         }
     }
-}
-
-void ApplicationLogStore::scheduleStateChanged()
-{
-    if (m_notificationQueued.exchange(true)) {
-        return;
-    }
-    const QPointer<ApplicationLogStore> self(this);
-    QMetaObject::invokeMethod(
-        this,
-        [self] {
-            if (self == nullptr) {
-                return;
-            }
-            self->m_notificationQueued.store(false);
-            emit self->stateChanged();
-        },
-        Qt::QueuedConnection);
 }
 
 ScopedPerformanceSpan::ScopedPerformanceSpan(

@@ -16,6 +16,7 @@
 #include <deque>
 #include <mutex>
 #include <optional>
+#include <variant>
 
 namespace kodosi {
 
@@ -56,7 +57,6 @@ class TerminalView : public QQuickItem {
     Q_PROPERTY(QColor selectionForeground READ selectionForeground WRITE setSelectionForeground NOTIFY selectionForegroundChanged)
     Q_PROPERTY(QColor preeditBackground READ preeditBackground WRITE setPreeditBackground NOTIFY preeditBackgroundChanged)
     Q_PROPERTY(QColor preeditForeground READ preeditForeground WRITE setPreeditForeground NOTIFY preeditForegroundChanged)
-    Q_PROPERTY(QString terminalTitle READ terminalTitle NOTIFY terminalTitleChanged)
     Q_PROPERTY(qreal viewportScale READ viewportScale NOTIFY viewportChanged)
     Q_PROPERTY(QSizeF gridSize READ gridSize NOTIFY viewportChanged)
     Q_PROPERTY(bool terminalReady READ terminalReady NOTIFY terminalReadyChanged)
@@ -84,7 +84,6 @@ public:
     [[nodiscard]] QColor selectionForeground() const;
     [[nodiscard]] QColor preeditBackground() const;
     [[nodiscard]] QColor preeditForeground() const;
-    [[nodiscard]] QString terminalTitle() const { return m_terminalTitle; }
     [[nodiscard]] qreal viewportScale() const;
     [[nodiscard]] QSizeF gridSize() const;
     [[nodiscard]] bool terminalReady() const noexcept;
@@ -133,8 +132,6 @@ signals:
     void preeditBackgroundChanged();
     void preeditForegroundChanged();
     void viewportChanged();
-    void terminalTitleChanged();
-    void terminalBell();
     void terminalReadyChanged();
     void capabilitiesChanged();
     void focusedSizeAuthorityChanged();
@@ -143,7 +140,6 @@ signals:
     void operationError(QString message);
     void contextMenuRequested(qreal x, qreal y);
     void connectionCompleted(bool connected, std::int32_t result);
-    void terminalNotificationRequested(QString title, QString body);
     void terminalClosed();
 
 protected:
@@ -193,7 +189,6 @@ private:
     [[nodiscard]] QPointF viewportOffset() const;
     [[nodiscard]] QPointF gridPoint(const QPointF& point) const;
     void updateViewport();
-    QString m_terminalTitle;
     QFont m_font;
     qreal m_lineHeight = 1.1;
     TerminalCursorStyle m_cursorStyle = TerminalCursorStyle::Block;
@@ -235,6 +230,14 @@ private:
     std::uint8_t m_inputBackoffStep = 0;
     std::atomic<std::uint64_t> m_attachmentEpoch {0};
     detail::TerminalFrameMailbox m_frameMailbox;
+    struct Closed {};
+    using GuiEvent = std::variant<GhosttyTerminalKernel::Failure, std::int32_t,
+        TerminalFocusOutcome, TerminalResizeOutcome, Closed>;
+    std::mutex m_guiEventMutex;
+    std::deque<GuiEvent> m_guiEvents;
+    bool m_guiDrainQueued = false;
+    bool m_guiOverflow = false;
+    std::uint64_t m_inputGeneration = 0;
     bool m_selecting = false;
     Qt::MouseButton m_reportedMouseButton = Qt::NoButton;
     bool m_copyShortcutActive = false;
@@ -246,6 +249,11 @@ private:
     std::atomic<std::uint64_t> m_renderPerformanceGeneration {1};
 
     void enqueueFrame(std::uint64_t epoch, GhosttyTerminalKernel::Frame frame);
+    void enqueueGuiEvent(std::uint64_t epoch, GuiEvent event);
+    void drainGuiEvents(std::uint64_t epoch);
+    [[nodiscard]] bool interactionAvailable() const;
+    void synchronizeInteraction();
+    void clearPendingInput();
     void queueRenderPerformance(qint64 durationMilliseconds, QString outcome);
     void drainFrame(std::uint64_t epoch);
     void presentFrame(GhosttyTerminalKernel::Frame frame);

@@ -8,6 +8,7 @@ Item {
     id: root
 
     property bool accessibilitySuppressed: false
+    property bool interactionEnabled: true
     readonly property bool active: Models.DesktopState.selectedSessionId === sessionId
     property bool componentReady: false
     property bool focusedSizeAuthority: false
@@ -138,10 +139,10 @@ Item {
                 }
                 KIconButton {
                     Accessible.id: objectName
-                    Accessible.name: qsTr("Close session")
+                    Accessible.name: qsTr("Close terminal")
                     glyph: "close"
                     objectName: root.objectName + ".close"
-                    onClicked: stopConfirmation.open()
+                    onClicked: closeConfirmation.open()
                 }
             }
         }
@@ -151,6 +152,7 @@ Item {
 
             Models.TerminalView {
                 id: terminal
+                enabled: root.interactionEnabled
 
                 Accessible.id: objectName
                 anchors.fill: parent
@@ -256,16 +258,20 @@ Item {
         }
     }
     KDialog {
-        id: stopConfirmation
+        id: closeConfirmation
 
+        objectName: root.objectName + ".closeConfirmation"
         standardButtons: Dialog.Ok | Dialog.Cancel
         title: qsTr("Close %1?").arg(root.sessionName)
+        onOpened: standardButton(Dialog.Ok).text = qsTr("Close")
 
-        onAccepted: Models.Workspace.stopSession(root.sessionId)
+        onAccepted: Models.Workspace.closeSession(root.sessionId)
 
         PlainLabel {
             color: KodosiTheme.textPrimary
-            text: qsTr("This ends the process on its host computer.")
+            width: 360
+            wrapMode: Text.WordWrap
+            text: qsTr("Running programs will stop.")
         }
     }
 }

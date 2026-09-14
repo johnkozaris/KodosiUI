@@ -2,27 +2,16 @@
 
 #include <QElapsedTimer>
 #include <QLoggingCategory>
-#include <QObject>
 #include <QString>
 #include <QStringView>
 
-#include <atomic>
 #include <mutex>
 
 Q_DECLARE_LOGGING_CATEGORY(kodosiPerformance)
 
 namespace kodosi {
 
-class ApplicationLogStore final : public QObject {
-    Q_OBJECT
-    Q_PROPERTY(bool healthy READ healthy NOTIFY stateChanged)
-    Q_PROPERTY(QString path READ path CONSTANT)
-    Q_PROPERTY(QString directory READ directory CONSTANT)
-    Q_PROPERTY(bool directoryAvailable READ directoryAvailable NOTIFY stateChanged)
-    Q_PROPERTY(qint64 sizeBytes READ sizeBytes NOTIFY stateChanged)
-    Q_PROPERTY(int rotationCount READ rotationCount NOTIFY stateChanged)
-    Q_PROPERTY(QString lastError READ lastError NOTIFY stateChanged)
-
+class ApplicationLogStore final {
 public:
     struct Options {
         QString directory;
@@ -32,10 +21,8 @@ public:
         bool installQtMessageHandler = true;
     };
 
-    explicit ApplicationLogStore(
-        Options options,
-        QObject* parent = nullptr);
-    ~ApplicationLogStore() override;
+    explicit ApplicationLogStore(Options options);
+    ~ApplicationLogStore();
 
     ApplicationLogStore(const ApplicationLogStore&) = delete;
     ApplicationLogStore& operator=(const ApplicationLogStore&) = delete;
@@ -43,7 +30,6 @@ public:
     [[nodiscard]] bool healthy() const;
     [[nodiscard]] QString path() const;
     [[nodiscard]] QString directory() const;
-    [[nodiscard]] bool directoryAvailable() const;
     [[nodiscard]] qint64 sizeBytes() const;
     [[nodiscard]] int rotationCount() const;
     [[nodiscard]] QString lastError() const;
@@ -53,11 +39,7 @@ public:
         QStringView category,
         QStringView message);
 
-    [[nodiscard]] static QString standardLogDirectory();
     [[nodiscard]] static QString redact(QString message);
-
-signals:
-    void stateChanged();
 
 private:
     friend void applicationQtMessageHandler(
@@ -72,7 +54,6 @@ private:
     QString m_path;
     mutable std::mutex m_mutex;
     QtMessageHandler m_previousHandler = nullptr;
-    std::atomic_bool m_notificationQueued = false;
     QString m_lastError;
     qint64 m_sizeBytes = 0;
     int m_rotationCount = 0;
@@ -88,7 +69,6 @@ private:
     [[nodiscard]] bool pruneCompletedFamiliesLocked();
     void failLocked(QString error);
     void refreshArchiveCountLocked();
-    void scheduleStateChanged();
 };
 
 enum class PerformanceCategory {

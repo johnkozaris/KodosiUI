@@ -261,7 +261,7 @@ bool isPasteShortcut(const QKeyEvent* event)
 
 bool TerminalView::event(QEvent* event)
 {
-    if (event->type() == QEvent::ShortcutOverride && hasActiveFocus()) {
+    if (event->type() == QEvent::ShortcutOverride && hasActiveFocus() && interactionAvailable()) {
         const auto* key = static_cast<QKeyEvent*>(event);
         const auto modifiers = key->modifiers();
         if (modifiers == Qt::ControlModifier
@@ -276,7 +276,7 @@ bool TerminalView::event(QEvent* event)
 
 void TerminalView::keyPressEvent(QKeyEvent* event)
 {
-    if (m_runtime == nullptr || m_registry == nullptr || !m_terminalReady) {
+    if (!interactionAvailable() || m_runtime == nullptr || m_registry == nullptr || !m_terminalReady) {
         QQuickItem::keyPressEvent(event);
         return;
     }
@@ -345,7 +345,7 @@ void TerminalView::keyReleaseEvent(QKeyEvent* event)
         event->accept();
         return;
     }
-    if (!m_terminalReady || !m_canSendInput) {
+    if (!interactionAvailable() || !m_terminalReady || !m_canSendInput) {
         QQuickItem::keyReleaseEvent(event);
         return;
     }
@@ -358,7 +358,7 @@ void TerminalView::keyReleaseEvent(QKeyEvent* event)
 
 void TerminalView::inputMethodEvent(QInputMethodEvent* event)
 {
-    if (!m_terminalReady || !m_canSendInput) {
+    if (!interactionAvailable() || !m_terminalReady || !m_canSendInput) {
         QQuickItem::inputMethodEvent(event);
         return;
     }
@@ -376,7 +376,7 @@ QVariant TerminalView::inputMethodQuery(const Qt::InputMethodQuery query) const
 {
     switch (query) {
     case Qt::ImEnabled:
-        return m_runtime != nullptr && m_terminalReady
+        return interactionAvailable() && m_runtime != nullptr && m_terminalReady
             && m_canSendInput;
     case Qt::ImFont:
         return m_font;
@@ -403,7 +403,7 @@ QVariant TerminalView::inputMethodQuery(const Qt::InputMethodQuery query) const
 
 void TerminalView::mousePressEvent(QMouseEvent* event)
 {
-    if (!m_terminalReady) {
+    if (!interactionAvailable() || !m_terminalReady) {
         QQuickItem::mousePressEvent(event);
         return;
     }
@@ -545,7 +545,7 @@ void TerminalView::hoverLeaveEvent(QHoverEvent* event)
 
 void TerminalView::wheelEvent(QWheelEvent* event)
 {
-    if (!m_terminalReady || m_registry == nullptr) {
+    if (!interactionAvailable() || !m_terminalReady || m_registry == nullptr) {
         QQuickItem::wheelEvent(event);
         return;
     }
@@ -585,7 +585,7 @@ bool TerminalView::sendMouseEvent(
     const Qt::KeyboardModifiers keyboardModifiers,
     const bool anyButtonPressed)
 {
-    if (!m_canSendInput || m_registry == nullptr || m_runtime == nullptr
+    if (!interactionAvailable() || !m_canSendInput || m_registry == nullptr || m_runtime == nullptr
         || !m_terminalReady) {
         return false;
     }
@@ -632,7 +632,7 @@ bool TerminalView::sendMouseEvent(
 
 void TerminalView::sendText(const QString& text)
 {
-    if (!m_canSendInput || m_runtime == nullptr || text.isEmpty()) {
+    if (!interactionAvailable() || !m_canSendInput || m_runtime == nullptr || text.isEmpty()) {
         return;
     }
     (void)enqueueInput(text.toUtf8());
@@ -640,7 +640,7 @@ void TerminalView::sendText(const QString& text)
 
 void TerminalView::pasteClipboard()
 {
-    if (!m_canSendInput || m_registry == nullptr || m_runtime == nullptr
+    if (!interactionAvailable() || !m_canSendInput || m_registry == nullptr || m_runtime == nullptr
         || !m_terminalReady) {
         return;
     }
@@ -669,7 +669,7 @@ void TerminalView::pasteClipboard()
 bool TerminalView::sendKey(QKeyEvent* event, const TerminalKeyAction action)
 {
     const auto key = terminalKey(event);
-    if (!m_canSendInput || !key || m_registry == nullptr
+    if (!interactionAvailable() || !m_canSendInput || !key || m_registry == nullptr
         || m_runtime == nullptr) {
         return false;
     }
@@ -714,7 +714,7 @@ bool TerminalView::sendKey(QKeyEvent* event, const TerminalKeyAction action)
 
 bool TerminalView::enqueueInput(QByteArray bytes)
 {
-    if (!m_canSendInput || bytes.isEmpty() || m_registry == nullptr
+    if (!interactionAvailable() || !m_canSendInput || bytes.isEmpty() || m_registry == nullptr
         || m_runtime == nullptr || !m_terminalReady) {
         return false;
     }
@@ -737,7 +737,7 @@ bool TerminalView::enqueueInput(QByteArray bytes)
 
 void TerminalView::drainInputQueue()
 {
-    if (!m_canSendInput || m_runtime == nullptr
+    if (!interactionAvailable() || !m_canSendInput || m_runtime == nullptr
         || m_inputRetryQueued) {
         return;
     }
@@ -757,6 +757,7 @@ void TerminalView::drainInputQueue()
                 m_inputBackoffStep,
                 std::size(inputBackoffMilliseconds) - 1);
             const auto epoch = m_attachmentEpoch.load(std::memory_order_acquire);
+            const auto inputGeneration = m_inputGeneration;
             m_inputRetryQueued = true;
             m_inputBackoffStep = static_cast<std::uint8_t>(
                 std::min<std::size_t>(
@@ -765,8 +766,9 @@ void TerminalView::drainInputQueue()
             QTimer::singleShot(
                 inputBackoffMilliseconds[step],
                 this,
-                [this, epoch] {
-                    if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch) {
+                [this, epoch, inputGeneration] {
+                    if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch
+                        || m_inputGeneration != inputGeneration) {
                         return;
                     }
                     m_inputRetryQueued = false;
@@ -784,9 +786,11 @@ void TerminalView::drainInputQueue()
     }
     if (!m_inputQueue.empty()) {
         const auto epoch = m_attachmentEpoch.load(std::memory_order_acquire);
+        const auto inputGeneration = m_inputGeneration;
         m_inputRetryQueued = true;
-        QTimer::singleShot(0, this, [this, epoch] {
-            if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch) {
+        QTimer::singleShot(0, this, [this, epoch, inputGeneration] {
+            if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch
+                || m_inputGeneration != inputGeneration) {
                 return;
             }
             m_inputRetryQueued = false;

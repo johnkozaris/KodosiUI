@@ -43,6 +43,7 @@ class TerminalNotificationsTest final : public QObject {
 
 private slots:
     void postsAndActivatesCurrentSession();
+    void ignoresRemoteOrMissingIncarnationEvents();
     void rejectsStaleSessionIncarnations();
     void routesOnlyTerminalNotificationKeys();
     void boundsTrackedNotifications();
@@ -76,11 +77,12 @@ struct Fixture {
         const QString& title = QStringLiteral("Build complete"),
         const QString& body = QStringLiteral("All checks passed"))
     {
-        notifications.receiveTerminalNotification({
-            .sessionId = test::id(1),
-            .runtimeIncarnationId = incarnation,
-            .title = title,
-            .body = body,
+        notifications.apply({
+            {QStringLiteral("type"), QStringLiteral("term.notification")},
+            {QStringLiteral("sessionId"), test::id(1)},
+            {QStringLiteral("runtimeIncarnationId"), incarnation},
+            {QStringLiteral("title"), title},
+            {QStringLiteral("body"), body},
         });
     }
 };
@@ -100,12 +102,7 @@ void TerminalNotificationsTest::postsAndActivatesCurrentSession()
     QVERIFY(notification.key.startsWith(QStringLiteral("terminal:")));
     QCOMPARE(notification.title, QStringLiteral("Build complete"));
     QCOMPARE(notification.body, QStringLiteral("All checks passed"));
-    QCOMPARE(
-        notification.actions,
-        QStringList({
-            QStringLiteral("default"),
-            QStringLiteral("Open Kodosi"),
-        }));
+
 
     fixture.driver.invoke(
         notification.key,
@@ -172,6 +169,19 @@ void TerminalNotificationsTest::boundsTrackedNotifications()
     fixture.driver.close(fixture.driver.posted.at(1).key);
     fixture.post();
     QCOMPARE(fixture.driver.withdrawn.size(), 1);
+}
+
+void TerminalNotificationsTest::ignoresRemoteOrMissingIncarnationEvents()
+{
+    Fixture fixture;
+    fixture.post(QString {});
+    QVERIFY(fixture.driver.posted.isEmpty());
+    fixture.sessionsModel.apply(test::snapshot({test::session(1, true)}));
+    fixture.post();
+    QVERIFY(fixture.driver.posted.isEmpty());
+    fixture.sessionsModel.apply(test::snapshot({test::session(1)}));
+    fixture.post();
+    QCOMPARE(fixture.driver.posted.size(), 1);
 }
 
 QTEST_GUILESS_MAIN(TerminalNotificationsTest)

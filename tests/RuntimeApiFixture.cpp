@@ -17,7 +17,7 @@ uint32_t kodosi_abi_version()
 }
 uint32_t kodosi_protocol_version()
 {
-    return 39;
+    return runtime_fixture::protocolVersion;
 }
 int32_t kodosi_send_command(void*, const uint8_t* bytes, uintptr_t size)
 {

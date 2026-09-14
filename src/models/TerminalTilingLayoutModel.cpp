@@ -195,6 +195,9 @@ void TerminalTilingLayoutModel::setStagedSessionIds(QStringList sessionIds)
         return;
     }
     m_stagedSessionIds = std::move(sessionIds);
+    m_lastGridTileGeometry.removeIf([this](const auto& entry) {
+        return !m_stagedSessionIds.contains(entry.key());
+    });
     emit stagedSessionIdsChanged();
     rebuild();
 }
@@ -304,41 +307,6 @@ qreal TerminalTilingLayoutModel::adjustDivider(
         rebuild();
         return accepted;
     }
-}
-
-int TerminalTilingLayoutModel::idealColumnCount(
-    const int sessionCount,
-    const qreal width,
-    const qreal height,
-    const qreal minimumTileHeight)
-{
-    if (sessionCount <= 1 || width <= 0 || height <= 0) {
-        return std::max(1, sessionCount);
-    }
-    const auto columnsThatFit = std::max(
-        1,
-        static_cast<int>(
-            (width + dividerSize)
-            / (baseMinimumTileWidth + dividerSize)));
-    const auto maximumColumns =
-        std::min(sessionCount, columnsThatFit);
-    auto bestColumns = 1;
-    auto bestPenalty = std::numeric_limits<qreal>::infinity();
-    for (auto columns = 1; columns <= maximumColumns; ++columns) {
-        const auto penalty =
-            layoutPenalty(
-                columns,
-                sessionCount,
-                width,
-                height,
-                baseMinimumTileWidth,
-                minimumTileHeight);
-        if (penalty < bestPenalty) {
-            bestPenalty = penalty;
-            bestColumns = columns;
-        }
-    }
-    return bestColumns;
 }
 
 qreal TerminalTilingLayoutModel::requiredContentHeight(

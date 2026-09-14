@@ -1,4 +1,5 @@
 #include "app/SingleInstanceGuard.hpp"
+#include "app/RuntimeStorageBootstrap.hpp"
 
 #include <QCryptographicHash>
 #include <QDataStream>
@@ -105,6 +106,8 @@ class SingleInstanceTest final : public QObject {
 
 private slots:
     void endpointNamespaceMatchesEffectiveRustDataRoot();
+    void storageBootstrapIsolatesPreferencesWithoutChangingProviderHome();
+    void storageBootstrapRejectsOverlapsBeforeCreatingFiles();
     void endpointNamespaceRejectsUnsafeIsolatedRoots();
     void endpointNamespaceRejectsCoreSymlinkAndProductionAliases();
     void delaysEndpointUntilOwnerReadinessAndDeliversExactlyOnce();
@@ -118,6 +121,97 @@ private slots:
     void shortEndpointNamesFitPortableUnixSocketPaths();
     void removesOnlyUnlockedStaleEndpoint();
 };
+
+void SingleInstanceTest::storageBootstrapIsolatesPreferencesWithoutChangingProviderHome()
+{
+    EnvironmentGuard data("KODOSI_DATA_ROOT");
+    EnvironmentGuard production("KODOSI_PRODUCTION_DATA_ROOT");
+    EnvironmentGuard config("XDG_CONFIG_HOME");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto root = directory.filePath(QStringLiteral("isolated"));
+    const auto protectedRoot = directory.filePath(QStringLiteral("production"));
+    const auto originalHome = qgetenv("HOME");
+    const auto originalConfig = directory.filePath(QStringLiteral("config"));
+    qputenv("XDG_CONFIG_HOME", originalConfig.toUtf8());
+    qputenv("KODOSI_DATA_ROOT", root.toUtf8());
+    qputenv("KODOSI_PRODUCTION_DATA_ROOT", protectedRoot.toUtf8());
+    const auto storage = kodosi::RuntimeStorageBootstrap::resolve();
+    QVERIFY2(storage, storage ? "" : qPrintable(storage.error()));
+    QVERIFY(!QFileInfo::exists(root));
+    QVERIFY(storage->prepare());
+    QCOMPARE(storage->runtimeRoot, root + QStringLiteral("/core"));
+    QCOMPARE(storage->logDirectory, root + QStringLiteral("/qt/logs"));
+    auto settings = storage->settings();
+    settings->setValue(QStringLiteral("terminal/fontSize"), 19);
+    settings->sync();
+    QCOMPARE(settings->status(), QSettings::NoError);
+    QCOMPARE(storage->settings()->value(QStringLiteral("terminal/fontSize")).toInt(), 19);
+    QVERIFY(!settings->fallbacksEnabled());
+    QCOMPARE(qgetenv("HOME"), originalHome);
+    QCOMPARE(qgetenv("XDG_CONFIG_HOME"), originalConfig.toUtf8());
+    QVERIFY(!QFileInfo::exists(originalConfig));
+    QVERIFY(!QFileInfo::exists(protectedRoot));
+    struct stat status {};
+    QVERIFY(::stat(QFile::encodeName(storage->preferencesPath).constData(), &status) == 0);
+    QCOMPARE(status.st_mode & 0777, static_cast<mode_t>(0600));
+}
+
+void SingleInstanceTest::storageBootstrapRejectsOverlapsBeforeCreatingFiles()
+{
+    EnvironmentGuard data("KODOSI_DATA_ROOT");
+    EnvironmentGuard production("KODOSI_PRODUCTION_DATA_ROOT");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto isolated = directory.filePath(QStringLiteral("isolated"));
+    qputenv("KODOSI_DATA_ROOT", isolated.toUtf8());
+    qputenv("KODOSI_PRODUCTION_DATA_ROOT", (isolated + QStringLiteral("/production")).toUtf8());
+    QVERIFY(!kodosi::RuntimeStorageBootstrap::resolve());
+    QVERIFY(!QFileInfo::exists(isolated));
+    {
+        EnvironmentGuard home("HOME");
+        qputenv("HOME", (isolated + QStringLiteral("/home")).toUtf8());
+        qputenv("KODOSI_PRODUCTION_DATA_ROOT", directory.filePath(QStringLiteral("elsewhere")).toUtf8());
+        QVERIFY(!kodosi::RuntimeStorageBootstrap::resolve());
+        QVERIFY(!QFileInfo::exists(isolated));
+    }
+    const auto target = directory.filePath(QStringLiteral("target"));
+    const auto alias = directory.filePath(QStringLiteral("alias"));
+    QVERIFY(QDir().mkpath(target));
+    QVERIFY(::symlink(QFile::encodeName(target).constData(), QFile::encodeName(alias).constData()) == 0);
+    qputenv("KODOSI_DATA_ROOT", target.toUtf8());
+    qputenv("KODOSI_PRODUCTION_DATA_ROOT", (alias + QStringLiteral("/missing/production")).toUtf8());
+    QVERIFY(!kodosi::RuntimeStorageBootstrap::resolve());
+    QVERIFY(!QFileInfo::exists(target + QStringLiteral("/qt")));
+    qputenv("KODOSI_DATA_ROOT", isolated.toUtf8());
+    qputenv("KODOSI_PRODUCTION_DATA_ROOT", target.toUtf8());
+    auto safe = kodosi::RuntimeStorageBootstrap::resolve();
+    QVERIFY(safe);
+    QVERIFY(QDir().mkpath(isolated));
+    const auto qtPath = isolated + QStringLiteral("/qt");
+    QVERIFY(::symlink(QFile::encodeName(target).constData(), QFile::encodeName(qtPath).constData()) == 0);
+    QVERIFY(!safe->prepare());
+    QVERIFY(!QFileInfo::exists(target + QStringLiteral("/preferences.ini")));
+    QVERIFY(!QFileInfo::exists(target + QStringLiteral("/logs")));
+    QVERIFY(QFile::remove(qtPath));
+    QVERIFY(QDir().mkpath(qtPath));
+    const auto protectedFile = target + QStringLiteral("/provider.json");
+    QFile original(protectedFile);
+    QVERIFY(original.open(QIODevice::WriteOnly));
+    QCOMPARE(original.write("untouched"), 9);
+    original.close();
+    QVERIFY(::link(QFile::encodeName(protectedFile).constData(),
+        QFile::encodeName(qtPath + QStringLiteral("/preferences.ini")).constData()) == 0);
+    QVERIFY(!kodosi::RuntimeStorageBootstrap::resolve());
+    QVERIFY(original.open(QIODevice::ReadOnly));
+    QCOMPARE(original.readAll(), QByteArrayLiteral("untouched"));
+    qunsetenv("KODOSI_DATA_ROOT");
+    qputenv("KODOSI_PRODUCTION_DATA_ROOT", target.toUtf8());
+    const auto productionStorage = kodosi::RuntimeStorageBootstrap::resolve();
+    QVERIFY(productionStorage);
+    QCOMPARE(productionStorage->runtimeRoot, target);
+    QCOMPARE(kodosi::SingleInstanceGuard::endpointNamespace().value, namespaceForRoot(target));
+}
 
 void SingleInstanceTest::endpointNamespaceMatchesEffectiveRustDataRoot()
 {

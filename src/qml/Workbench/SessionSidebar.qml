@@ -96,7 +96,6 @@ Item {
                                         Accessible.name: qsTr("Session details")
                                         objectName: row.objectName + ".details"
                                         glyph: "document"
-                                        visible: row.hovered
                                         onClicked: root.detailsRequested(row.modelData.id)
                                     }
                                     KIconButton {
@@ -104,7 +103,7 @@ Item {
                                         Accessible.name: qsTr("Minimize")
                                         objectName: row.objectName + ".minimize"
                                         glyph: "minus"
-                                        visible: row.hovered && Models.DesktopState.stagedSessionIds.indexOf(row.modelData.id) >= 0
+                                        visible: Models.DesktopState.stagedSessionIds.indexOf(row.modelData.id) >= 0
                                         onClicked: Models.Workspace.closeView(row.modelData.id)
                                     }
                                 }

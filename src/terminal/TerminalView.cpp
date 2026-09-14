@@ -1,4 +1,5 @@
 #include "terminal/TerminalView.hpp"
+#include "bridge/JsonEnvelope.hpp"
 #include "logging/ApplicationLogStore.hpp"
 
 #include <kodosi_runtime.h>
@@ -128,12 +129,6 @@ void publishAccessibleTextChange(
     QAccessible::updateAccessibility(&event);
 }
 
-QByteArray jsonString(const QString& value)
-{
-    const auto encoded = QJsonDocument(QJsonArray {value}).toJson(QJsonDocument::Compact);
-    return encoded.mid(1, encoded.size() - 2);
-}
-
 }
 
 void detail::TerminalFrameMailbox::reset(const std::uint64_t incarnation)
@@ -190,7 +185,7 @@ TerminalView::TerminalView(QQuickItem* parent)
     auto* accessible = qobject_cast<QQuickAccessibleAttached*>(
         qmlAttachedPropertiesObject<QQuickAccessibleAttached>(this, true));
     accessible->setRole(QAccessible::Terminal);
-    accessible->setName(QStringLiteral("Terminal session"));
+    accessible->setName(tr("Terminal session"));
     accessible->set_focusable(true);
     accessible->set_editable(false);
     accessible->set_readOnly(true);
@@ -209,9 +204,8 @@ TerminalView::TerminalView(QQuickItem* parent)
         m_renderedFrame.reset();
         update();
     });
-    connect(this, &QQuickItem::visibleChanged, this, [this] {
-        scheduleResize();
-    });
+    connect(this, &QQuickItem::enabledChanged, this, &TerminalView::synchronizeInteraction);
+    connect(this, &QQuickItem::opacityChanged, this, &TerminalView::synchronizeInteraction);
 }
 
 TerminalView::~TerminalView()
@@ -228,7 +222,7 @@ QSizeF TerminalView::gridSize() const
 qreal TerminalView::viewportScale() const
 {
     const auto grid = gridSize();
-    if (m_canResize || grid.isEmpty() || width() <= 0 || height() <= 0)
+    if (grid.isEmpty() || width() <= 0 || height() <= 0)
         return 1.0;
     return std::min({1.0, width() / grid.width(), height() / grid.height()});
 }
@@ -498,10 +492,7 @@ void TerminalView::setTerminalInteraction(
     m_canSendInput = canSendInput;
     m_canResize = canResize;
     if (!m_canSendInput) {
-        m_inputQueue.clear();
-        m_queuedInputBytes = 0;
-        m_inputRetryQueued = false;
-        m_inputBackoffStep = 0;
+        clearPendingInput();
         m_preedit.clear();
         m_renderedPreedit.clear();
         m_pasteShortcutKey.reset();
@@ -600,89 +591,21 @@ bool TerminalView::attach(
                 enqueueFrame(epoch, std::move(frame));
             },
             .failed = [this, epoch](auto failure) {
-                QMetaObject::invokeMethod(
-                    this,
-                    [this, epoch, failure = std::move(failure)]() mutable {
-                        if (m_attachmentEpoch.load(std::memory_order_acquire) == epoch) {
-                            presentFailure(std::move(failure));
-                        }
-                    },
-                    Qt::QueuedConnection);
+                failure.message = failure.message.left(1024);
+                enqueueGuiEvent(epoch, std::move(failure));
             },
-            .connectionCompleted = [this, epoch](const std::int32_t result) {
-                QMetaObject::invokeMethod(
-                    this,
-                    [this, epoch, result] {
-                        if (m_attachmentEpoch.load(std::memory_order_acquire) == epoch) {
-                            emit connectionCompleted(result == KODOSI_FFI_OK, result);
-                            if (result == KODOSI_FFI_OK && hasActiveFocus()) {
-                                sendFocus(true);
-                            }
-                        }
-                    },
-                    Qt::QueuedConnection);
+            .connectionCompleted = [this, epoch](std::int32_t result) {
+                enqueueGuiEvent(epoch, result);
             },
             .focusCompleted = [this, epoch](auto outcome) {
-                QMetaObject::invokeMethod(
-                    this,
-                    [this, epoch, outcome = std::move(outcome)]() mutable {
-                        if (m_attachmentEpoch.load(std::memory_order_acquire) == epoch) {
-                            handleFocusOutcome(std::move(outcome));
-                        }
-                    },
-                    Qt::QueuedConnection);
+                outcome.reason = outcome.reason.left(1024);
+                enqueueGuiEvent(epoch, std::move(outcome));
             },
             .resizeCompleted = [this, epoch](auto outcome) {
-                QMetaObject::invokeMethod(
-                    this,
-                    [this, epoch, outcome = std::move(outcome)]() mutable {
-                        if (m_attachmentEpoch.load(std::memory_order_acquire) == epoch) {
-                            handleResizeOutcome(std::move(outcome));
-                        }
-                    },
-                    Qt::QueuedConnection);
+                outcome.reason = outcome.reason.left(1024);
+                enqueueGuiEvent(epoch, std::move(outcome));
             },
-            .notificationRequested = [this, epoch](auto notification) {
-                QMetaObject::invokeMethod(
-                    this,
-                    [this,
-                     epoch,
-                     notification = std::move(notification)]() mutable {
-                        if (m_attachmentEpoch.load(std::memory_order_acquire)
-                            == epoch) {
-                            emit terminalNotificationRequested(
-                                std::move(notification.title),
-                                std::move(notification.body));
-                        }
-                    },
-                    Qt::QueuedConnection);
-            },
-            .titleChanged = [this, epoch](QString title) {
-                QMetaObject::invokeMethod(this, [this, epoch, title = std::move(title)] {
-                    if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch
-                        || m_terminalTitle == title) return;
-                    m_terminalTitle = title;
-                    emit terminalTitleChanged();
-                }, Qt::QueuedConnection);
-            },
-            .bell = [this, epoch] {
-                QMetaObject::invokeMethod(this, [this, epoch] {
-                    if (m_attachmentEpoch.load(std::memory_order_acquire) == epoch)
-                        emit terminalBell();
-                }, Qt::QueuedConnection);
-            },
-            .closed = [this, epoch] {
-                QMetaObject::invokeMethod(
-                    this,
-                    [this, epoch] {
-                        if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch) {
-                            return;
-                        }
-                        detach();
-                        emit terminalClosed();
-                    },
-                    Qt::QueuedConnection);
-            },
+            .closed = [this, epoch] { enqueueGuiEvent(epoch, Closed {}); },
         },
         kernelSettings());
     if (!registered) {
@@ -717,7 +640,7 @@ void TerminalView::detach()
 {
     m_renderPerformanceGeneration.fetch_add(1, std::memory_order_acq_rel);
     Q_ASSERT(thread() == QThread::currentThread());
-    const auto priorAccessibleText = accessibleText();
+    const auto priorAccessibleText = QAccessible::isActive() ? accessibleText() : QString {};
     const auto wasReady = m_terminalReady;
     const auto ownsComposition = hasActiveFocus() && !m_preedit.isEmpty();
     if (m_runtime != nullptr && (m_focusClaimed || !m_pendingFocusRequestId.isEmpty())) {
@@ -734,6 +657,12 @@ void TerminalView::detach()
     }
     const auto epoch = m_attachmentEpoch.fetch_add(1, std::memory_order_acq_rel) + 1;
     m_frameMailbox.reset(epoch);
+    {
+        std::scoped_lock lock(m_guiEventMutex);
+        m_guiEvents.clear();
+        m_guiDrainQueued = false;
+        m_guiOverflow = false;
+    }
     auto* registry = std::exchange(m_registry, nullptr);
     auto* runtime = std::exchange(m_runtime, nullptr);
     bool disconnectSubscription = false;
@@ -744,10 +673,6 @@ void TerminalView::detach()
         (void)runtime->disconnectTerminal(m_subscription);
     }
     m_subscription = {};
-    if (!m_terminalTitle.isEmpty()) {
-        m_terminalTitle.clear();
-        emit terminalTitleChanged();
-    }
     m_expectedRuntimeIncarnationId.clear();
     m_surfaceGeneration = 0;
     m_resizeQueued = false;
@@ -761,10 +686,7 @@ void TerminalView::detach()
     m_resizeRetryQueued = false;
     m_resizeClaimPending = false;
     m_desiredFocus = false;
-    m_inputQueue.clear();
-    m_queuedInputBytes = 0;
-    m_inputRetryQueued = false;
-    m_inputBackoffStep = 0;
+    clearPendingInput();
     m_preedit.clear();
     m_renderedPreedit.clear();
     m_selecting = false;
@@ -834,6 +756,7 @@ void TerminalView::itemChange(const ItemChange change, const ItemChangeData& val
         update();
         scheduleResize();
     } else if (change == ItemVisibleHasChanged) {
+        synchronizeInteraction();
         updateBlinkTimer();
         scheduleResize();
     } else if (change == ItemSceneChange) {
@@ -843,9 +766,118 @@ void TerminalView::itemChange(const ItemChange change, const ItemChangeData& val
                 value.window,
                 &QWindow::visibilityChanged,
                 this,
-                [this] { updateBlinkTimer(); });
+                [this] {
+                    synchronizeInteraction();
+                    updateBlinkTimer();
+                    scheduleResize();
+                });
         }
+        synchronizeInteraction();
         updateBlinkTimer();
+    }
+}
+
+bool TerminalView::interactionAvailable() const
+{
+    return isVisible() && isEnabled() && opacity() > 0 && window() != nullptr
+        && window()->isVisible() && window()->visibility() != QWindow::Minimized;
+}
+
+void TerminalView::clearPendingInput()
+{
+    ++m_inputGeneration;
+    m_inputQueue.clear();
+    m_queuedInputBytes = 0;
+    m_inputRetryQueued = false;
+    m_inputBackoffStep = 0;
+}
+
+void TerminalView::synchronizeInteraction()
+{
+    if (interactionAvailable()) {
+        if (auto* inputMethod = QGuiApplication::inputMethod())
+            inputMethod->update(Qt::ImEnabled | Qt::ImCursorRectangle);
+        if (hasActiveFocus() && m_terminalReady) {
+            m_desiredFocus = true;
+            if (!(m_focusRetryQueued && m_focusRetryOperation == FocusOperation::Blur))
+                sendFocus(true);
+        }
+        return;
+    }
+    clearPendingInput();
+    const bool ownsComposition = hasActiveFocus() && !m_preedit.isEmpty();
+    m_preedit.clear();
+    m_renderedPreedit.clear();
+    m_pasteShortcutKey.reset();
+    m_copyShortcutActive = false;
+    m_pressedLink.reset();
+    m_selecting = false;
+    m_reportedMouseButton = Qt::NoButton;
+    if (m_focusClaimed || !m_pendingFocusRequestId.isEmpty() || m_desiredFocus)
+        sendFocus(false);
+    m_desiredFocus = false;
+    if (auto* inputMethod = QGuiApplication::inputMethod()) {
+        if (ownsComposition) inputMethod->reset();
+        inputMethod->update(Qt::ImEnabled | Qt::ImCursorRectangle);
+    }
+    update();
+}
+
+void TerminalView::enqueueGuiEvent(const std::uint64_t epoch, GuiEvent event)
+{
+    std::scoped_lock lock(m_guiEventMutex);
+    if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch || m_guiOverflow)
+        return;
+    if (m_guiEvents.size() >= 64) {
+        m_guiEvents.clear();
+        m_guiOverflow = true;
+    } else {
+        m_guiEvents.push_back(std::move(event));
+    }
+    if (!m_guiDrainQueued) {
+        m_guiDrainQueued = true;
+        QMetaObject::invokeMethod(this, [this, epoch] { drainGuiEvents(epoch); }, Qt::QueuedConnection);
+    }
+}
+
+void TerminalView::drainGuiEvents(const std::uint64_t epoch)
+{
+    std::deque<GuiEvent> events;
+    bool overflow = false;
+    {
+        std::scoped_lock lock(m_guiEventMutex);
+        if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch) return;
+        events.swap(m_guiEvents);
+        overflow = m_guiOverflow;
+        m_guiDrainQueued = false;
+    }
+    if (overflow) {
+        detach();
+        emit terminalError(tr("Terminal updates exceeded their limit. Reconnect this view."));
+        return;
+    }
+    for (auto& event : events) {
+        if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch) return;
+        std::visit([this, epoch](auto&& value) {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<T, GhosttyTerminalKernel::Failure>) {
+                presentFailure(std::move(value));
+            } else if constexpr (std::is_same_v<T, std::int32_t>) {
+                emit connectionCompleted(value == KODOSI_FFI_OK, value);
+                if (m_attachmentEpoch.load(std::memory_order_acquire) == epoch
+                    && value == KODOSI_FFI_OK && hasActiveFocus() && interactionAvailable()) sendFocus(true);
+            } else if constexpr (std::is_same_v<T, TerminalFocusOutcome>) {
+                handleFocusOutcome(std::move(value));
+            } else if constexpr (std::is_same_v<T, TerminalResizeOutcome>) {
+                handleResizeOutcome(std::move(value));
+
+            } else {
+                drainFrame(epoch);
+                if (m_attachmentEpoch.load(std::memory_order_acquire) != epoch) return;
+                detach();
+                emit terminalClosed();
+            }
+        }, std::move(event));
     }
 }
 
@@ -880,7 +912,7 @@ void TerminalView::drainFrame(const std::uint64_t epoch)
 void TerminalView::presentFrame(GhosttyTerminalKernel::Frame frame)
 {
     Q_ASSERT(thread() == QThread::currentThread());
-    const auto priorAccessibleText = accessibleText();
+    const auto priorAccessibleText = QAccessible::isActive() ? accessibleText() : QString {};
     m_frame = std::move(frame);
     m_pressedLink.reset();
     clearHoverLink();
@@ -938,7 +970,7 @@ void TerminalView::dispatchFocus(const FocusOperation operation)
     if (operation == FocusOperation::None) {
         return;
     }
-    if (focused && !m_canSendInput) {
+    if (focused && (!m_canSendInput || !interactionAvailable())) {
         return;
     }
     if (m_runtime == nullptr || !m_runtime->isRunning()) {
@@ -948,22 +980,22 @@ void TerminalView::dispatchFocus(const FocusOperation operation)
         return;
     }
     auto command = QByteArrayLiteral("{\"type\":");
-    command += jsonString(
+    command += jsonStringBytes(
         focused ? QStringLiteral("session.focus") : QStringLiteral("session.blur"));
     command += QByteArrayLiteral(",\"sessionId\":");
-    command += jsonString(m_subscription.sessionId);
+    command += jsonStringBytes(m_subscription.sessionId);
     command += QByteArrayLiteral(",\"clientId\":");
-    command += jsonString(m_subscription.subscriptionId);
+    command += jsonStringBytes(m_subscription.subscriptionId);
     command += QByteArrayLiteral(",\"subscriptionGeneration\":");
     command += QByteArray::number(m_subscription.generation);
     if (focused) {
         m_pendingFocusRequestId =
             QUuid::createUuidV7().toString(QUuid::WithoutBraces);
         command += QByteArrayLiteral(",\"requestId\":");
-        command += jsonString(m_pendingFocusRequestId);
+        command += jsonStringBytes(m_pendingFocusRequestId);
     }
     command += QByteArrayLiteral(",\"expectedRuntimeIncarnationId\":");
-    command += jsonString(m_expectedRuntimeIncarnationId);
+    command += jsonStringBytes(m_expectedRuntimeIncarnationId);
     command += '}';
     if (auto result = m_runtime->send(command); !result) {
         if (focused) {
@@ -1096,7 +1128,7 @@ void TerminalView::scheduleResize()
 void TerminalView::dispatchResize()
 {
     if (m_runtime == nullptr || !m_runtime->isRunning() || m_surfaceGeneration == 0
-        || !m_canResize || !isVisible()
+        || !m_canResize || !interactionAvailable()
         || width() <= 0.0 || height() <= 0.0) {
         return;
     }
@@ -1148,13 +1180,13 @@ void TerminalView::dispatchResize()
     };
 
     auto command = QByteArrayLiteral("{\"type\":\"session.resize\",\"sessionId\":");
-    command += jsonString(m_subscription.sessionId);
+    command += jsonStringBytes(m_subscription.sessionId);
     command += QByteArrayLiteral(",\"requestId\":");
-    command += jsonString(pending.requestId);
+    command += jsonStringBytes(pending.requestId);
     command += QByteArrayLiteral(",\"expectedRuntimeIncarnationId\":");
-    command += jsonString(m_expectedRuntimeIncarnationId);
+    command += jsonStringBytes(m_expectedRuntimeIncarnationId);
     command += QByteArrayLiteral(",\"subscriptionId\":");
-    command += jsonString(m_subscription.subscriptionId);
+    command += jsonStringBytes(m_subscription.subscriptionId);
     command += QByteArrayLiteral(",\"subscriptionGeneration\":");
     command += QByteArray::number(m_subscription.generation);
     command += QByteArrayLiteral(",\"surfaceGeneration\":");
@@ -1217,8 +1249,7 @@ void TerminalView::configureAttachedKernel()
 bool TerminalView::blinkEligible() const
 {
     return m_cursorBlink && m_terminalReady && m_frame
-        && m_frame->cursor.visible && hasActiveFocus() && isVisible()
-        && window() != nullptr && window()->isVisible();
+        && m_frame->cursor.visible && hasActiveFocus() && interactionAvailable();
 }
 
 void TerminalView::updateBlinkTimer()

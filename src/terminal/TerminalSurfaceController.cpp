@@ -84,21 +84,10 @@ bool TerminalSurfaceController::bind(
             .sessionId = sessionId,
             .runtimeIncarnationId = currentIncarnation.value_or(QString {}),
             .subscription = {},
-            .notificationConnection = {},
             .readinessConnection = {},
             .checkpointTimer = {},
             .attached = false,
         });
-        m_bindings.back().notificationConnection = connect(
-            view,
-            &TerminalView::terminalNotificationRequested,
-            this,
-            [this, view](QString title, QString body) {
-                forwardNotification(
-                    view,
-                    std::move(title),
-                    std::move(body));
-            });
         view->setTerminalInteraction(presentation && presentation->canControl, presentation && presentation->canControl);
         connect(view, &QObject::destroyed, this, [this, view] {
             for (auto binding = m_bindings.begin();
@@ -108,7 +97,6 @@ bool TerminalSurfaceController::bind(
                     continue;
                 }
                 cancelCheckpointTimeout(*binding);
-                disconnect(binding->notificationConnection);
                 disconnect(binding->readinessConnection);
                 binding = m_bindings.erase(binding);
             }
@@ -248,15 +236,8 @@ void TerminalSurfaceController::detach(TerminalView* view)
         cancelCheckpointTimeout(*found);
         found->view->detach();
     }
-    disconnect(found->notificationConnection);
     disconnect(found->readinessConnection);
     m_bindings.erase(found);
-}
-
-void TerminalSurfaceController::setNotificationSink(
-    TerminalNotificationSink* sink) noexcept
-{
-    m_notificationSink = sink;
 }
 
 void TerminalSurfaceController::runtimeChanged(const bool running)
@@ -326,7 +307,6 @@ void TerminalSurfaceController::reconcile()
                 binding->view.data(),
                 binding->sessionId,
                 QStringLiteral("The terminal session was replaced or removed."));
-            disconnect(binding->notificationConnection);
             disconnect(binding->readinessConnection);
             binding = m_bindings.erase(binding);
             continue;
@@ -542,30 +522,6 @@ void TerminalSurfaceController::cancelCheckpointTimeout(Binding& binding)
     binding.checkpointTimer->stop();
     binding.checkpointTimer->deleteLater();
     binding.checkpointTimer = nullptr;
-}
-
-void TerminalSurfaceController::forwardNotification(
-    TerminalView* view,
-    QString title,
-    QString body)
-{
-    if (m_notificationSink == nullptr) {
-        return;
-    }
-    const auto binding =
-        std::ranges::find_if(m_bindings, [&](const Binding& value) {
-            return value.view == view;
-        });
-    if (binding == m_bindings.end() || !binding->attached
-        || binding->runtimeIncarnationId.isEmpty()) {
-        return;
-    }
-    m_notificationSink->receiveTerminalNotification({
-        .sessionId = binding->sessionId,
-        .runtimeIncarnationId = binding->runtimeIncarnationId,
-        .title = std::move(title),
-        .body = std::move(body),
-    });
 }
 
 }

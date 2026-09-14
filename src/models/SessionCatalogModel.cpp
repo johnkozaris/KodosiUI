@@ -136,7 +136,7 @@ std::optional<SessionCatalogModel::Session> SessionCatalogModel::decode(const QJ
         || (s.kind != QStringLiteral("local") && s.kind != QStringLiteral("remote"))
         || !o.value(QStringLiteral("isOwner")).isBool()
         || !QStringList { QStringLiteral("running"),
-            QStringLiteral("reconnecting"), QStringLiteral("stopping") }
+            QStringLiteral("reconnecting"), QStringLiteral("closing") }
             .contains(s.status)
         || !QStringList { QStringLiteral("local"), QStringLiteral("connecting"), QStringLiteral("connected"),
             QStringLiteral("offline"), QStringLiteral("blocked") }

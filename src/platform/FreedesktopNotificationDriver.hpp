@@ -29,6 +29,7 @@ private:
     QHash<uint, QString> m_keysById;
     QHash<uint, QString> m_activationTokens;
     QHash<QString, quint64> m_postGenerations;
+    int m_pendingPosts = 0;
     quint64 m_nextPostGeneration = 0;
     quint64 m_serviceGeneration = 0;
 

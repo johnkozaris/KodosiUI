@@ -111,16 +111,17 @@ void DesktopStateModel::toggleFocusForSelectedSession()
     else
         enterFocusMode();
 }
-void DesktopStateModel::selectAdjacentSession(int offset)
+void DesktopStateModel::setModalVisible(QObject* modal, bool visible)
 {
-    if (m_staged.isEmpty())
-        return;
-    auto index = m_staged.indexOf(m_selected);
-    if (index < 0)
-        index = 0;
-    const auto count = m_staged.size();
-    m_selected = m_staged.at((index + offset % count + count) % count);
-    emit selectedSessionIdChanged();
+    if (!modal) return;
+    const bool wasOpen = modalOpen();
+    if (visible && !m_modals.contains(modal)) {
+        m_modals.insert(modal, connect(modal, &QObject::destroyed, this,
+            [this, modal] { setModalVisible(modal, false); }));
+    } else if (!visible) {
+        disconnect(m_modals.take(modal));
+    }
+    if (wasOpen != modalOpen()) emit modalOpenChanged();
 }
 void DesktopStateModel::clearError()
 {

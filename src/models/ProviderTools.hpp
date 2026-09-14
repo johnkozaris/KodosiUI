@@ -42,7 +42,7 @@ public:
     Q_INVOKABLE void loadLatest();
     Q_INVOKABLE void inspect();
     Q_INVOKABLE void clearError();
-    void apply(const QJsonObject& event);
+    void apply(const QJsonObject& event, const QByteArray& payload);
     Q_INVOKABLE void reset();
 signals:
     void selectionChanged();
@@ -58,11 +58,11 @@ private:
     QString m_provider = QStringLiteral("claude"), m_directory, m_requestId, m_operation, m_error, m_cursor;
     QVariantList m_conversations, m_entries;
     QVariantMap m_selected, m_installation;
-    std::optional<qint64> m_before, m_pageBefore, m_requestedBefore;
-    QList<std::optional<qint64>> m_newer;
+    std::optional<std::uint64_t> m_before, m_pageBefore, m_requestedBefore;
+    QList<std::optional<std::uint64_t>> m_newer;
     enum class Navigation { Latest, Older, Newer };
     Navigation m_navigation = Navigation::Latest;
-    void readPage(std::optional<qint64> before, Navigation navigation);
+    void readPage(std::optional<std::uint64_t> before, Navigation navigation);
     bool m_append = false;
     void send(QString operation, QJsonObject values = {});
     void fail(QString message);

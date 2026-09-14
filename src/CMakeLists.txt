@@ -10,8 +10,11 @@ qt_add_library(kodosi-runtime-bridge STATIC
     app/DeepLinkRouter.hpp
     app/SingleInstanceGuard.cpp
     app/SingleInstanceGuard.hpp
+    app/RuntimeStorageBootstrap.cpp
+    app/RuntimeStorageBootstrap.hpp
     bridge/RuntimeBridge.cpp
     bridge/RuntimeBridge.hpp
+    bridge/JsonEnvelope.hpp
     logging/ApplicationLogStore.cpp
     logging/ApplicationLogStore.hpp
     models/Workspace.cpp
@@ -85,7 +88,6 @@ qt_add_library(kodosi-terminal-kernel STATIC
     terminal/TerminalFrame.hpp
     terminal/TerminalRasterizer.cpp
     terminal/TerminalRasterizer.hpp
-    terminal/TerminalNotificationSink.hpp
     terminal/TerminalSessionRegistry.cpp
     terminal/TerminalSessionRegistry.hpp
     terminal/TerminalSettings.hpp
@@ -180,12 +182,10 @@ qt_add_qml_module(kodosi-ui
         qml/Controls/KItemDelegate.qml
         qml/Controls/KMenu.qml
         qml/Controls/KMenuItem.qml
-        qml/Controls/KMenuSeparator.qml
         qml/Controls/KPopover.qml
         qml/Controls/KReadOnlyText.qml
         qml/Controls/KScrollBar.qml
         qml/Controls/KScrollView.qml
-        qml/Controls/KSegmentedBar.qml
         qml/Controls/KSpinBox.qml
         qml/Controls/KTextField.qml
         qml/Controls/PlainLabel.qml

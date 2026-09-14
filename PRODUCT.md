@@ -33,8 +33,10 @@ docs. Existing code and candidate lists are starting evidence, not predetermined
 
 ## Operating Context
 
-- Closing a view or window leaves its process running. Stop ends that session;
-  quitting its host ends local processes, not sessions hosted elsewhere.
+- Minimize hides a terminal view and leaves its process running. Close ends the session
+  for everyone connected and removes it from the live catalog; it creates no session archive.
+- Closing the window hides Kodosi. Quit ends processes hosted on this computer, not
+  sessions hosted elsewhere. Files and provider-saved conversations are kept.
 - A shared shell runs with the host OS user's capabilities, not a project sandbox.
 - Terminal control does not confer identity or sharing administration.
 - Mission membership is independent of terminal sharing.

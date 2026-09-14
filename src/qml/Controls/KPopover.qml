@@ -1,9 +1,15 @@
 import Kodosi 1.0
 import QtQuick
 import QtQuick.Controls
+import Kodosi.Models 1.0 as Models
 
 Popup {
     id: root
+
+    Component.onCompleted: Models.DesktopState.setModalVisible(root, visible && modal)
+    onVisibleChanged: Models.DesktopState.setModalVisible(root, visible && modal)
+    onModalChanged: Models.DesktopState.setModalVisible(root, visible && modal)
+    Component.onDestruction: Models.DesktopState.setModalVisible(root, false)
 
     padding: 0
     palette.window: KodosiTheme.surfaceRaised

@@ -6,8 +6,10 @@
 class ProviderCommands final : public kodosi::CommandDispatcher {
 public:
     QList<QJsonObject> values;
+    QByteArray lastBytes;
     Result send(QByteArrayView bytes) override
     {
+        lastBytes = bytes.toByteArray();
         values.append(QJsonDocument::fromJson(bytes.toByteArray()).object());
         return {};
     }
@@ -20,6 +22,11 @@ public:
             { QStringLiteral("result"), result } };
     }
 };
+void apply(kodosi::ProviderTools& tools, const QJsonObject& event)
+{
+    tools.apply(event, QJsonDocument(event).toJson(QJsonDocument::Compact));
+}
+
 class ProviderToolsTest final : public QObject {
     Q_OBJECT
 private slots:
@@ -32,10 +39,10 @@ private slots:
         const QJsonObject item { { QStringLiteral("provider"), QStringLiteral("claude") },
             { QStringLiteral("workingDirectory"), QStringLiteral("/repo") },
             { QStringLiteral("nativeConversationId"), test::id(1) } };
-        tools.apply(commands.reply({ { QStringLiteral("items"), QJsonArray { item } } }));
+        apply(tools, commands.reply({ { QStringLiteral("items"), QJsonArray { item } } }));
         QCOMPARE(tools.conversations().size(), 1);
         tools.preview(test::id(1));
-        tools.apply(commands.reply(
+        apply(tools, commands.reply(
             { { QStringLiteral("entries"),
                   QJsonArray { QJsonObject { { QStringLiteral("role"), QStringLiteral("user") },
                       { QStringLiteral("content"), QStringLiteral("Hello") } } } },
@@ -47,7 +54,7 @@ private slots:
         QVERIFY(!commands.values.last().contains(QStringLiteral("beforeLine")));
         const auto stale = commands.reply({ { QStringLiteral("entries"), QJsonArray { QJsonObject {} } } });
         tools.select(QStringLiteral("copilot"), QStringLiteral("/other"));
-        tools.apply(stale);
+        apply(tools, stale);
         QVERIFY(tools.entries().isEmpty());
         QVERIFY(!tools.busy());
     }
@@ -57,7 +64,7 @@ private slots:
         kodosi::ProviderTools tools(commands);
         tools.select(QStringLiteral("claude"), QStringLiteral("/repo"));
         tools.discover();
-        tools.apply(commands.reply({ { QStringLiteral("items"), QJsonArray { QJsonObject {
+        apply(tools, commands.reply({ { QStringLiteral("items"), QJsonArray { QJsonObject {
             { QStringLiteral("provider"), QStringLiteral("claude") },
             { QStringLiteral("workingDirectory"), QStringLiteral("/repo") },
             { QStringLiteral("nativeConversationId"), test::id(1) } } } } }));
@@ -68,25 +75,25 @@ private slots:
             return QJsonObject { { QStringLiteral("entries"), QJsonArray { QJsonObject {
                 { QStringLiteral("content"), content } } } }, { QStringLiteral("nextBeforeByte"), before } };
         };
-        tools.apply(commands.reply(page(QStringLiteral("latest"), 1000)));
+        apply(tools, commands.reply(page(QStringLiteral("latest"), 1000)));
         for (int i = 0; i < 45; ++i) {
             tools.loadOlder();
-            tools.apply(commands.reply(page(QString::number(i), 999 - i)));
+            apply(tools, commands.reply(page(QString::number(i), 999 - i)));
             QCOMPARE(tools.entries().size(), 1);
         }
         QVERIFY(tools.hasNewer());
         tools.loadLatest();
-        tools.apply({ { QStringLiteral("type"), QStringLiteral("provider.error") },
+        apply(tools, { { QStringLiteral("type"), QStringLiteral("provider.error") },
             { QStringLiteral("requestId"), commands.values.last().value(QStringLiteral("requestId")) },
             { QStringLiteral("message"), QStringLiteral("Unavailable") } });
         QCOMPARE(tools.entries().first().toMap().value(QStringLiteral("content")).toString(), QStringLiteral("44"));
         QVERIFY(tools.hasNewer());
         tools.loadNewer();
         QCOMPARE(commands.values.last().value(QStringLiteral("beforeByte")).toInt(), 957);
-        tools.apply(commands.reply(page(QStringLiteral("43"), 956)));
+        apply(tools, commands.reply(page(QStringLiteral("43"), 956)));
         tools.loadLatest();
         QVERIFY(!commands.values.last().contains(QStringLiteral("beforeByte")));
-        tools.apply(commands.reply(page(QStringLiteral("latest"), 1000)));
+        apply(tools, commands.reply(page(QStringLiteral("latest"), 1000)));
         QVERIFY(!tools.hasNewer());
         QCOMPARE(tools.entries().size(), 1);
     }
@@ -97,7 +104,7 @@ private slots:
         tools.select(QStringLiteral("claude"), {});
         tools.discover();
         QVERIFY(!commands.values.last().contains(QStringLiteral("workingDirectory")));
-        tools.apply(commands.reply({ { QStringLiteral("items"), QJsonArray { QJsonObject {
+        apply(tools, commands.reply({ { QStringLiteral("items"), QJsonArray { QJsonObject {
             { QStringLiteral("provider"), QStringLiteral("claude") },
             { QStringLiteral("workingDirectory"), QStringLiteral("/another-project") },
             { QStringLiteral("nativeConversationId"), test::id(1) } } } } }));
@@ -110,12 +117,33 @@ private slots:
         kodosi::ProviderTools tools(commands);
         tools.select(QStringLiteral("claude"), QStringLiteral("/repo"));
         tools.discover();
-        tools.apply(commands.reply({ { QStringLiteral("items"),
+        apply(tools, commands.reply({ { QStringLiteral("items"),
             QJsonArray { QJsonObject { { QStringLiteral("provider"), QStringLiteral("claude") },
                 { QStringLiteral("workingDirectory"), QStringLiteral("/other") },
                 { QStringLiteral("nativeConversationId"), test::id(1) } } } } }));
         QVERIFY(tools.conversations().isEmpty());
         QVERIFY(!tools.error().isEmpty());
+    }
+    void preservesUnsignedByteCursor()
+    {
+        ProviderCommands commands;
+        kodosi::ProviderTools tools(commands);
+        tools.select(QStringLiteral("claude"), QStringLiteral("/repo"));
+        tools.discover();
+        const QJsonObject item {
+            {QStringLiteral("provider"), QStringLiteral("claude")},
+            {QStringLiteral("workingDirectory"), QStringLiteral("/repo")},
+            {QStringLiteral("nativeConversationId"), test::id(1)}};
+        apply(tools, commands.reply({{QStringLiteral("items"), QJsonArray {item}}}));
+        tools.preview(test::id(1));
+        auto reply = commands.reply({{QStringLiteral("entries"), QJsonArray {}},
+            {QStringLiteral("nextBeforeByte"), QStringLiteral("18446744073709551615")}});
+        auto bytes = QJsonDocument(reply).toJson(QJsonDocument::Compact);
+        bytes.replace("\"18446744073709551615\"", "18446744073709551615");
+        tools.apply(QJsonDocument::fromJson(bytes).object(), bytes);
+        QVERIFY(tools.hasOlder());
+        tools.loadOlder();
+        QVERIFY(commands.lastBytes.contains("\"beforeByte\":18446744073709551615"));
     }
     void inspectionOnlyRequestsMetadata()
     {

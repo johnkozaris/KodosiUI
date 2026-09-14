@@ -5,10 +5,11 @@ and Mission metadata; Qt owns presentation and native desktop integration.
 See [PRODUCT.md](PRODUCT.md) for scope and [DESIGN.md](DESIGN.md) for visual constraints.
 
 New Session starts an auto-named shell immediately. The sidebar groups terminals
-by folder; headers add provider icons and terminal titles. Minimize closes a view,
-not its process. Close Session confirms before stopping it. Closing the window
-hides Kodosi; Quit stops local processes. Approved devices and selected friends
-have full control; Mission membership never grants terminal access.
+by folder; headers add provider icons and terminal titles. Minimize hides a view,
+not its process. Close confirms before ending the session for everyone connected;
+it removes the live session without archiving it. Files and saved conversations stay.
+Closing the window hides Kodosi; Quit ends local processes. Approved devices and
+selected friends have full control; Mission membership never grants terminal access.
 
 History reads bounded Claude/Copilot pages across projects and resumes explicitly.
 Provider files remain read-only. Details organizes Workspace, People and Mission.
@@ -31,6 +32,8 @@ Bootstrap installs pinned Qt/CMake/Ninja under `.tools/`. `build/` contains disp
 outputs. Control regression tests use the packaged `Kodosi` QML module.
 Linux containers verify builds and offscreen tests, not desktop portal or Wayland
 interaction. Use isolated storage; never reset user databases or provider history.
+With `KODOSI_DATA_ROOT` and `KODOSI_PRODUCTION_DATA_ROOT` set, Qt preferences and
+logs stay under `<KODOSI_DATA_ROOT>/qt`; HOME and provider lookup paths remain unchanged.
 
 `-DKODOSI_ALLOW_DIRTY_RUNTIME=ON` is for coordinated local development only. Releases
 require clean checkouts matching the immutable source pins, native provenance,

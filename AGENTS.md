@@ -15,7 +15,10 @@ accessibility, localization, file picking, and desktop notifications.
 
 ## Rules
 
-- Desktop protocol 39 and C ABI 6 only. No old event/command lanes or compatibility.
+- Desktop protocol 42 and C ABI 6 only. No old event/command lanes or compatibility.
+- Close uses `session.close` to end the process and remove the live session, without
+  archiving it. Minimize uses `closeView` to hide only this view. Window close hides
+  Kodosi; Quit ends local processes. Preserve files and provider-saved conversations.
 - QML never decodes raw wire JSON or receives terminal bytes, checkpoints, FFI
   pointers, credentials, or cryptographic authority. Commands re-resolve the
   current session incarnation in native code.

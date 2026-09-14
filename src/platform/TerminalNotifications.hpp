@@ -2,7 +2,7 @@
 
 #include "models/SessionCatalogModel.hpp"
 #include "platform/DesktopNotificationDriver.hpp"
-#include "terminal/TerminalNotificationSink.hpp"
+#include <QJsonObject>
 
 #include <QHash>
 #include <QObject>
@@ -10,9 +10,7 @@
 
 namespace kodosi {
 
-class TerminalNotifications final
-    : public QObject,
-      public TerminalNotificationSink {
+class TerminalNotifications final : public QObject {
     Q_OBJECT
 
 public:
@@ -21,8 +19,7 @@ public:
         DesktopNotificationDriver& driver,
         QObject* parent = nullptr);
 
-    void receiveTerminalNotification(
-        TerminalNotificationEvent notification) override;
+    void apply(const QJsonObject& event);
 
 signals:
     void sessionRequested(QString sessionId, QString activationToken);

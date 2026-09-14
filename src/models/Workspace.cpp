@@ -3,7 +3,6 @@
 #include "models/SessionCatalogModel.hpp"
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QRegularExpression>
 #include <QRandomGenerator>
 #include <QUuid>
 #include <algorithm>
@@ -58,6 +57,7 @@ Workspace::Workspace(
     });
     connect(
         &sessions, &SessionCatalogModel::authoritativeSnapshotApplied, this, &Workspace::activatePendingLink);
+    connect(&sessions, &SessionCatalogModel::authorityStateChanged, this, &Workspace::missionChanged);
 }
 bool Workspace::send(QString type, QJsonObject values, QString sessionId)
 {
@@ -128,13 +128,13 @@ bool Workspace::activateSession(const QString& id)
         m_link.reset();
         return false;
     }
-    if (!s || s->connectionState == QStringLiteral("blocked") || s->status == QStringLiteral("stopping")) {
+    if (!s || s->connectionState == QStringLiteral("blocked") || s->status == QStringLiteral("closing")) {
         setError(s && !s->message.isEmpty() ? s->message : tr("This session is no longer available."));
         return false;
     }
     if (!m_desktop.stagedSessionIds().contains(id) && m_desktop.stagedSessionIds().size() >= 6)
         return m_desktop.stageSession(id);
-    if (s->kind == QStringLiteral("remote") && s->connectionState != QStringLiteral("connected")) {
+    if (s->kind == QStringLiteral("remote")) {
         for (auto it = m_pending.cbegin(); it != m_pending.cend(); ++it) {
             if (it->operation == QStringLiteral("session.openRemote") && it->sessionId == id) {
                 if (!m_desktop.stageSession(id))
@@ -157,6 +157,13 @@ bool Workspace::closeView(const QString& id)
         return false;
     if (m_link && m_link->sessionId == id)
         m_link.reset();
+    for (auto pending = m_pending.begin(); pending != m_pending.end();) {
+        if (pending->operation == QStringLiteral("session.openRemote") && pending->sessionId == id)
+            pending = m_pending.erase(pending);
+        else
+            ++pending;
+    }
+    emit busyChanged();
     const auto session = m_sessions.session(id);
     if (session && session->kind == QStringLiteral("remote"))
         send(QStringLiteral("session.disconnect"), { { QStringLiteral("sessionId"), id } });
@@ -202,9 +209,9 @@ bool Workspace::sessionCommand(QString type, const QString& id, QJsonObject valu
     values.insert(QStringLiteral("expectedRuntimeIncarnationId"), s->incarnationId);
     return send(std::move(type), std::move(values), id);
 }
-bool Workspace::stopSession(const QString& id)
+bool Workspace::closeSession(const QString& id)
 {
-    return sessionCommand(QStringLiteral("session.stop"), id);
+    return sessionCommand(QStringLiteral("session.close"), id);
 }
 bool Workspace::shareSession(const QString& id, const QStringList& users, const QStringList& expectedUsers)
 {
@@ -267,24 +274,31 @@ void Workspace::cancelEnrollment()
 {
     send(QStringLiteral("devices.link.cancelSelf"));
 }
-void Workspace::createMission(const QString& name, const QString& slug)
+void Workspace::createMission(const QString& name)
 {
-    if (!validName(name)
-        || !QRegularExpression(QStringLiteral("^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$"))
-            .match(slug.trimmed())
-            .hasMatch()) {
-        setError(tr("Use a name of 1–128 UTF-8 bytes and a 3–64 character lowercase slug."));
+    if (!validName(name)) {
+        setError(tr("Use a name of 1–128 UTF-8 bytes."));
         return;
     }
-    send(QStringLiteral("room.create"),
-        { { QStringLiteral("name"), name.trimmed() }, { QStringLiteral("slug"), slug.trimmed() } });
+    send(QStringLiteral("room.create"), { { QStringLiteral("name"), name.trimmed() } });
+}
+QStringList Workspace::missionSessionIds() const
+{
+    QStringList result;
+    if (m_selectedMission.isEmpty() || !m_sessions.hasAuthoritativeSnapshot())
+        return result;
+    for (int row = 0; row < m_sessions.rowCount(); ++row) {
+        const auto index = m_sessions.index(row, 0);
+        if (m_sessions.data(index, SessionCatalogModel::RoomIdRole).toString() == m_selectedMission)
+            result.append(m_sessions.data(index, SessionCatalogModel::SessionIdRole).toString());
+    }
+    return result;
 }
 void Workspace::openMission(const QString& id)
 {
     m_selectedMission = id;
     m_mission.clear();
     m_members.clear();
-    m_missionSessions.clear();
     emit missionChanged();
     for (auto it = m_pending.begin(); it != m_pending.end();) {
         if (it->operation == QStringLiteral("room.open"))
@@ -357,9 +371,9 @@ void Workspace::clearAccount()
     m_deviceRequests.clear();
     m_missions.clear();
     m_invitations.clear();
+    m_missionCatalogTruncated = false;
     m_mission.clear();
     m_members.clear();
-    m_missionSessions.clear();
     m_selectedMission.clear();
     m_selfDeviceCode.clear();
     m_selfDeviceId.clear();
@@ -382,7 +396,7 @@ void Workspace::reset()
     m_userId.clear();
     m_userCode.clear();
     m_verificationUri.clear();
-    m_accountEpoch = -1;
+    m_accountEpoch.reset();
     m_finalizing = true;
     emit accountChanged();
     emit loginChanged();
@@ -416,7 +430,7 @@ void Workspace::activatePendingLink()
     }
     activateSession(id);
 }
-void Workspace::apply(const QJsonObject& event)
+void Workspace::apply(const QJsonObject& event, std::uint64_t accountEpoch)
 {
     const auto type = event.value(QStringLiteral("type")).toString();
     if (type == QStringLiteral("auth.finalizing")) {
@@ -426,7 +440,7 @@ void Workspace::apply(const QJsonObject& event)
     }
     if (type == QStringLiteral("auth.ready") || type == QStringLiteral("auth.required")) {
         m_finalizing = false;
-        const auto epoch = event.value(QStringLiteral("accountEpoch")).toInteger(-1);
+        const auto epoch = accountEpoch;
         const auto user = type == QStringLiteral("auth.ready")
             ? event.value(QStringLiteral("userId")).toString()
             : QString {};
@@ -450,7 +464,7 @@ void Workspace::apply(const QJsonObject& event)
         emit loginChanged();
         return;
     }
-    if (type == QStringLiteral("auth.notice") || type == QStringLiteral("auth.identity_health")) {
+    if (type == QStringLiteral("auth.notice")) {
         if (!event.value(QStringLiteral("message")).toString().isEmpty())
             setError(event.value(QStringLiteral("message")).toString());
         return;
@@ -476,7 +490,7 @@ void Workspace::apply(const QJsonObject& event)
                     activateSession(created);
                     continue;
                 }
-            } else if (pending.operation == QStringLiteral("session.stop")
+            } else if (pending.operation == QStringLiteral("session.close")
                 && !m_sessions.containsSession(pending.sessionId)) {
                 it = m_pending.erase(it);
                 continue;
@@ -516,19 +530,22 @@ void Workspace::apply(const QJsonObject& event)
         send(QStringLiteral("devices.refresh"));
         return;
     }
-    if (type == QStringLiteral("devices.link.requested") || type == QStringLiteral("devices.link.resolved")) {
+    if (type == QStringLiteral("devices.link.resolved")) {
         send(QStringLiteral("devices.refresh"));
         return;
     }
     if (type == QStringLiteral("rooms.snapshot")) {
         m_missions = list(event, "rooms");
         m_invitations = list(event, "invitations");
+        const bool roomsTruncated = event.value(QStringLiteral("roomsTruncated")).toBool();
+        m_missionCatalogTruncated = roomsTruncated
+            || event.value(QStringLiteral("invitationsTruncated")).toBool();
         emit missionsChanged();
         if (!m_selectedMission.isEmpty()) {
             const auto exists = std::any_of(m_missions.cbegin(), m_missions.cend(), [&](const QVariant& room) {
                 return room.toMap().value(QStringLiteral("id")).toString() == m_selectedMission;
             });
-            if (!exists) openMission({});
+            if (!exists && !roomsTruncated) openMission({});
             else openMission(m_selectedMission);
         }
         return;
@@ -542,9 +559,6 @@ void Workspace::apply(const QJsonObject& event)
         if (room.value(QStringLiteral("id")).toString() == m_selectedMission) {
             m_mission = room.toVariantMap();
             m_members = list(event, "members");
-            m_missionSessions.clear();
-            for (const auto& id : event.value(QStringLiteral("sessionIds")).toArray())
-                m_missionSessions.append(id.toString());
             emit missionChanged();
         }
     }
@@ -590,6 +604,8 @@ void Workspace::apply(const QJsonObject& event)
             m_userCode.clear();
             emit loginChanged();
         }
+        if (pending.operation == QStringLiteral("room.open") && pending.roomId == m_selectedMission)
+            openMission({});
         m_pending.remove(id);
         emit busyChanged();
         setError(event.value(QStringLiteral("message")).toString());

@@ -104,11 +104,6 @@ public:
         const QString& stableId,
         qreal deltaPixels);
 
-    [[nodiscard]] static int idealColumnCount(
-        int sessionCount,
-        qreal width,
-        qreal height,
-        qreal minimumTileHeight = 170);
     [[nodiscard]] static qreal requiredContentHeight(
         int rowCount,
         qreal viewportHeight,

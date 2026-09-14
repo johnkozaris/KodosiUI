@@ -133,6 +133,7 @@ public slots:
 
 class InspectableTerminalView final : public kodosi::TerminalView {
 public:
+    using TerminalView::TerminalView;
     using TerminalView::inputMethodQuery;
 };
 
@@ -295,6 +296,7 @@ void completeResize(
 
 class TerminalKernelTest final : public QObject {
     Q_OBJECT
+    QQuickWindow m_window;
 
 private slots:
     void initTestCase();
@@ -317,6 +319,10 @@ private slots:
     void remoteGridFitsAndMapsAccessibleMouseCoordinates();
     void terminalViewPreservesControlAndEscapeKeys();
     void runtimeBellAndTitleKeepTerminalAvailable();
+    void hiddenAndDisabledTerminalRejectsInputAndCancelsRetries();
+    void terminalControlsStayBoundedAndFenceReattachment();
+    void terminalClosePresentsPendingFinalFrameBeforeDetaching();
+    void retiredTerminalCloseCannotDetachReplacement();
     void pasteEncodingUsesRestoredTerminalModes();
     void wheelScrollsGhosttyViewportWithoutChangingSequence();
     void selectionUsesGhosttyTrackedStateAndFormatting();
@@ -383,28 +389,168 @@ void TerminalKernelTest::runtimeBellAndTitleKeepTerminalAvailable()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("session"), QStringLiteral("subscription"), 1};
     QVERIFY(view.attach(registry, dispatcher, subscription, QStringLiteral("incarnation")));
     makeTerminalReady(registry, subscription);
     QSignalSpy errors(&view, &kodosi::TerminalView::terminalError);
-    QSignalSpy bells(&view, &kodosi::TerminalView::terminalBell);
     registry.receiveControl({subscription, QByteArrayLiteral(R"({"type":"term.bell","sessionId":"session"})")});
     registry.receiveControl({subscription, QByteArrayLiteral(R"({"type":"term.title","sessionId":"session","title":"Building project"})")});
-    QTRY_COMPARE(bells.count(), 1);
-    QTRY_COMPARE(view.terminalTitle(), QStringLiteral("Building project"));
     QCOMPARE(errors.count(), 0);
     QVERIFY(view.terminalReady());
     registry.receiveControl({subscription, QByteArrayLiteral(R"({"type":"term.title","sessionId":"session","title":null})")});
-    QTRY_VERIFY(view.terminalTitle().isEmpty());
     registry.receiveControl({subscription, QByteArrayLiteral(R"({"type":"term.bell","sessionId":"wrong"})")});
     QTRY_COMPARE(errors.count(), 1);
+}
+
+void TerminalKernelTest::hiddenAndDisabledTerminalRejectsInputAndCancelsRetries()
+{
+    kodosi::TerminalSessionRegistry registry;
+    FakeTerminalDispatcher dispatcher;
+    QQuickWindow window;
+    window.resize(800, 500);
+    QQuickItem container(window.contentItem());
+    container.setSize(QSizeF(800, 500));
+    InspectableTerminalView view(m_window.contentItem());
+    view.setParentItem(&container);
+    view.setSize(container.size());
+    view.setTerminalInteraction(true, true);
+    const kodosi::TerminalSubscription subscription {QStringLiteral("hidden-input"), QStringLiteral("subscription"), 1};
+    QVERIFY(view.attach(registry, dispatcher, subscription, QStringLiteral("incarnation")));
+    makeTerminalReady(registry, subscription);
+    window.show();
+    window.requestActivate();
+    view.forceActiveFocus();
+    QTRY_VERIFY(view.hasActiveFocus());
+    QTest::keyClick(&window, Qt::Key_A);
+    QCOMPARE(dispatcher.inputCommands.size(), 1);
+    dispatcher.busyInputCommands = 100;
+    QTest::keyClick(&window, Qt::Key_B);
+    const auto beforeHidden = dispatcher.inputCommands.size();
+    container.setVisible(false);
+    QTest::keyClick(&window, Qt::Key_C);
+    QInputMethodEvent hiddenIme;
+    hiddenIme.setCommitString(QStringLiteral("hidden"));
+    QCoreApplication::sendEvent(&view, &hiddenIme);
+    QVERIFY(!view.inputMethodQuery(Qt::ImEnabled).toBool());
+    QTest::qWait(80);
+    QCOMPARE(dispatcher.inputCommands.size(), beforeHidden);
+    container.setVisible(true);
+    dispatcher.busyInputCommands = 0;
+    view.forceActiveFocus();
+    QTest::keyClick(&window, Qt::Key_D);
+    QCOMPARE(dispatcher.inputCommands.last(), QByteArrayLiteral("d"));
+    QCOMPARE(dispatcher.inputCommands.size(), beforeHidden + 1);
+    container.setEnabled(false);
+    QCoreApplication::sendEvent(&view, &hiddenIme);
+    QTest::qWait(80);
+    QCOMPARE(dispatcher.inputCommands.size(), beforeHidden + 1);
+    container.setEnabled(true);
+    window.hide();
+    QCoreApplication::sendEvent(&view, &hiddenIme);
+    QCOMPARE(dispatcher.inputCommands.size(), beforeHidden + 1);
+    QVERIFY(view.terminalReady());
+    QCOMPARE(dispatcher.disconnectCount, 0);
+}
+
+void TerminalKernelTest::terminalControlsStayBoundedAndFenceReattachment()
+{
+    kodosi::TerminalSessionRegistry registry;
+    FakeTerminalDispatcher dispatcher;
+    kodosi::TerminalView view(m_window.contentItem());
+    const kodosi::TerminalSubscription subscription {QStringLiteral("effects"), QStringLiteral("subscription"), 1};
+    QVERIFY(view.attach(registry, dispatcher, subscription, QStringLiteral("incarnation")));
+    makeTerminalReady(registry, subscription);
+    QSignalSpy errors(&view, &kodosi::TerminalView::terminalError);
+    for (int i = 0; i < 5000; ++i) {
+        registry.receiveControl({subscription, QByteArrayLiteral(R"({"type":"invalid"})")});
+    }
+    QCoreApplication::processEvents();
+    QCOMPARE(errors.count(), 1);
+    QVERIFY(!view.terminalReady());
+    QCOMPARE(dispatcher.disconnectCount, 1);
+    QVERIFY(view.attach(registry, dispatcher, subscription, QStringLiteral("replacement")));
+    makeTerminalReady(registry, subscription);
+    registry.receiveControl({subscription, QByteArrayLiteral(R"({"type":"invalid"})")});
+    view.detach();
+    QVERIFY(view.attach(registry, dispatcher, subscription, QStringLiteral("newer")));
+    makeTerminalReady(registry, subscription);
+    QCoreApplication::processEvents();
+    QCOMPARE(errors.count(), 1);
+
+}
+
+void TerminalKernelTest::terminalClosePresentsPendingFinalFrameBeforeDetaching()
+{
+    kodosi::TerminalSessionRegistry registry;
+    FakeTerminalDispatcher dispatcher;
+    kodosi::TerminalView view(m_window.contentItem());
+    view.setSize(QSizeF(640, 480));
+    const kodosi::TerminalSubscription subscription {
+        QStringLiteral("final-output"), QStringLiteral("subscription"), 1};
+    QVERIFY(view.attach(registry, dispatcher, subscription, QStringLiteral("incarnation")));
+    makeTerminalReady(registry, subscription);
+    QStringList presentation;
+    connect(&view, &kodosi::TerminalView::frameChanged, &view, [&] {
+        if (view.accessibleText().contains(QStringLiteral("FINAL-MARKER")))
+            presentation.append(QStringLiteral("frame"));
+    });
+    connect(&view, &kodosi::TerminalView::terminalReadyChanged, &view, [&] {
+        if (!view.terminalReady()) presentation.append(QStringLiteral("detached"));
+    });
+    connect(&view, &kodosi::TerminalView::terminalClosed, &view, [&] {
+        presentation.append(QStringLiteral("closed"));
+    });
+    registry.receiveControl({subscription, QByteArrayLiteral(
+        R"({"type":"term.focusApplied","requestId":"focus","runtimeIncarnationId":"incarnation"})")});
+    registry.receiveData({subscription, 1, QByteArrayLiteral(" FINAL-MARKER")});
+    registry.receiveControl({subscription, QByteArrayLiteral(
+        R"({"type":"term.closed","reason":"end","finalSequence":2})")});
+    QVERIFY(presentation.isEmpty());
+    QCoreApplication::processEvents();
+    QCOMPARE(presentation, QStringList({QStringLiteral("frame"), QStringLiteral("detached"), QStringLiteral("closed")}));
+    QCOMPARE(dispatcher.disconnectCount, 1);
+}
+
+void TerminalKernelTest::retiredTerminalCloseCannotDetachReplacement()
+{
+    kodosi::TerminalSessionRegistry registry;
+    FakeTerminalDispatcher dispatcher;
+    kodosi::TerminalView view(m_window.contentItem());
+    view.setSize(QSizeF(640, 480));
+    const kodosi::TerminalSubscription subscription {
+        QStringLiteral("replaced-output"), QStringLiteral("old-subscription"), 1};
+    const kodosi::TerminalSubscription replacement {
+        subscription.sessionId, QStringLiteral("new-subscription"), 2};
+    QVERIFY(view.attach(registry, dispatcher, subscription, QStringLiteral("old-incarnation")));
+    makeTerminalReady(registry, subscription);
+    QSignalSpy closed(&view, &kodosi::TerminalView::terminalClosed);
+    bool replaced = false;
+    connect(&view, &kodosi::TerminalView::frameChanged, &view, [&] {
+        if (replaced || !view.accessibleText().contains(QStringLiteral("FINAL-MARKER"))) return;
+        replaced = true;
+        QVERIFY(view.attach(registry, dispatcher, replacement, QStringLiteral("new-incarnation")));
+        QVERIFY(registry.installSemanticCheckpoint({replacement, 1, 24, 80,
+            checkpointFor(QByteArrayLiteral("replacement"), 80, 24)}));
+        registry.receiveConnectResult({replacement, ffiOk});
+    });
+    registry.receiveControl({subscription, QByteArrayLiteral(
+        R"({"type":"term.focusApplied","requestId":"focus","runtimeIncarnationId":"old-incarnation"})")});
+    registry.receiveData({subscription, 1, QByteArrayLiteral(" FINAL-MARKER")});
+    registry.receiveControl({subscription, QByteArrayLiteral(
+        R"({"type":"term.closed","reason":"end","finalSequence":2})")});
+    QTRY_VERIFY(replaced && view.terminalReady());
+    QCOMPARE(closed.count(), 0);
+    QVERIFY(view.accessibleText().contains(QStringLiteral("replacement")));
+    QCOMPARE(dispatcher.disconnectCount, 1);
 }
 
 void TerminalKernelTest::initTestCase()
 {
     qRegisterMetaType<kodosi::TerminalView*>();
+    m_window.resize(900, 600);
+    m_window.show();
 }
 
 void TerminalKernelTest::terminalViewPrefersInstalledNerdFontFallback()
@@ -432,7 +578,7 @@ void TerminalKernelTest::terminalViewPrefersInstalledNerdFontFallback()
         QSKIP("No installed fixed-pitch Nerd Font can exercise fallback selection.");
     }
 
-    InspectableTerminalView view;
+    InspectableTerminalView view(m_window.contentItem());
     const auto font =
         view.inputMethodQuery(Qt::ImFont).value<QFont>();
     QVERIFY(std::ranges::any_of(
@@ -732,8 +878,8 @@ void TerminalKernelTest::scrollbackReconfigurationPublishesReplacementFrame()
     QVector<kodosi::GhosttyTerminalKernel::Frame> frames;
     std::optional<kodosi::GhosttyTerminalKernel::Failure> failure;
     kodosi::TerminalSessionRegistry registry;
-    QVERIFY(registry.registerSession(
-        subscription,
+    QVERIFY(registry.registerSurface(
+        {subscription, 1},
         {
             .frameChanged = [&](auto frame) { frames.append(std::move(frame)); },
             .failed = [&](auto value) { failure = std::move(value); },
@@ -752,15 +898,15 @@ void TerminalKernelTest::scrollbackReconfigurationPublishesReplacementFrame()
         20,
         checkpointFor(output, 20, 5),
     }));
-    QVERIFY(registry.scrollViewport(subscription, -100'000));
+    QVERIFY(registry.scrollViewport(kodosi::TerminalSurfaceIdentity {subscription, 1}, -100'000));
     const auto topFrame = frames.constLast();
     QVERIFY(topFrame->scroll.viewportOffset == 0);
     QVERIFY(registry.beginSelection(
-        subscription,
+        kodosi::TerminalSurfaceIdentity {subscription, 1},
         topFrame->viewportRevision,
         0,
         0));
-    const auto selectedBeforeConfigure = registry.selectedText(subscription);
+    const auto selectedBeforeConfigure = registry.selectedText(kodosi::TerminalSurfaceIdentity {subscription, 1});
     QVERIFY(selectedBeforeConfigure);
     QVERIFY(!selectedBeforeConfigure->isEmpty());
 
@@ -770,7 +916,7 @@ void TerminalKernelTest::scrollbackReconfigurationPublishesReplacementFrame()
         .scrollbackLines = 100,
         .scrollbackBytes = kodosi::terminalScrollbackByteBudget(100),
     };
-    QVERIFY(registry.configure(subscription, reduced));
+    QVERIFY(registry.configure(kodosi::TerminalSurfaceIdentity {subscription, 1}, reduced));
     QVERIFY(!failure.has_value());
     QCOMPARE(frames.size(), publishedBeforeConfigure + 1);
     const auto configuredFrame = frames.constLast();
@@ -782,11 +928,11 @@ void TerminalKernelTest::scrollbackReconfigurationPublishesReplacementFrame()
         frameBeforeConfigure->displayRevision + 1);
     QVERIFY(configuredFrame != frameBeforeConfigure);
     QVERIFY(configuredFrame->scroll.totalRows < frameBeforeConfigure->scroll.totalRows);
-    const auto selectedAfterConfigure = registry.selectedText(subscription);
+    const auto selectedAfterConfigure = registry.selectedText(kodosi::TerminalSurfaceIdentity {subscription, 1});
     QVERIFY(selectedAfterConfigure);
     QVERIFY(selectedAfterConfigure->isEmpty());
 
-    QVERIFY(registry.configure(subscription, reduced));
+    QVERIFY(registry.configure(kodosi::TerminalSurfaceIdentity {subscription, 1}, reduced));
     QCOMPARE(frames.size(), publishedBeforeConfigure + 1);
 }
 
@@ -828,7 +974,7 @@ void TerminalKernelTest::terminalViewMailboxRejectsReversedDisplayRevisions()
 
 void TerminalKernelTest::terminalViewOwnsValidatedDisplaySettings()
 {
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     view.setFontFamily(QStringLiteral("Iosevka"));
     view.setFontPixelSize(20);
     view.setLineHeight(1.6);
@@ -851,7 +997,7 @@ void TerminalKernelTest::terminalViewOwnsValidatedDisplaySettings()
 
 void TerminalKernelTest::terminalViewOwnsExplicitSelectionAndPreeditPalette()
 {
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const auto selectionBackground = QColor(QStringLiteral("#db8a62"));
     const auto selectionForeground = QColor(QStringLiteral("#160e0a"));
     const auto preeditBackground = QColor(QStringLiteral("#e69a72"));
@@ -962,7 +1108,7 @@ void TerminalKernelTest::terminalViewRoutesTrackedMouseToPty()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("mouse"),
         QStringLiteral("mouse-subscription"),
@@ -1026,7 +1172,7 @@ void TerminalKernelTest::remoteGridFitsAndMapsAccessibleMouseCoordinates()
     window.resize(400, 220);
     kodosi::TerminalView view(window.contentItem());
     view.setSize(QSizeF(400, 220));
-    view.setTerminalInteraction(true, false);
+    view.setTerminalInteraction(true, true);
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("remote"), QStringLiteral("remote-view"), 1};
     QVERIFY(view.attach(registry, dispatcher, subscription, QStringLiteral("remote-incarnation")));
@@ -1060,9 +1206,17 @@ void TerminalKernelTest::remoteGridFitsAndMapsAccessibleMouseCoordinates()
     };
     click(right);
     QCOMPARE(dispatcher.inputCommands.constLast(), QByteArrayLiteral("\x1b[<0;116;1m"));
-    QVERIFY(std::ranges::none_of(dispatcher.terminalCommands, [](const QJsonObject& command) {
-        return command.value(QStringLiteral("type")) == QStringLiteral("session.resize");
-    }));
+    QVERIFY(view.canResize());
+    QVERIFY(view.viewportScale() < 1);
+    const auto rejected = dispatcher.terminalCommands.last();
+    auto outcome = rejected;
+    outcome.insert(QStringLiteral("type"), QStringLiteral("term.resizeRejected"));
+    outcome.insert(QStringLiteral("reason"), QStringLiteral("Another controller owns size"));
+    outcome.remove(QStringLiteral("claim"));
+    registry.receiveControl({subscription, QJsonDocument(outcome).toJson(QJsonDocument::Compact)});
+    QCoreApplication::processEvents();
+    QVERIFY(view.canResize());
+    QVERIFY(view.viewportScale() < 1);
 }
 
 void TerminalKernelTest::pasteEncodingUsesRestoredTerminalModes()
@@ -1302,7 +1456,7 @@ void TerminalKernelTest::selectionEndpointsTrackIncomingOutput()
 void TerminalKernelTest::terminalViewExposesNativeAccessibleTextInterface()
 {
     kodosi::installTerminalAccessibility();
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     auto* accessible = QAccessible::queryAccessibleInterface(&view);
 
     QVERIFY(accessible != nullptr);
@@ -1355,7 +1509,7 @@ void TerminalKernelTest::terminalViewGatesDeniedCommandsAndRevocation()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("session"),
         QStringLiteral("subscription"),
@@ -1442,7 +1596,7 @@ void TerminalKernelTest::terminalViewPastesClipboardThroughBoundedAuthority()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("paste"),
         QStringLiteral("paste-subscription"),
@@ -1542,7 +1696,7 @@ void TerminalKernelTest::terminalViewTracksShiftInsertPasteReleaseExactly()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("paste-release"),
         QStringLiteral("paste-release-subscription"),
@@ -1589,7 +1743,7 @@ void TerminalKernelTest::terminalOriginatedClipboardCommandsCannotReachHostClipb
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("osc-clipboard"),
         QStringLiteral("osc-clipboard-subscription"),
@@ -1621,7 +1775,7 @@ void TerminalKernelTest::terminalViewWheelUpdatesFrameWithoutPtyInput()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("wheel-view"),
         QStringLiteral("wheel-view-subscription"),
@@ -1705,7 +1859,7 @@ void TerminalKernelTest::terminalViewAcceptedInputReturnsViewportToBottom()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("input-bottom"),
         QStringLiteral("input-bottom-subscription"),
@@ -1803,7 +1957,7 @@ void TerminalKernelTest::terminalViewSelectionAnchorSurvivesPresentedScroll()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("selection-anchor"),
         QStringLiteral("selection-anchor-subscription"),
@@ -1893,7 +2047,7 @@ void TerminalKernelTest::terminalViewSelectionAnchorSurvivesPresentedScroll()
     QCoreApplication::sendEvent(&view, &move);
     QCoreApplication::sendEvent(&view, &release);
 
-    const auto text = registry.selectedText(subscription);
+    const auto text = registry.selectedText(kodosi::TerminalSurfaceIdentity {subscription, 1});
     QVERIFY(text);
     QVERIFY(text->contains(QStringLiteral("row-00")));
     QVERIFY(text->contains(QStringLiteral("\nrow-")));
@@ -1903,7 +2057,7 @@ void TerminalKernelTest::terminalViewCancelsSelectionAgainstStaleDisplayedViewpo
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("selection-stale"),
         QStringLiteral("selection-stale-subscription"),
@@ -1933,7 +2087,7 @@ void TerminalKernelTest::terminalViewCancelsSelectionAgainstStaleDisplayedViewpo
     }));
     registry.receiveConnectResult({subscription, ffiOk});
     QCoreApplication::processEvents();
-    QVERIFY(registry.scrollViewport(subscription, -100));
+    QVERIFY(registry.scrollViewport(kodosi::TerminalSurfaceIdentity {subscription, 1}, -100));
     QCoreApplication::processEvents();
 
     const auto cell = kodosi::TerminalRasterizer::cellSize(
@@ -1950,7 +2104,7 @@ void TerminalKernelTest::terminalViewCancelsSelectionAgainstStaleDisplayedViewpo
     QCoreApplication::sendEvent(&view, &press);
 
     QSignalSpy errors(&view, &kodosi::TerminalView::terminalError);
-    const auto advanced = registry.scrollViewport(subscription, 1);
+    const auto advanced = registry.scrollViewport(kodosi::TerminalSurfaceIdentity {subscription, 1}, 1);
     QVERIFY(advanced);
     const QPointF endpoint(cell.width() * 5.5, cell.height() * 0.5);
     QMouseEvent release(
@@ -1963,12 +2117,12 @@ void TerminalKernelTest::terminalViewCancelsSelectionAgainstStaleDisplayedViewpo
     QCoreApplication::sendEvent(&view, &release);
     QCoreApplication::processEvents();
 
-    const auto text = registry.selectedText(subscription);
+    const auto text = registry.selectedText(kodosi::TerminalSurfaceIdentity {subscription, 1});
     QVERIFY(text);
     QVERIFY(text->isEmpty());
 
     const auto outside = registry.beginSelection(
-        subscription,
+        kodosi::TerminalSurfaceIdentity {subscription, 1},
         (*advanced)->viewportRevision,
         (*advanced)->columns,
         0);
@@ -1978,7 +2132,7 @@ void TerminalKernelTest::terminalViewCancelsSelectionAgainstStaleDisplayedViewpo
         kodosi::GhosttyTerminalKernel::Failure::Code::HitTestRace);
 
     const auto missingAnchor = registry.updateSelection(
-        subscription,
+        kodosi::TerminalSurfaceIdentity {subscription, 1},
         (*advanced)->viewportRevision,
         0,
         0);
@@ -2016,7 +2170,7 @@ void TerminalKernelTest::terminalViewActivatesOnlySafeGhosttyLinks()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("link"),
         QStringLiteral("link-subscription"),
@@ -2125,7 +2279,7 @@ void TerminalKernelTest::terminalViewCannotActivateLinkFromUndisplayedFrame()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("link-stale"),
         QStringLiteral("link-stale-subscription"),
@@ -2192,7 +2346,7 @@ void TerminalKernelTest::terminalViewCancelsLinkReleaseOutsideBounds()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("link-bounds"),
         QStringLiteral("link-bounds-subscription"),
@@ -2256,7 +2410,7 @@ void TerminalKernelTest::terminalViewCopySelectionStillUsesHostClipboard()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("copy"),
         QStringLiteral("copy-subscription"),
@@ -2318,7 +2472,7 @@ void TerminalKernelTest::terminalViewRetriesRevocationBlurBeforeRefocus()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("session"),
         QStringLiteral("subscription"),
@@ -2371,7 +2525,7 @@ void TerminalKernelTest::terminalViewClaimsFocusedResizeExactly()
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
     dispatcher.busyTerminalCommands = 1;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("session"),
         QStringLiteral("subscription"),
@@ -2407,7 +2561,7 @@ void TerminalKernelTest::terminalViewClaimsFocusedResizeExactly()
             9);
     }
 
-    kodosi::TerminalView denied;
+    kodosi::TerminalView denied(m_window.contentItem());
     denied.setWidth(800);
     denied.setHeight(400);
     denied.setTerminalInteraction(false, false);
@@ -2436,7 +2590,7 @@ void TerminalKernelTest::terminalViewClaimsFocusedResizeExactly()
                 .toBool());
 
     FakeTerminalDispatcher gridDispatcher;
-    kodosi::TerminalView grid;
+    kodosi::TerminalView grid(m_window.contentItem());
     grid.setWidth(800);
     grid.setHeight(400);
     grid.setTerminalInteraction(false, false);
@@ -2467,7 +2621,7 @@ void TerminalKernelTest::terminalViewPreservesClaimAcrossInflightResize()
 {
     kodosi::TerminalSessionRegistry registry;
     FakeTerminalDispatcher dispatcher;
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     const kodosi::TerminalSubscription subscription {
         QStringLiteral("claim-race"),
         QStringLiteral("claim-race-subscription"),
@@ -2558,7 +2712,7 @@ void TerminalKernelTest::surfaceControllerFencesSessionIncarnations()
     kodosi::RuntimeBridge runtime(registry);
     kodosi::SessionCatalogModel sessions;
     kodosi::TerminalSurfaceController controller(registry, runtime, sessions);
-    kodosi::TerminalView view;
+    kodosi::TerminalView view(m_window.contentItem());
     QSignalSpy rejected(
         &controller,
         &kodosi::TerminalSurfaceController::attachmentRejected);
@@ -2587,8 +2741,8 @@ void TerminalKernelTest::surfaceControllerKeepsBindingsIndependent()
     FakeRuntimeBridge runtime(registry);
     kodosi::SessionCatalogModel sessions;
     kodosi::TerminalSurfaceController controller(registry, runtime, sessions);
-    kodosi::TerminalView firstView;
-    kodosi::TerminalView secondView;
+    kodosi::TerminalView firstView(m_window.contentItem());
+    kodosi::TerminalView secondView(m_window.contentItem());
     QSignalSpy rejected(
         &controller,
         &kodosi::TerminalSurfaceController::attachmentRejected);
@@ -2636,18 +2790,12 @@ void TerminalKernelTest::surfaceControllerKeepsSameSessionSurfacesIndependent()
     FakeRuntimeBridge runtime(registry);
     kodosi::SessionCatalogModel sessions;
     kodosi::TerminalSurfaceController controller(registry, runtime, sessions);
-    kodosi::TerminalView stageView;
-    kodosi::TerminalView focusView;
+    kodosi::TerminalView stageView(m_window.contentItem());
+    kodosi::TerminalView focusView(m_window.contentItem());
     stageView.setWidth(400);
     stageView.setHeight(160);
     focusView.setWidth(400);
     focusView.setHeight(160);
-    QSignalSpy stageNotifications(
-        &stageView,
-        &kodosi::TerminalView::terminalNotificationRequested);
-    QSignalSpy focusNotifications(
-        &focusView,
-        &kodosi::TerminalView::terminalNotificationRequested);
     QSignalSpy stageConnections(
         &stageView,
         &kodosi::TerminalView::connectionCompleted);
@@ -2759,16 +2907,6 @@ void TerminalKernelTest::surfaceControllerKeepsSameSessionSurfacesIndependent()
     QCOMPARE(stageView.accessibleSelection(), stageSelection);
     QVERIFY(focusView.accessibleText().contains(QStringLiteral("row-19")));
 
-    registry.receiveControl({
-        stageSubscription,
-        QByteArrayLiteral(
-            R"({"type":"term.notification","sessionId":"0198aaaa-0000-7000-8000-000000000004","title":"Stage","body":"stage-only"})"),
-    });
-    QCoreApplication::processEvents();
-    QCOMPARE(stageNotifications.size(), 1);
-    QCOMPARE(focusNotifications.size(), 0);
-    QCOMPARE(stageNotifications.constFirst().at(1).toString(), QStringLiteral("stage-only"));
-
     controller.detach(&focusView);
     runtime.refreshHandler = {};
     QVERIFY(controller.bind(&focusView, QStringLiteral("0198aaaa-0000-7000-8000-000000000004")));
@@ -2786,17 +2924,9 @@ void TerminalKernelTest::surfaceControllerKeepsSameSessionSurfacesIndependent()
         1,
         QByteArrayLiteral(" live"),
     });
-    registry.receiveControl({
-        stageSubscription,
-        QByteArrayLiteral(
-            R"({"type":"term.notification","sessionId":"0198aaaa-0000-7000-8000-000000000004","title":"Focus","body":"focus-only"})"),
-    });
     QCoreApplication::processEvents();
-
     QVERIFY(stageView.terminalReady());
     QVERIFY(stageFrames.count() > stageFrameCount);
-    QCOMPARE(stageNotifications.size(), 2);
-    QCOMPARE(stageNotifications.constLast().at(1).toString(), QStringLiteral("focus-only"));
 
     controller.detach(&stageView);
     QCOMPARE(runtime.disconnectedSubscriptions.size(), 1);
@@ -2811,8 +2941,8 @@ void TerminalKernelTest::surfaceControllerRetriesFailedSeedRefresh()
     FakeRuntimeBridge runtime(registry);
     kodosi::SessionCatalogModel sessions;
     kodosi::TerminalSurfaceController controller(registry, runtime, sessions);
-    kodosi::TerminalView firstView;
-    kodosi::TerminalView secondView;
+    kodosi::TerminalView firstView(m_window.contentItem());
+    kodosi::TerminalView secondView(m_window.contentItem());
     firstView.setWidth(400);
     firstView.setHeight(160);
     secondView.setWidth(400);
@@ -2864,8 +2994,8 @@ void TerminalKernelTest::surfaceControllerTimesOutAcceptedSeedRefresh()
         runtime,
         sessions,
         50);
-    kodosi::TerminalView firstView;
-    kodosi::TerminalView secondView;
+    kodosi::TerminalView firstView(m_window.contentItem());
+    kodosi::TerminalView secondView(m_window.contentItem());
     firstView.setWidth(400);
     firstView.setHeight(160);
     secondView.setWidth(400);
@@ -2920,8 +3050,8 @@ void TerminalKernelTest::surfaceControllerScopesAttachmentOutcomes()
     FakeRuntimeBridge runtime(registry);
     kodosi::SessionCatalogModel sessions;
     kodosi::TerminalSurfaceController controller(registry, runtime, sessions);
-    kodosi::TerminalView firstView;
-    kodosi::TerminalView secondView;
+    kodosi::TerminalView firstView(m_window.contentItem());
+    kodosi::TerminalView secondView(m_window.contentItem());
     QString firstState = QStringLiteral("healthy");
     QString secondState = QStringLiteral("connecting");
 
@@ -3069,7 +3199,16 @@ void TerminalKernelTest::registryRoutesMultiSurfaceControlExactly()
     QCOMPARE(firstResizeOutcomes, 0);
     QCOMPARE(secondResizeOutcomes, 1);
 
+    QVERIFY(!registry.registerSurface({subscription, 0}, {}));
+    QVERIFY(!registry.encodeKey({subscription, 0}, {
+        .key = kodosi::TerminalKey::Enter,
+        .action = kodosi::TerminalKeyAction::Press,
+    }));
     QVERIFY(!registry.unregisterSurface(first));
+    QVERIFY(!registry.encodeKey(first, {
+        .key = kodosi::TerminalKey::Enter,
+        .action = kodosi::TerminalKeyAction::Press,
+    }));
     registry.receiveData({
         subscription,
         1,
@@ -3091,12 +3230,11 @@ void TerminalKernelTest::registryConsumesNormativeControlWireWithoutLosingU64Pre
     kodosi::GhosttyTerminalKernel::Frame currentFrame;
     std::optional<kodosi::TerminalFocusOutcome> focusOutcome;
     std::optional<kodosi::TerminalResizeOutcome> resizeOutcome;
-    std::optional<kodosi::TerminalNotification> notification;
     std::optional<kodosi::GhosttyTerminalKernel::Failure> failure;
     bool closed = false;
     kodosi::TerminalSessionRegistry registry;
-    QVERIFY(registry.registerSession(
-        subscription,
+    QVERIFY(registry.registerSurface(
+        {subscription, sequence},
         {
             .frameChanged = [&](auto frame) { currentFrame = std::move(frame); },
             .failed = [&](auto value) { failure = std::move(value); },
@@ -3105,9 +3243,6 @@ void TerminalKernelTest::registryConsumesNormativeControlWireWithoutLosingU64Pre
             },
             .resizeCompleted = [&](auto outcome) {
                 resizeOutcome = std::move(outcome);
-            },
-            .notificationRequested = [&](auto value) {
-                notification = std::move(value);
             },
             .closed = [&] { closed = true; },
         }));
@@ -3147,24 +3282,6 @@ void TerminalKernelTest::registryConsumesNormativeControlWireWithoutLosingU64Pre
     QVERIFY(resizeOutcome->applied);
     QCOMPARE(resizeOutcome->surfaceGeneration, sequence);
     QCOMPARE(resizeOutcome->widthPixels, 216U);
-
-    registry.receiveControl({
-        subscription,
-        QByteArrayLiteral(
-            R"({"type":"term.notification","sessionId":"session","title":"Build complete","body":"All checks passed"})"),
-    });
-    QVERIFY(notification);
-    QCOMPARE(notification->title, QStringLiteral("Build complete"));
-    QCOMPARE(notification->body, QStringLiteral("All checks passed"));
-
-    registry.receiveControl({
-        subscription,
-        QByteArrayLiteral(
-            R"({"type":"term.notification","sessionId":"replacement","body":"stale"})"),
-    });
-    QVERIFY(failure);
-    QVERIFY(failure->message.contains(QStringLiteral("notification")));
-    QCOMPARE(notification->body, QStringLiteral("All checks passed"));
 
     registry.receiveControl({
         subscription,

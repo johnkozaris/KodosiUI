@@ -73,6 +73,15 @@ Item {
                 text: qsTr("Sign in to organize shared projects.")
                 visible: !Models.Workspace.signedIn
             }
+            PlainLabel {
+                Accessible.id: objectName
+                Layout.fillWidth: true
+                color: KodosiTheme.textSecondary
+                objectName: "panel.missions.truncated"
+                text: qsTr("Some Missions or invitations are hidden. Leave Missions or decline invitations to reveal more.")
+                visible: !root.detailVisible && Models.Workspace.missionCatalogTruncated
+                wrapMode: Text.WordWrap
+            }
             Repeater {
                 model: root.detailVisible ? [] : Models.Workspace.invitations
 
@@ -268,28 +277,19 @@ Item {
     KDialog {
         id: create
 
+        objectName: "panel.missions.create"
         standardButtons: Dialog.Ok | Dialog.Cancel
         title: qsTr("New Mission")
 
-        onAccepted: Models.Workspace.createMission(missionName.text, slug.text)
+        onAccepted: Models.Workspace.createMission(missionName.text)
 
-        ColumnLayout {
-            KTextField {
-                id: missionName
+        KTextField {
+            id: missionName
 
-                Accessible.id: objectName
-                Accessible.name: qsTr("Mission name")
-                objectName: "panel.missions.create.name"
-                placeholderText: qsTr("Project name")
-            }
-            KTextField {
-                id: slug
-
-                Accessible.id: objectName
-                Accessible.name: qsTr("Mission slug")
-                objectName: "panel.missions.create.slug"
-                placeholderText: qsTr("project-slug")
-            }
+            Accessible.id: objectName
+            Accessible.name: qsTr("Mission name")
+            objectName: "panel.missions.create.name"
+            placeholderText: qsTr("Project name")
         }
     }
     KDialog {

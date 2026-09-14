@@ -3,6 +3,7 @@
 #include "bridge/RuntimeBridge.hpp"
 #include <QJsonDocument>
 #include <QSignalSpy>
+#include <limits>
 #include <QtTest/QTest>
 
 class RuntimeBridgeTest final : public QObject {
@@ -12,6 +13,28 @@ private slots:
     {
         runtime_fixture::reset();
         runtime_fixture::allowStart = true;
+    }
+    void requiresExactDesktopProtocol()
+    {
+        for (const auto version : { 41u, 43u }) {
+            runtime_fixture::protocolVersion = version;
+            kodosi::RuntimeBridge bridge;
+            const auto result = bridge.start();
+            QVERIFY(!result);
+            QCOMPARE(result.error().code, kodosi::RuntimeFailure::Code::ContractMismatch);
+            bool completed = false;
+            bridge.startAsync([&](auto asynchronousResult) {
+                completed = true;
+                QVERIFY(!asynchronousResult);
+            });
+            QVERIFY(completed);
+            QVERIFY(!bridge.isRunning());
+            QVERIFY(runtime_fixture::userdata == nullptr);
+        }
+        runtime_fixture::protocolVersion = 42;
+        kodosi::RuntimeBridge bridge;
+        QVERIFY(bridge.start());
+        QVERIFY(bridge.isRunning());
     }
     void asynchronousStartupCanBeCancelledBeforeInstallation()
     {
@@ -72,6 +95,41 @@ private slots:
         for(int i=0;i<10000;++i)runtime_fixture::sendEvent(event);
         QTRY_VERIFY(!bridge.isRunning());
         QCOMPARE(errors.size(),1);
+    }
+    void preservesUnsignedIdentitiesAndRejectsCallerEnvelope()
+    {
+        kodosi::RuntimeBridge bridge;
+        QSignalSpy events(&bridge, &kodosi::RuntimeBridge::eventReceived);
+        QVERIFY(bridge.start());
+        runtime_fixture::sendEvent(QByteArrayLiteral(
+            R"({"type":"auth.ready","accountEpoch":18446744073709551615,"accountUserId":"owner"})"));
+        QTRY_COMPARE(events.size(), 1);
+        QCOMPARE(events.first().at(1).toULongLong(), std::numeric_limits<quint64>::max());
+        const auto command = QByteArrayLiteral(
+            R"({"type":"session.resize","surfaceGeneration":9223372036854775809,"subscriptionGeneration":18446744073709551615})");
+        QVERIFY(bridge.send(command));
+        QVERIFY(runtime_fixture::lastCommand.contains("\"accountEpoch\":18446744073709551615"));
+        QVERIFY(runtime_fixture::lastCommand.contains("\"surfaceGeneration\":9223372036854775809"));
+        QVERIFY(runtime_fixture::lastCommand.contains("\"subscriptionGeneration\":18446744073709551615"));
+        const auto nested = QByteArrayLiteral(
+            "{\"type\":\"example\",\"nested\":{\"accountEpoch\":1,\"text\":\"braces } , and escaped \\\"quote\\\"\","
+            "\"number\":9223372036854775809},\"list\":[1,{\"field\":2}]}");
+        QVERIFY(bridge.send(nested));
+        QVERIFY(runtime_fixture::lastCommand.contains("\"number\":9223372036854775809"));
+        QVERIFY(QJsonDocument::fromJson(runtime_fixture::lastCommand).isObject());
+        for (const auto& invalid : {
+            QByteArrayLiteral(R"({"type":"session.list","accountEpoch":0})"),
+            QByteArrayLiteral(R"({"type":"session.list","accountUserId":null})"),
+            QByteArrayLiteral(R"({"type":"session.list","account\u0045poch":0})"),
+            QByteArrayLiteral(R"({"type":"session.list","type":"shutdown"})")}) {
+            QVERIFY(!bridge.send(invalid));
+        }
+        runtime_fixture::sendEvent(QByteArrayLiteral(
+            R"({"type":"sessions.snapshot","accountEpoch":18446744073709551614,"accountUserId":"owner"})"));
+        runtime_fixture::sendEvent(QByteArrayLiteral(
+            R"({"type":"auth.ready","accountEpoch":1,"accountEpoch":18446744073709551615,"accountUserId":"owner"})"));
+        QCoreApplication::processEvents();
+        QCOMPARE(events.size(), 1);
     }
     void admissionErrorsAreNotCompletion()
     {

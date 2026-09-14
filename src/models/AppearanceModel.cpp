@@ -95,8 +95,13 @@ AppearanceModel::StyleHooks applicationStyleHooks()
 }
 
 AppearanceModel::AppearanceModel(QObject* parent)
+    : AppearanceModel(std::make_unique<QSettings>(), parent)
+{
+}
+
+AppearanceModel::AppearanceModel(std::unique_ptr<QSettings> settings, QObject* parent)
     : AppearanceModel(
-          std::make_unique<QSettings>(),
+          std::move(settings),
           QDBusConnection::sessionBus(),
           applicationStyleHooks(),
           true,

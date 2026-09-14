@@ -34,6 +34,8 @@ ComboBox {
             : KodosiTheme.textSecondary
     }
 
+    KFocusIndicator { active: root.activeFocus && root.enabled }
+
     background: Rectangle {
         color: root.pressed
             ? KodosiTheme.surfaceSelected

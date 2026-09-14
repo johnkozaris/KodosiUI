@@ -1,4 +1,5 @@
 #include "app/SingleInstanceGuard.hpp"
+#include "app/RuntimeStorageBootstrap.hpp"
 
 #include <QCryptographicHash>
 #include <QDataStream>
@@ -40,276 +41,11 @@ constexpr quint32 maximumFrameBytes = 8192;
 constexpr qsizetype maximumRememberedRequests = 64;
 constexpr int endpointRetryIntervalMs = 10;
 
-struct NormalizedRoot {
-    QString path;
-    QString error;
-};
-
 bool containsControl(const QStringView value)
 {
-    return std::any_of(
-        value.cbegin(),
-        value.cend(),
-        [](const QChar character) {
-            return character.isNull()
-                || character.category() == QChar::Other_Control;
-        });
-}
-
-NormalizedRoot normalizeAbsoluteRoot(
-    const QString& raw,
-    const QString& label)
-{
-    if (raw.isEmpty()) {
-        return {
-            .path = {},
-            .error =
-                QStringLiteral("%1 must not be empty.").arg(label),
-        };
-    }
-    if (!QDir::isAbsolutePath(raw)) {
-        return {
-            .path = {},
-            .error =
-                QStringLiteral("%1 must be absolute.").arg(label),
-        };
-    }
-    if (raw.split(u'/', Qt::SkipEmptyParts).contains(
-            QStringLiteral(".."))) {
-        return {
-            .path = {},
-            .error = QStringLiteral(
-                "%1 must not contain parent-directory components.")
-                         .arg(label),
-        };
-    }
-    if (raw.contains(u'$') || containsControl(raw)) {
-        return {
-            .path = {},
-            .error = QStringLiteral(
-                "%1 contains unresolved variables or control characters.")
-                         .arg(label),
-        };
-    }
-    const auto normalized = QDir::cleanPath(raw);
-    if (normalized == QStringLiteral("/")) {
-        return {
-            .path = {},
-            .error =
-                QStringLiteral("%1 must not be the filesystem root.")
-                    .arg(label),
-        };
-    }
-    return {
-        .path = normalized,
-        .error = {},
-    };
-}
-
-bool isSameOrDescendant(
-    const QString& candidate,
-    const QString& protectedRoot)
-{
-    return candidate == protectedRoot
-        || candidate.startsWith(
-            protectedRoot.endsWith(u'/')
-                ? protectedRoot
-                : protectedRoot + u'/');
-}
-
-bool rejectExistingSymlinks(const QString& path, QString& error)
-{
-    QString current = QStringLiteral("/");
-    const auto components =
-        path.split(u'/', Qt::SkipEmptyParts);
-    for (const auto& component : components) {
-        current = QDir(current).filePath(component);
-        struct stat status {};
-        const auto native = QFile::encodeName(current);
-        if (::lstat(native.constData(), &status) == 0) {
-            if (S_ISLNK(status.st_mode)) {
-                error = QStringLiteral(
-                    "The effective KODOSI_DATA_ROOT/core must not traverse symlinks.");
-                return false;
-            }
-            if (!S_ISDIR(status.st_mode)
-                && current != path) {
-                error = QStringLiteral(
-                    "An effective KODOSI_DATA_ROOT/core ancestor is not a directory.");
-                return false;
-            }
-            if (current == path && !S_ISDIR(status.st_mode)) {
-                error = QStringLiteral(
-                    "The effective KODOSI_DATA_ROOT/core must identify a directory.");
-                return false;
-            }
-            continue;
-        }
-        if (errno == ENOENT) {
-            return true;
-        }
-        error = QStringLiteral(
-            "The effective KODOSI_DATA_ROOT/core could not be validated.");
-        return false;
-    }
-    return true;
-}
-
-bool aliasesCanonicalProductionRoot(
-    const QString& candidate,
-    const QString& production)
-{
-    const auto canonicalCandidate =
-        QFileInfo(candidate).canonicalFilePath();
-    const auto canonicalProduction =
-        QFileInfo(production).canonicalFilePath();
-    return !canonicalCandidate.isEmpty()
-        && !canonicalProduction.isEmpty()
-        && isSameOrDescendant(
-            canonicalCandidate,
-            canonicalProduction);
-}
-
-bool aliasesExistingProductionRoot(
-    const QString& candidate,
-    const QString& production,
-    QString& error)
-{
-    struct stat productionStatus {};
-    const auto nativeProduction = QFile::encodeName(production);
-    if (::stat(
-            nativeProduction.constData(),
-            &productionStatus)
-        != 0) {
-        if (errno == ENOENT) {
-            return false;
-        }
-        error = QStringLiteral(
-            "KODOSI_PRODUCTION_DATA_ROOT could not be validated.");
-        return true;
-    }
-
-    QString current = QStringLiteral("/");
-    const auto components =
-        candidate.split(u'/', Qt::SkipEmptyParts);
-    for (const auto& component : components) {
-        current = QDir(current).filePath(component);
-        struct stat status {};
-        if (::stat(
-                QFile::encodeName(current).constData(),
-                &status)
-            == 0) {
-            if (status.st_dev == productionStatus.st_dev
-                && status.st_ino == productionStatus.st_ino) {
-                return true;
-            }
-            continue;
-        }
-        if (errno == ENOENT) {
-            return false;
-        }
-        error = QStringLiteral(
-            "The effective KODOSI_DATA_ROOT/core could not be compared with the production root.");
-        return true;
-    }
-    return false;
-}
-
-NormalizedRoot effectiveDataRoot()
-{
-    if (!qEnvironmentVariableIsSet("KODOSI_DATA_ROOT")) {
-        const auto config = QStandardPaths::writableLocation(
-            QStandardPaths::ConfigLocation);
-        auto normalized = normalizeAbsoluteRoot(
-            config,
-            QStringLiteral(
-                "QStandardPaths::ConfigLocation"));
-        if (!normalized.error.isEmpty()) {
-            return normalized;
-        }
-        normalized.path = QDir(normalized.path).filePath(
-            QStringLiteral("kodosi"));
-        return normalized;
-    }
-
-    if (!qEnvironmentVariableIsSet(
-            "KODOSI_PRODUCTION_DATA_ROOT")) {
-        return {
-            .path = {},
-            .error = QStringLiteral(
-                "KODOSI_PRODUCTION_DATA_ROOT is required when KODOSI_DATA_ROOT is configured."),
-        };
-    }
-    const auto rawEffectiveRoot = QDir(
-        qEnvironmentVariable("KODOSI_DATA_ROOT"))
-                                      .filePath(
-                                          QStringLiteral("core"));
-    auto isolated = normalizeAbsoluteRoot(
-        rawEffectiveRoot,
-        QStringLiteral("The effective KODOSI_DATA_ROOT/core"));
-    if (!isolated.error.isEmpty()) {
-        return isolated;
-    }
-    const auto configuredRoot =
-        QFileInfo(isolated.path).dir().absolutePath();
-    if (configuredRoot == QStringLiteral("/")) {
-        return {
-            .path = {},
-            .error = QStringLiteral(
-                "KODOSI_DATA_ROOT must not be the filesystem root."),
-        };
-    }
-    if (configuredRoot == QDir::cleanPath(QDir::homePath())) {
-        return {
-            .path = {},
-            .error = QStringLiteral(
-                "KODOSI_DATA_ROOT must not be the user home directory."),
-        };
-    }
-    const auto production = normalizeAbsoluteRoot(
-        qEnvironmentVariable("KODOSI_PRODUCTION_DATA_ROOT"),
-        QStringLiteral("KODOSI_PRODUCTION_DATA_ROOT"));
-    if (!production.error.isEmpty()) {
-        return production;
-    }
-    if (isSameOrDescendant(isolated.path, production.path)) {
-        return {
-            .path = {},
-            .error = QStringLiteral(
-                "The effective KODOSI_DATA_ROOT/core must not be the production Kodosi data directory or a descendant."),
-        };
-    }
-    QString validationError;
-    if (!rejectExistingSymlinks(
-            isolated.path,
-            validationError)) {
-        return {
-            .path = {},
-            .error = validationError,
-        };
-    }
-    if (aliasesCanonicalProductionRoot(
-            isolated.path,
-            production.path)) {
-        return {
-            .path = {},
-            .error = QStringLiteral(
-                "The effective KODOSI_DATA_ROOT/core must not canonically alias the production Kodosi data directory or a descendant."),
-        };
-    }
-    if (aliasesExistingProductionRoot(
-            isolated.path,
-            production.path,
-            validationError)) {
-        return {
-            .path = {},
-            .error = validationError.isEmpty()
-                ? QStringLiteral(
-                      "The effective KODOSI_DATA_ROOT/core must not alias the production Kodosi data directory or a descendant.")
-                : validationError,
-        };
-    }
-    return isolated;
+    return std::any_of(value.cbegin(), value.cend(), [](const QChar character) {
+        return character.isNull() || character.category() == QChar::Other_Control;
+    });
 }
 
 QByteArray frame(const QJsonObject& object)
@@ -1128,17 +864,17 @@ QString SingleInstanceGuard::standardRuntimeDirectory()
 SingleInstanceGuard::EndpointNamespaceResult
 SingleInstanceGuard::endpointNamespace()
 {
-    const auto root = effectiveDataRoot();
-    if (!root.error.isEmpty()) {
+    const auto root = RuntimeStorageBootstrap::resolve();
+    if (!root) {
         return {
             .value = {},
-            .error = root.error,
+            .error = root.error(),
         };
     }
     return {
         .value = QString::fromLatin1(
             QCryptographicHash::hash(
-                root.path.toUtf8(),
+                root->runtimeRoot.toUtf8(),
                 QCryptographicHash::Sha256)
                 .toHex()
                 .left(16)),

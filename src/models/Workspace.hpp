@@ -34,6 +34,7 @@ class Workspace final : public QObject {
     Q_PROPERTY(QString selfDeviceId READ selfDeviceId NOTIFY devicesChanged)
     Q_PROPERTY(QVariantList missions READ missions NOTIFY missionsChanged)
     Q_PROPERTY(QVariantList invitations READ invitations NOTIFY missionsChanged)
+    Q_PROPERTY(bool missionCatalogTruncated READ missionCatalogTruncated NOTIFY missionsChanged)
     Q_PROPERTY(QVariantMap mission READ mission NOTIFY missionChanged)
     Q_PROPERTY(QVariantList missionMembers READ missionMembers NOTIFY missionChanged)
     Q_PROPERTY(QStringList missionSessionIds READ missionSessionIds NOTIFY missionChanged)
@@ -58,9 +59,10 @@ public:
     QString selfDeviceId() const { return m_selfDeviceId; }
     QVariantList missions() const { return m_missions; }
     QVariantList invitations() const { return m_invitations; }
+    bool missionCatalogTruncated() const { return m_missionCatalogTruncated; }
     QVariantMap mission() const { return m_mission; }
     QVariantList missionMembers() const { return m_members; }
-    QStringList missionSessionIds() const { return m_missionSessions; }
+    QStringList missionSessionIds() const;
     QString selectedMissionId() const { return m_selectedMission; }
     Q_INVOKABLE void login();
     Q_INVOKABLE void logout();
@@ -69,7 +71,7 @@ public:
     Q_INVOKABLE bool closeView(const QString& sessionId);
     Q_INVOKABLE bool createSession(const QString& name, const QString& directory,
         const QString& provider = {}, const QString& nativeId = {});
-    Q_INVOKABLE bool stopSession(const QString& sessionId);
+    Q_INVOKABLE bool closeSession(const QString& sessionId);
     Q_INVOKABLE bool shareSession(const QString& sessionId, const QStringList& userIds, const QStringList& expectedUsers = {});
     Q_INVOKABLE bool leaveSession(const QString& sessionId);
     Q_INVOKABLE bool attachMission(const QString& sessionId, const QString& missionId);
@@ -82,7 +84,7 @@ public:
     Q_INVOKABLE void approveDevice(const QString& code);
     Q_INVOKABLE void enrollDevice();
     Q_INVOKABLE void cancelEnrollment();
-    Q_INVOKABLE void createMission(const QString& name, const QString& slug);
+    Q_INVOKABLE void createMission(const QString& name);
     Q_INVOKABLE void openMission(const QString& id);
     Q_INVOKABLE void renameMission(const QString& name);
     Q_INVOKABLE void deleteMission();
@@ -92,7 +94,7 @@ public:
     Q_INVOKABLE void acceptInvitation(const QString& id);
     Q_INVOKABLE void rejectInvitation(const QString& id);
     Q_INVOKABLE void clearError();
-    void apply(const QJsonObject& event);
+    void apply(const QJsonObject& event, std::uint64_t accountEpoch);
     void reset();
     void route(const DeepLinkDestination& destination);
     void setError(QString error);
@@ -121,13 +123,13 @@ private:
     QTimer m_timeout;
     QString m_userId, m_userCode, m_verificationUri, m_error, m_selfDeviceCode, m_selfDeviceId;
     QString m_selectedMission;
-    qint64 m_accountEpoch = -1;
+    std::optional<std::uint64_t> m_accountEpoch;
     bool m_enrolled = false;
     bool m_finalizing = true;
+    bool m_missionCatalogTruncated = false;
     QVariantList m_friends, m_incoming, m_outgoing, m_devices, m_deviceRequests, m_missions, m_invitations,
         m_members;
     QVariantMap m_mission;
-    QStringList m_missionSessions;
     std::optional<DeepLinkDestination> m_link;
     QList<DeepLinkDestination> m_links;
     bool send(QString type, QJsonObject values = {}, QString sessionId = {});

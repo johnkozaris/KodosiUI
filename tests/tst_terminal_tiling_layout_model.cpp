@@ -414,20 +414,6 @@ void TerminalTilingLayoutModelTest::
     QCOMPARE(
         kodosi::TerminalTilingLayoutModel::requiredContentHeight(2, 100),
         346.0);
-    QCOMPARE(
-        kodosi::TerminalTilingLayoutModel::idealColumnCount(
-            3,
-            920,
-            460),
-        2);
-    QCOMPARE(
-        kodosi::TerminalTilingLayoutModel::idealColumnCount(
-            3,
-            920,
-            460,
-            240),
-        3);
-
     kodosi::TerminalTilingLayoutModel model;
     model.setViewportWidth(568);
     model.setViewportHeight(508);

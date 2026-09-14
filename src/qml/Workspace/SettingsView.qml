@@ -24,6 +24,13 @@ Item {
                 font.pixelSize: 22
                 text: qsTr("Settings")
             }
+            PlainLabel {
+                Layout.fillWidth: true
+                color: KodosiTheme.danger
+                text: Models.Appearance.settingsError
+                visible: text.length > 0
+                wrapMode: Text.WordWrap
+            }
             RowLayout {
                 PlainLabel { text: qsTr("Appearance"); color: KodosiTheme.textPrimary }
                 KComboBox {

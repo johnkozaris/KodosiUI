@@ -7,7 +7,7 @@ import Kodosi.Models 1.0 as Models
 ApplicationWindow {
     id: window
 
-    readonly property bool modalOpen: startup.visible || details.opened || history.opened
+    readonly property bool modalOpen: Models.DesktopState.modalOpen || Models.DesktopFiles.busy
 
     function openCreate(folder) {
         Models.Workspace.createSession("", folder || Models.DesktopSettings.effectiveWorkingDirectory, "", "");
@@ -22,9 +22,11 @@ ApplicationWindow {
     visible: true
     width: 1240
 
-    header: Rectangle {
-        color: KodosiTheme.surface
+    header: Models.AccessibilityScope {
         height: 54
+        enabled: !window.modalOpen
+        suppressed: window.modalOpen
+        Rectangle { anchors.fill: parent; color: KodosiTheme.surface }
 
         RowLayout {
             anchors.fill: parent
@@ -90,78 +92,83 @@ ApplicationWindow {
         window.hide();
     }
 
-    ColumnLayout {
+    Models.AccessibilityScope {
         anchors.fill: parent
-        spacing: 0
+        suppressed: window.modalOpen
 
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: errorRow.implicitHeight + 16
-            color: KodosiTheme.surfaceRaised
-            visible: Models.Workspace.error.length > 0 || Models.DesktopState.lastError.length > 0 || Models.DesktopFiles.errorMessage.length > 0
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 0
 
-            RowLayout {
-                id: errorRow
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: errorRow.implicitHeight + 16
+                color: KodosiTheme.surfaceRaised
+                visible: Models.Workspace.error.length > 0 || Models.DesktopState.lastError.length > 0 || Models.DesktopFiles.errorMessage.length > 0
 
-                anchors.fill: parent
-                anchors.margins: 8
+                RowLayout {
+                    id: errorRow
 
-                PlainLabel {
-                    Layout.fillWidth: true
-                    color: KodosiTheme.danger
-                    text: Models.Workspace.error || Models.DesktopState.lastError || Models.DesktopFiles.errorMessage
-                    wrapMode: Text.WordWrap
-                }
-                KIconButton {
-                    Accessible.id: objectName
-                    Accessible.name: qsTr("Dismiss error")
-                    glyph: "close"
-                    objectName: "window.error.dismiss"
+                    anchors.fill: parent
+                    anchors.margins: 8
 
-                    onClicked: {
-                        Models.Workspace.clearError();
-                        Models.DesktopState.clearError();
-                        Models.DesktopFiles.clearError();
+                    PlainLabel {
+                        Layout.fillWidth: true
+                        color: KodosiTheme.danger
+                        text: Models.Workspace.error || Models.DesktopState.lastError || Models.DesktopFiles.errorMessage
+                        wrapMode: Text.WordWrap
+                    }
+                    KIconButton {
+                        Accessible.id: objectName
+                        Accessible.name: qsTr("Dismiss error")
+                        glyph: "close"
+                        objectName: "window.error.dismiss"
+
+                        onClicked: {
+                            Models.Workspace.clearError();
+                            Models.DesktopState.clearError();
+                            Models.DesktopFiles.clearError();
+                        }
                     }
                 }
             }
-        }
-        StackLayout {
-            Layout.fillHeight: true
-            Layout.fillWidth: true
-            currentIndex: Models.DesktopState.activeView
+            StackLayout {
+                Layout.fillHeight: true
+                Layout.fillWidth: true
+                currentIndex: Models.DesktopState.activeView
 
-            RowLayout {
-                spacing: 0
+                RowLayout {
+                    spacing: 0
 
-                SessionSidebar {
-                    Layout.fillHeight: true
-                    Layout.preferredWidth: 230
-                    visible: Models.DesktopState.sidebarOpen
+                    SessionSidebar {
+                        Layout.fillHeight: true
+                        Layout.preferredWidth: 230
+                        visible: Models.DesktopState.sidebarOpen
 
-                    onDetailsRequested: sessionId => details.openSession(sessionId)
-                    onNewSessionRequested: folder => window.openCreate(folder)
-                    onHistoryRequested: history.openModal()
+                        onDetailsRequested: sessionId => details.openSession(sessionId)
+                        onNewSessionRequested: folder => window.openCreate(folder)
+                        onHistoryRequested: history.openModal()
+                    }
+                    TerminalStage {
+                        id: stage
+
+                        Layout.fillHeight: true
+                        Layout.fillWidth: true
+                        interactionEnabled: !window.modalOpen && Models.DesktopState.activeView === 0
+                        sidebarOpen: Models.DesktopState.sidebarOpen
+
+                        onInspectSessionRequested: (sessionId, name) => details.openSession(sessionId)
+                        onNewSessionRequested: window.openCreate("")
+                        onShareSessionRequested: (sessionId, name) => details.openSession(sessionId)
+                        onShowSidebarRequested: Models.DesktopState.sidebarOpen = true
+                    }
                 }
-                TerminalStage {
-                    id: stage
-
-                    Layout.fillHeight: true
-                    Layout.fillWidth: true
-                    interactionEnabled: !window.modalOpen && Models.DesktopState.activeView === 0
-                    sidebarOpen: Models.DesktopState.sidebarOpen
-
-                    onInspectSessionRequested: (sessionId, name) => details.openSession(sessionId)
-                    onNewSessionRequested: window.openCreate("")
-                    onShareSessionRequested: (sessionId, name) => details.openSession(sessionId)
-                    onShowSidebarRequested: Models.DesktopState.sidebarOpen = true
+                MissionsView {
                 }
-            }
-            MissionsView {
-            }
-            PeopleView {
-            }
-            SettingsView {
+                PeopleView {
+                }
+                SettingsView {
+                }
             }
         }
     }

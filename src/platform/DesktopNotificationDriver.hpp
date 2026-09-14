@@ -10,7 +10,6 @@ struct DesktopNotification {
     QString key;
     QString title;
     QString body;
-    QStringList actions;
 };
 
 class DesktopNotificationDriver : public QObject {

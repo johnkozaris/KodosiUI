@@ -1,4 +1,5 @@
 #include "platform/FreedesktopNotificationDriver.hpp"
+#include "app/SingleInstanceGuard.hpp"
 
 #include <QDBusError>
 #include <QDBusMessage>
@@ -87,8 +88,9 @@ FreedesktopNotificationDriver::FreedesktopNotificationDriver(QObject* parent)
 void FreedesktopNotificationDriver::post(
     const DesktopNotification& notification)
 {
-    if (notification.key.isEmpty() || notification.title.isEmpty()
-        || notification.actions.size() % 2 != 0) {
+    if (notification.key.isEmpty() || notification.key.size() > 256
+        || notification.title.isEmpty() || notification.title.size() > 320
+        || notification.body.size() > 480) {
         emit deliveryError(
             notification.key,
             tr("Desktop notification data was invalid and was not sent."));
@@ -97,8 +99,11 @@ void FreedesktopNotificationDriver::post(
     }
 
     withdraw(notification.key);
-    if (m_nextPostGeneration == std::numeric_limits<quint64>::max()) {
-        m_nextPostGeneration = 0;
+    if (m_pendingPosts >= 32 || m_idsByKey.size() >= 256
+        || m_nextPostGeneration == std::numeric_limits<quint64>::max()) {
+        emit deliveryError(notification.key, tr("Desktop notification capacity is full."));
+        emit notificationClosed(notification.key);
+        return;
     }
     const auto generation = ++m_nextPostGeneration;
     const auto serviceGeneration = m_serviceGeneration;
@@ -119,11 +124,12 @@ void FreedesktopNotificationDriver::post(
         QStringLiteral("com.kodosi.Kodosi"),
         notification.title.toHtmlEscaped(),
         notification.body.toHtmlEscaped(),
-        notification.actions,
+        QStringList {QStringLiteral("default"), tr("Open Kodosi")},
         hints,
         -1,
     });
-    auto* watcher = new QDBusPendingCallWatcher(m_bus.asyncCall(request), this);
+    auto* watcher = new QDBusPendingCallWatcher(m_bus.asyncCall(request, 5000), this);
+    ++m_pendingPosts;
     connect(
         watcher,
         &QDBusPendingCallWatcher::finished,
@@ -133,6 +139,7 @@ void FreedesktopNotificationDriver::post(
          generation,
          serviceGeneration](QDBusPendingCallWatcher* call) {
             const QDBusPendingReply<uint> reply = *call;
+            --m_pendingPosts;
             call->deleteLater();
             if (reply.isError()) {
                 if (m_postGenerations.value(key) != generation
@@ -192,7 +199,7 @@ void FreedesktopNotificationDriver::onActionInvoked(
     const QString& action)
 {
     const auto key = m_keysById.value(id);
-    if (key.isEmpty()) {
+    if (key.isEmpty() || action != QStringLiteral("default")) {
         return;
     }
     emit actionInvoked(key, action, m_activationTokens.take(id));
@@ -202,7 +209,7 @@ void FreedesktopNotificationDriver::onActivationToken(
     const uint id,
     const QString& token)
 {
-    if (m_keysById.contains(id) && !token.isEmpty()) {
+    if (m_keysById.contains(id) && !token.isEmpty() && SingleInstanceGuard::isSafeActivationToken(token)) {
         m_activationTokens.insert(id, token);
     }
 }
@@ -223,7 +230,7 @@ void FreedesktopNotificationDriver::close(const uint id)
 {
     auto request = method(QStringLiteral("CloseNotification"));
     request.setArguments({QVariant::fromValue(id)});
-    (void)m_bus.asyncCall(request);
+    (void)m_bus.call(request, QDBus::NoBlock);
 }
 
 void FreedesktopNotificationDriver::forget(const uint id)

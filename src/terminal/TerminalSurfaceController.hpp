@@ -3,7 +3,6 @@
 #include "bridge/RuntimeBridge.hpp"
 #include "models/SessionCatalogModel.hpp"
 #include "terminal/TerminalSessionRegistry.hpp"
-#include "terminal/TerminalNotificationSink.hpp"
 
 #include <QMetaObject>
 #include <QObject>
@@ -35,7 +34,6 @@ public:
         kodosi::TerminalView* view,
         const QString& sessionId);
     Q_INVOKABLE void detach(kodosi::TerminalView* view);
-    void setNotificationSink(TerminalNotificationSink* sink) noexcept;
 
 signals:
     void attachmentRejected(
@@ -52,7 +50,6 @@ private:
         QString sessionId;
         QString runtimeIncarnationId;
         TerminalSubscription subscription;
-        QMetaObject::Connection notificationConnection;
         QMetaObject::Connection readinessConnection;
         QPointer<QTimer> checkpointTimer;
         std::uint64_t surfaceGeneration = 0;
@@ -66,7 +63,6 @@ private:
     TerminalSessionRegistry& m_registry;
     RuntimeBridge& m_runtime;
     SessionCatalogModel& m_sessions;
-    TerminalNotificationSink* m_notificationSink = nullptr;
     QVector<Binding> m_bindings;
     std::uint64_t m_nextSubscriptionGeneration = 0;
     std::uint64_t m_nextSurfaceGeneration = 0;
@@ -82,10 +78,7 @@ private:
     void retryPendingAttachments();
     void armCheckpointTimeout(Binding& binding);
     void cancelCheckpointTimeout(Binding& binding);
-    void forwardNotification(
-        TerminalView* view,
-        QString title,
-        QString body);
+
 };
 
 }

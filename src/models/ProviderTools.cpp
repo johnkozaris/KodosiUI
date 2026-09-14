@@ -1,4 +1,5 @@
 #include "models/ProviderTools.hpp"
+#include "bridge/JsonEnvelope.hpp"
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QUuid>
@@ -56,7 +57,12 @@ void ProviderTools::send(QString operation, QJsonObject values)
     values.insert(QStringLiteral("provider"), m_provider);
     if (!values.contains(QStringLiteral("workingDirectory")) && !m_directory.isEmpty())
         values.insert(QStringLiteral("workingDirectory"), m_directory);
-    const auto result = m_commands.send(QJsonDocument(values).toJson(QJsonDocument::Compact));
+    auto bytes = QJsonDocument(values).toJson(QJsonDocument::Compact);
+    if (operation == QStringLiteral("provider.readConversation") && m_requestedBefore) {
+        bytes.chop(1);
+        bytes += QByteArrayLiteral(",\"beforeByte\":") + QByteArray::number(*m_requestedBefore) + '}';
+    }
+    const auto result = m_commands.send(bytes);
     if (!result) {
         m_requestId.clear();
         fail(result.error().message);
@@ -113,7 +119,7 @@ void ProviderTools::preview(const QString& id)
     emit entriesChanged();
     readPage(std::nullopt, Navigation::Latest);
 }
-void ProviderTools::readPage(std::optional<qint64> before, Navigation navigation)
+void ProviderTools::readPage(std::optional<std::uint64_t> before, Navigation navigation)
 {
     m_requestedBefore = before;
     m_navigation = navigation;
@@ -122,7 +128,6 @@ void ProviderTools::readPage(std::optional<qint64> before, Navigation navigation
         { QStringLiteral("workingDirectory"), m_selected.value(QStringLiteral("workingDirectory")).toString() },
         { QStringLiteral("limit"), 50 }, { QStringLiteral("maxBytes"), 131072 }
     };
-    if (before) values.insert(QStringLiteral("beforeByte"), *before);
     send(QStringLiteral("provider.readConversation"), values);
 }
 void ProviderTools::loadOlder()
@@ -148,7 +153,7 @@ void ProviderTools::inspect()
     m_append = false;
     send(QStringLiteral("provider.inspect"));
 }
-void ProviderTools::apply(const QJsonObject& event)
+void ProviderTools::apply(const QJsonObject& event, const QByteArray& payload)
 {
     if (event.value(QStringLiteral("requestId")).toString() != m_requestId || m_requestId.isEmpty())
         return;
@@ -210,9 +215,17 @@ void ProviderTools::apply(const QJsonObject& event)
         }
         m_pageBefore = m_requestedBefore;
         m_entries = entries.toVariantList();
-        const auto next = result.value(QStringLiteral("nextBeforeByte"));
-        m_before
-            = next.isDouble() && next.toInteger(-1) >= 0 ? std::optional(next.toInteger()) : std::nullopt;
+        m_before.reset();
+        if (const auto fields = jsonObjectFields(payload)) {
+            for (const auto& field : *fields) {
+                if (field.name != QStringLiteral("result")) continue;
+                const auto resultBytes = field.value.toByteArray();
+                if (const auto resultFields = jsonObjectFields(resultBytes)) {
+                    for (const auto& resultField : *resultFields)
+                        if (resultField.name == QStringLiteral("nextBeforeByte")) m_before = jsonUnsigned(resultField.value);
+                }
+            }
+        }
         emit entriesChanged();
         const auto degraded = result.value(QStringLiteral("degradedReason")).toString();
         if (!degraded.isEmpty())

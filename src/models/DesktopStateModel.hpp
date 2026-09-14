@@ -2,6 +2,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QSettings>
+#include <QHash>
 #include <QSize>
 #include <QStringList>
 #include <memory>
@@ -18,6 +19,7 @@ class DesktopStateModel final : public QObject {
     Q_PROPERTY(QStringList stagedSessionIds READ stagedSessionIds NOTIFY stagedSessionIdsChanged)
     Q_PROPERTY(StageLayoutMode stageLayoutMode READ stageLayoutMode NOTIFY stageLayoutModeChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
+    Q_PROPERTY(bool modalOpen READ modalOpen NOTIFY modalOpenChanged)
 public:
     enum StageLayoutMode { Grid, Focus };
     Q_ENUM(StageLayoutMode)
@@ -41,7 +43,8 @@ public:
     Q_INVOKABLE void enterFocusMode(const QString& id = {});
     Q_INVOKABLE void exitFocusMode();
     Q_INVOKABLE void toggleFocusForSelectedSession();
-    Q_INVOKABLE void selectAdjacentSession(int offset);
+    bool modalOpen() const { return !m_modals.isEmpty(); }
+    Q_INVOKABLE void setModalVisible(QObject* modal, bool visible);
     Q_INVOKABLE void clearError();
     void clearSessions();
 signals:
@@ -51,6 +54,7 @@ signals:
     void stagedSessionIdsChanged();
     void stageLayoutModeChanged();
     void lastErrorChanged();
+    void modalOpenChanged();
 
 protected:
     bool eventFilter(QObject*, QEvent*) override;
@@ -59,6 +63,7 @@ private:
     std::unique_ptr<QSettings> m_settings;
     QPointer<SessionCatalogModel> m_sessions;
     QPointer<QWindow> m_window;
+    QHash<QObject*, QMetaObject::Connection> m_modals;
     QString m_selected;
     QStringList m_staged;
     QString m_error;
