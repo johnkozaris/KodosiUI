@@ -13,7 +13,7 @@ void kodosi_stop(void*)
 }
 uint32_t kodosi_abi_version()
 {
-    return 6;
+    return 7;
 }
 uint32_t kodosi_protocol_version()
 {

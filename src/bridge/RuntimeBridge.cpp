@@ -9,7 +9,7 @@
 #include <utility>
 #include <thread>
 
-static_assert(KODOSI_FFI_ABI_VERSION == 6, "KodosiQT requires FFI ABI 6");
+static_assert(KODOSI_FFI_ABI_VERSION == 7, "KodosiQT requires FFI ABI 7");
 
 namespace kodosi {
 namespace {
@@ -68,7 +68,7 @@ RuntimeBridge::Result RuntimeBridge::start()
     Q_ASSERT(thread() == QThread::currentThread());
     if (isRunning())
         return {};
-    if (kodosi_protocol_version() != 42 || kodosi_abi_version() != 6) {
+    if (kodosi_protocol_version() != 42 || kodosi_abi_version() != 7) {
         return std::unexpected(failure(RuntimeFailure::Code::ContractMismatch, KODOSI_FFI_DESER_FAILED,
             tr("The linked runtime is incompatible with this version of Kodosi.")));
     }
@@ -97,7 +97,7 @@ void RuntimeBridge::startAsync(std::function<void(Result)> completion)
 {
     Q_ASSERT(thread() == QThread::currentThread());
     if (isRunning()) { completion({}); return; }
-    if (m_starting || kodosi_protocol_version() != 42 || kodosi_abi_version() != 6) {
+    if (m_starting || kodosi_protocol_version() != 42 || kodosi_abi_version() != 7) {
         completion(std::unexpected(failure(RuntimeFailure::Code::StartRejected, KODOSI_FFI_RUNTIME_STOPPED,
             tr("The runtime is unavailable or still starting."))));
         return;
