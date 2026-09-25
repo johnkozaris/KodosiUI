@@ -141,7 +141,7 @@ KPopover {
                     iconName: "refresh"
                     objectName: "startup.retry"
                     text: qsTr("Try Again")
-                    variant: "primary"
+                    variant: KButton.Primary
 
                     onClicked: Models.ApplicationLifecycle.retry()
                 }

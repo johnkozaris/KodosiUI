@@ -15,22 +15,14 @@ QtObject {
     readonly property color darkTerminal: "#0a0807"
     readonly property color darkSeam: "#40332c"
     readonly property color darkSeamStrong: "#57443a"
-    readonly property color darkControlBorder: "#806a5f"
     readonly property color darkTextPrimary: "#f1e9e3"
     readonly property color darkTextSecondary: "#ad9a8e"
     readonly property color darkTextTertiary: "#9c887e"
     readonly property color darkAccent: "#db8a62"
     readonly property color darkAccentHover: "#e69a72"
     readonly property color darkAccentPressed: "#c97752"
-    readonly property color darkAccentMuted: "#5a3527"
     readonly property color darkAccentForeground: "#160e0a"
-    readonly property color darkSuccess: "#72a687"
-    readonly property color darkWarning: "#d2aa60"
     readonly property color darkDanger: "#e47773"
-    readonly property color darkDangerHover: "#e87773"
-    readonly property color darkDangerPressed: "#c25e5a"
-    readonly property color darkDangerForeground: "#160e0a"
-    readonly property color darkReconnecting: "#629bb8"
     readonly property color darkFocusRing: "#ef9d75"
     readonly property color darkOverlayDim: "#100d0b"
     readonly property color darkShadow: "#b8000000"
@@ -46,22 +38,14 @@ QtObject {
     readonly property color lightTerminal: "#e7e3de"
     readonly property color lightSeam: "#d6bea4"
     readonly property color lightSeamStrong: "#b99a79"
-    readonly property color lightControlBorder: "#8f6d50"
     readonly property color lightTextPrimary: "#25160e"
     readonly property color lightTextSecondary: "#5b4233"
     readonly property color lightTextTertiary: "#705445"
     readonly property color lightAccent: "#943a10"
     readonly property color lightAccentHover: "#9b3f12"
     readonly property color lightAccentPressed: "#87350e"
-    readonly property color lightAccentMuted: "#dfbda3"
     readonly property color lightAccentForeground: "#fcf9f3"
-    readonly property color lightSuccess: "#2d6140"
-    readonly property color lightWarning: "#754800"
     readonly property color lightDanger: "#a52525"
-    readonly property color lightDangerHover: "#9f2424"
-    readonly property color lightDangerPressed: "#891d1d"
-    readonly property color lightDangerForeground: "#fcf9f3"
-    readonly property color lightReconnecting: "#205873"
     readonly property color lightFocusRing: "#944014"
     readonly property color lightOverlayDim: "#efe6dc"
     readonly property color lightShadow: "#421f1208"
@@ -85,9 +69,6 @@ QtObject {
     readonly property color seamStrong: isDark
         ? darkSeamStrong
         : lightSeamStrong
-    readonly property color controlBorder: isDark
-        ? darkControlBorder
-        : lightControlBorder
     readonly property color textPrimary: isDark
         ? darkTextPrimary
         : lightTextPrimary
@@ -104,27 +85,10 @@ QtObject {
     readonly property color accentPressed: isDark
         ? darkAccentPressed
         : lightAccentPressed
-    readonly property color accentMuted: isDark
-        ? darkAccentMuted
-        : lightAccentMuted
     readonly property color accentForeground: isDark
         ? darkAccentForeground
         : lightAccentForeground
-    readonly property color success: isDark ? darkSuccess : lightSuccess
-    readonly property color warning: isDark ? darkWarning : lightWarning
     readonly property color danger: isDark ? darkDanger : lightDanger
-    readonly property color dangerHover: isDark
-        ? darkDangerHover
-        : lightDangerHover
-    readonly property color dangerPressed: isDark
-        ? darkDangerPressed
-        : lightDangerPressed
-    readonly property color dangerForeground: isDark
-        ? darkDangerForeground
-        : lightDangerForeground
-    readonly property color reconnecting: isDark
-        ? darkReconnecting
-        : lightReconnecting
     readonly property color focusRing: isDark
         ? darkFocusRing
         : lightFocusRing
@@ -138,38 +102,24 @@ QtObject {
         : lightPlaceholderText
     readonly property color disabled: isDark ? darkDisabled : lightDisabled
 
-    readonly property int fontCaption: 11
     readonly property int fontBody: 13
-    readonly property int fontTitle: 18
 
-    readonly property int spacing1: 3
     readonly property int spacing2: 6
     readonly property int spacing3: 8
     readonly property int spacing4: 10
     readonly property int spacing5: 12
-    readonly property int spacing6: 16
-    readonly property int spacing7: 24
 
     readonly property real radiusSmall: 8
-    readonly property real radiusMedium: 10
     readonly property real radiusLarge: 12
     readonly property real radiusModal: 16
-    readonly property real headerHeight: 56
-    readonly property real sidebarWidth: 272
     readonly property real controlHeight: 34
     readonly property real compactControlHeight: 30
     readonly property real iconButtonSize: 32
 
     readonly property int motionFastAuthored: 150
-    readonly property int motionNormalAuthored: 200
     readonly property int motionSpinnerAuthored: 900
-    readonly property int motionAttentionStaggerAuthored: 120
     readonly property int motionFast: reduceMotion ? 0 : motionFastAuthored
-    readonly property int motionNormal: reduceMotion ? 0 : motionNormalAuthored
     readonly property int motionSpinner: reduceMotion
         ? 0
         : motionSpinnerAuthored
-    readonly property int motionAttentionStagger: reduceMotion
-        ? 0
-        : motionAttentionStaggerAuthored
 }

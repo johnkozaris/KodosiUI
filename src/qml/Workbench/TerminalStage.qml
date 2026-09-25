@@ -175,7 +175,7 @@ Item {
                     Accessible.id: objectName
                     Accessible.ignored: !visible
                     compact: true
-                    variant: "quiet"
+                    variant: KButton.Quiet
                     iconName: "chevron-left"
                     text: qsTr("Grid")
                     Accessible.name: qsTr("Return to terminal grid")
@@ -424,7 +424,7 @@ Item {
                 KBusyIndicator {
                     objectName: "stage.sessions.loading"
                     Accessible.id: objectName
-                    Accessible.name: qsTr("Loading sessions")
+                    Accessible.name: qsTr("Loading terminals")
                     Accessible.ignored: !visible
                     Layout.alignment: Qt.AlignHCenter
                     visible: root.catalogLoading
@@ -449,12 +449,12 @@ Item {
                     Accessible.ignored: !visible
                     Layout.fillWidth: true
                     text: root.catalogFailed
-                        ? qsTr("Sessions unavailable")
+                        ? qsTr("Terminals unavailable")
                         : root.catalogLoading
-                          ? qsTr("Loading sessions...")
+                          ? qsTr("Loading terminals...")
                           : Models.Sessions.count === 0
-                            ? qsTr("Start a session")
-                            : qsTr("Nothing on Stage")
+                            ? qsTr("No terminals")
+                            : qsTr("No terminals open")
                     color: KodosiTheme.textPrimary
                     font.pixelSize: 20
                     font.weight: Font.DemiBold
@@ -464,19 +464,12 @@ Item {
                 PlainLabel {
                     Accessible.ignored: !visible
                     Layout.fillWidth: true
-                    text: root.catalogFailed
-                        ? Models.Sessions.authorityError
-                        : root.catalogLoading
-                          ? qsTr("Waiting for the authoritative session catalog.")
-                          : Models.Sessions.count === 0
-                            ? qsTr("Open a terminal for Claude, Copilot, or your shell.")
-                            : root.sidebarOpen
-                              ? qsTr("Choose a live session in Sessions to open its terminal.")
-                              : qsTr("Your sessions are still running. Show Sessions to open one.")
+                    text: Models.Sessions.authorityError
                     color: KodosiTheme.textSecondary
                     font.pixelSize: 12
                     wrapMode: Text.Wrap
                     horizontalAlignment: Text.AlignHCenter
+                    visible: root.catalogFailed
                 }
 
                 KButton {
@@ -485,11 +478,11 @@ Item {
                     Accessible.ignored: !visible
                     Layout.alignment: Qt.AlignHCenter
                     visible: root.catalogFailed
-                    variant: "directional"
+                    variant: KButton.Directional
                     iconName: "refresh"
                     text: qsTr("Retry")
-                    Accessible.name: qsTr("Retry loading sessions")
-                    onClicked: Models.Workspace.refresh()
+                    Accessible.name: qsTr("Retry loading terminals")
+                    onClicked: Models.SessionActions.refresh()
                 }
 
                 KButton {
@@ -500,9 +493,9 @@ Item {
                     visible: !root.catalogFailed
                         && !root.catalogLoading
                         && Models.Sessions.count === 0
-                    variant: "directional"
+                    variant: KButton.Directional
                     iconName: "chevron-right"
-                    text: qsTr("New Session")
+                    text: qsTr("New terminal")
                     Accessible.name: text
                     onClicked: root.newSessionRequested()
                 }
@@ -516,51 +509,11 @@ Item {
                         && !root.catalogLoading
                         && Models.Sessions.count > 0
                         && !root.sidebarOpen
-                    text: qsTr("Show Sessions")
-                    variant: "secondary"
+                    text: qsTr("Show Terminals")
+                    variant: KButton.Secondary
                     iconName: "sidebar"
-                    Accessible.name: qsTr("Show Sessions sidebar")
+                    Accessible.name: qsTr("Show Terminals sidebar")
                     onClicked: root.showSidebarRequested()
-                }
-            }
-        }
-
-        Rectangle {
-            visible: Models.Workspace.error.length > 0
-                || Models.DesktopState.lastError.length > 0
-            Layout.fillWidth: true
-            implicitHeight: visible ? sessionError.implicitHeight + 14 : 0
-            color: KodosiTheme.surfaceElevated
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: KodosiTheme.spacing3
-                anchors.rightMargin: KodosiTheme.spacing3
-
-                PlainLabel {
-                    id: sessionError
-                    Accessible.ignored: !visible
-                    Layout.fillWidth: true
-                    text: [
-                        Models.Workspace.error,
-                        Models.DesktopState.lastError
-                    ].filter(function(message) {
-                        return message.length > 0
-                    }).join("\n")
-                    color: KodosiTheme.danger
-                    font.pixelSize: 10
-                }
-
-                KButton {
-                    objectName: "stage.error.dismiss"
-                    Accessible.id: objectName
-                    Accessible.ignored: !visible
-                    text: qsTr("Dismiss")
-                    Accessible.name: text
-                    onClicked: {
-                        Models.Workspace.clearError()
-                        Models.DesktopState.clearError()
-                    }
                 }
             }
         }

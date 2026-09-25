@@ -17,7 +17,7 @@ KButton {
           : hovered
             ? KodosiTheme.textPrimary
             : glyphColor
-    variant: "quiet"
+    variant: KButton.Quiet
     compact: true
     implicitWidth: size
     implicitHeight: size

@@ -1,5 +1,5 @@
 #include "terminal/TerminalView.hpp"
-#include "bridge/JsonEnvelope.hpp"
+#include "runtime/JsonEnvelope.hpp"
 #include "logging/ApplicationLogStore.hpp"
 
 #include <kodosi_runtime.h>
@@ -185,7 +185,7 @@ TerminalView::TerminalView(QQuickItem* parent)
     auto* accessible = qobject_cast<QQuickAccessibleAttached*>(
         qmlAttachedPropertiesObject<QQuickAccessibleAttached>(this, true));
     accessible->setRole(QAccessible::Terminal);
-    accessible->setName(tr("Terminal session"));
+    accessible->setName(tr("Terminal"));
     accessible->set_focusable(true);
     accessible->set_editable(false);
     accessible->set_readOnly(true);

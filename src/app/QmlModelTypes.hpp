@@ -1,13 +1,19 @@
 #pragma once
 #include "accessibility/AccessibilityScope.hpp"
 #include "app/ApplicationLifecycleModel.hpp"
-#include "models/AppearanceModel.hpp"
-#include "models/DesktopSettings.hpp"
-#include "models/DesktopStateModel.hpp"
-#include "models/ProviderTools.hpp"
-#include "models/SessionCatalogModel.hpp"
-#include "models/TerminalTilingLayoutModel.hpp"
-#include "models/Workspace.hpp"
+#include "presentation/AccountModel.hpp"
+#include "presentation/AppearanceModel.hpp"
+#include "presentation/ConversationHistoryModel.hpp"
+#include "presentation/DesktopSettings.hpp"
+#include "presentation/DesktopStateModel.hpp"
+#include "presentation/DevicesModel.hpp"
+#include "presentation/MissionsModel.hpp"
+#include "presentation/PeopleModel.hpp"
+#include "presentation/ProviderFilesModel.hpp"
+#include "presentation/SessionCatalogModel.hpp"
+#include "presentation/SessionActionsModel.hpp"
+#include "presentation/TerminalTilingLayoutModel.hpp"
+#include "presentation/Workspace.hpp"
 #include "platform/DesktopFileIntegration.hpp"
 #include "terminal/TerminalSurfaceController.hpp"
 #include "terminal/TerminalView.hpp"
@@ -21,24 +27,84 @@ template <typename T> T* singleton(T* instance, QQmlEngine* engine)
     QQmlEngine::setObjectOwnership(instance, QQmlEngine::CppOwnership);
     return instance;
 }
-struct WorkspaceForeign {
+struct AppStateForeign {
     Q_GADGET
     QML_FOREIGN(kodosi::Workspace)
-    QML_NAMED_ELEMENT(Workspace)
+    QML_NAMED_ELEMENT(AppState)
     QML_SINGLETON
 public:
     inline static kodosi::Workspace* instance = nullptr;
     static kodosi::Workspace* create(QQmlEngine* engine, QJSEngine*) { return singleton(instance, engine); }
 };
 
-struct ProviderToolsForeign {
+struct AccountModelForeign {
     Q_GADGET
-    QML_FOREIGN(kodosi::ProviderTools)
-    QML_NAMED_ELEMENT(ProviderTools)
+    QML_FOREIGN(kodosi::AccountModel)
+    QML_NAMED_ELEMENT(Account)
     QML_SINGLETON
 public:
-    inline static kodosi::ProviderTools* instance = nullptr;
-    static kodosi::ProviderTools* create(QQmlEngine* engine, QJSEngine*) { return singleton(instance, engine); }
+    inline static kodosi::AccountModel* instance = nullptr;
+    static kodosi::AccountModel* create(QQmlEngine* engine, QJSEngine*) { return singleton(instance, engine); }
+};
+
+struct PeopleModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::PeopleModel)
+    QML_NAMED_ELEMENT(People)
+    QML_SINGLETON
+public:
+    inline static kodosi::PeopleModel* instance = nullptr;
+    static kodosi::PeopleModel* create(QQmlEngine* engine, QJSEngine*) { return singleton(instance, engine); }
+};
+
+struct DevicesModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::DevicesModel)
+    QML_NAMED_ELEMENT(Devices)
+    QML_SINGLETON
+public:
+    inline static kodosi::DevicesModel* instance = nullptr;
+    static kodosi::DevicesModel* create(QQmlEngine* engine, QJSEngine*) { return singleton(instance, engine); }
+};
+
+struct MissionsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::MissionsModel)
+    QML_NAMED_ELEMENT(Missions)
+    QML_SINGLETON
+public:
+    inline static kodosi::MissionsModel* instance = nullptr;
+    static kodosi::MissionsModel* create(QQmlEngine* engine, QJSEngine*) { return singleton(instance, engine); }
+};
+
+struct SessionActionsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::SessionActionsModel)
+    QML_NAMED_ELEMENT(SessionActions)
+    QML_SINGLETON
+public:
+    inline static kodosi::SessionActionsModel* instance = nullptr;
+    static kodosi::SessionActionsModel* create(QQmlEngine* engine, QJSEngine*) { return singleton(instance, engine); }
+};
+
+struct ConversationHistoryModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::ConversationHistoryModel)
+    QML_NAMED_ELEMENT(ConversationHistory)
+    QML_SINGLETON
+public:
+    inline static kodosi::ConversationHistoryModel* instance = nullptr;
+    static kodosi::ConversationHistoryModel* create(QQmlEngine* engine, QJSEngine*) { return singleton(instance, engine); }
+};
+
+struct ProviderFilesModelForeign {
+    Q_GADGET
+    QML_FOREIGN(kodosi::ProviderFilesModel)
+    QML_NAMED_ELEMENT(ProviderFiles)
+    QML_SINGLETON
+public:
+    inline static kodosi::ProviderFilesModel* instance = nullptr;
+    static kodosi::ProviderFilesModel* create(QQmlEngine* engine, QJSEngine*) { return singleton(instance, engine); }
 };
 
 struct AppearanceModelForeign {
@@ -132,7 +198,8 @@ struct AccessibilityScopeForeign {
     QML_FOREIGN(kodosi::AccessibilityScope)
     QML_NAMED_ELEMENT(AccessibilityScope)
 };
-void configureModelInstances(Workspace&, ProviderTools&, AppearanceModel&, DesktopSettings&,
+void configureModelInstances(Workspace&, ConversationHistoryModel&, ProviderFilesModel&,
+    AppearanceModel&, DesktopSettings&,
     DesktopStateModel&, SessionCatalogModel&, TerminalTilingLayoutModel&, DesktopFileIntegration&,
     ApplicationLifecycleModel&, TerminalSurfaceController&);
 }

@@ -4,15 +4,16 @@
 #include "app/SingleInstanceGuard.hpp"
 #include "app/RuntimeStorageBootstrap.hpp"
 #include "platform/TerminalNotifications.hpp"
-#include "bridge/RuntimeBridge.hpp"
+#include "runtime/RuntimeBridge.hpp"
 #include "logging/ApplicationLogStore.hpp"
-#include "models/AppearanceModel.hpp"
-#include "models/DesktopSettings.hpp"
-#include "models/DesktopStateModel.hpp"
-#include "models/ProviderTools.hpp"
-#include "models/SessionCatalogModel.hpp"
-#include "models/TerminalTilingLayoutModel.hpp"
-#include "models/Workspace.hpp"
+#include "presentation/AppearanceModel.hpp"
+#include "presentation/ConversationHistoryModel.hpp"
+#include "presentation/DesktopSettings.hpp"
+#include "presentation/DesktopStateModel.hpp"
+#include "presentation/ProviderFilesModel.hpp"
+#include "presentation/SessionCatalogModel.hpp"
+#include "presentation/TerminalTilingLayoutModel.hpp"
+#include "presentation/Workspace.hpp"
 #include "platform/DesktopFileIntegration.hpp"
 #include "platform/FreedesktopNotificationDriver.hpp"
 #include "terminal/TerminalAccessibility.hpp"
@@ -89,10 +90,11 @@ int main(int argc, char* argv[])
     kodosi::SessionCatalogModel sessions;
     kodosi::DesktopStateModel desktop(storage->settings(), true);
     desktop.attachSessionCatalog(&sessions);
-    kodosi::Workspace workspace(runtime, sessions, desktop);
-    kodosi::ProviderTools providers(runtime);
-    kodosi::AppearanceModel appearance(storage->settings());
     kodosi::DesktopSettings settings(storage->settings());
+    kodosi::Workspace workspace(runtime, sessions, desktop, settings);
+    kodosi::ConversationHistoryModel history(runtime);
+    kodosi::ProviderFilesModel providerFiles(runtime);
+    kodosi::AppearanceModel appearance(storage->settings());
     kodosi::DesktopFileIntegration files;
     kodosi::TerminalTilingLayoutModel tiling;
     kodosi::FreedesktopNotificationDriver notifications;
@@ -104,20 +106,25 @@ int main(int argc, char* argv[])
         workspace.apply(event, accountEpoch);
         terminalNotifications.apply(event);
         const auto type = event.value(QStringLiteral("type")).toString();
-        if (type == QStringLiteral("provider.reply") || type == QStringLiteral("provider.error"))
-            providers.apply(event, payload);
-        if (type == QStringLiteral("auth.ready") || type == QStringLiteral("auth.required"))
-            providers.reset();
+        if (type == QStringLiteral("provider.reply") || type == QStringLiteral("provider.error")) {
+            history.apply(event, payload);
+            providerFiles.apply(event);
+        }
+        if (type == QStringLiteral("auth.ready") || type == QStringLiteral("auth.required")) {
+            history.reset();
+            providerFiles.reset();
+        }
     });
     QObject::connect(&runtime, &kodosi::RuntimeBridge::eventError, &workspace, &kodosi::Workspace::setError);
     QObject::connect(&runtime, &kodosi::RuntimeBridge::runningChanged, &app, [&](bool running) {
         if (!running) {
             workspace.reset();
-            providers.reset();
+            history.reset();
+            providerFiles.reset();
         }
     });
     QObject::connect(&lifecycle, &kodosi::ApplicationLifecycleModel::runtimeGenerationReady, &workspace,
-        [&](quint64) { workspace.refresh(); });
+        [&](quint64) { workspace.sessionActions().refresh(); });
     const auto syncTheme = [&] {
         if (runtime.isRunning()) {
             const auto command
@@ -133,7 +140,8 @@ int main(int argc, char* argv[])
             syncTheme();
     });
     kodosi::qml::configureModelInstances(
-        workspace, providers, appearance, settings, desktop, sessions, tiling, files, lifecycle, surfaces);
+        workspace, history, providerFiles, appearance, settings, desktop, sessions, tiling, files,
+        lifecycle, surfaces);
     QQmlApplicationEngine engine;
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
@@ -166,7 +174,7 @@ int main(int argc, char* argv[])
         });
     QObject::connect(&terminalNotifications, &kodosi::TerminalNotifications::sessionRequested, &app,
         [&](const QString& id, const QString& token) {
-            if (workspace.activateSession(id))
+            if (workspace.sessionActions().activate(id))
                 raise(token);
         });
     raise(activation.activationToken);

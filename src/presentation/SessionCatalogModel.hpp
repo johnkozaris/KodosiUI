@@ -29,8 +29,8 @@ public:
         QString ownerUserId;
         QString ownerName;
         QString hostName;
-        QString roomId;
-        QString roomName;
+        QString missionId;
+        QString missionName;
         QString status;
         QString connectionState;
         QString message;
@@ -51,8 +51,8 @@ public:
         KindRole,
         HostRole,
         StatusRole,
-        RoomIdRole,
-        RoomNameRole,
+        MissionIdRole,
+        MissionNameRole,
         IsOwnerRole,
         ConnectionRole
     };

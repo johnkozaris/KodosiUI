@@ -1,4 +1,4 @@
-#include "models/AppearanceModel.hpp"
+#include "presentation/AppearanceModel.hpp"
 
 #include <QDBusConnection>
 #include <QDBusVariant>

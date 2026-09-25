@@ -1,4 +1,4 @@
-#include "models/SessionCatalogModel.hpp"
+#include "presentation/SessionCatalogModel.hpp"
 #include <QJsonArray>
 #include <QSet>
 #include <QDir>
@@ -53,10 +53,10 @@ QVariant SessionCatalogModel::data(const QModelIndex& index, int role) const
         return s.kind == QStringLiteral("local") ? tr("This computer") : s.hostName;
     case StatusRole:
         return s.status;
-    case RoomIdRole:
-        return s.roomId;
-    case RoomNameRole:
-        return s.roomName;
+    case MissionIdRole:
+        return s.missionId;
+    case MissionNameRole:
+        return s.missionName;
     case IsOwnerRole:
         return s.isOwner;
     case ConnectionRole:
@@ -68,8 +68,8 @@ QVariant SessionCatalogModel::data(const QModelIndex& index, int role) const
 QHash<int, QByteArray> SessionCatalogModel::roleNames() const
 {
     return { { SessionIdRole, "sessionId" }, { NameRole, "name" }, { KindRole, "kind" },
-        { HostRole, "hostName" }, { StatusRole, "status" }, { RoomIdRole, "roomId" },
-        { RoomNameRole, "roomName" }, { IsOwnerRole, "isOwner" }, { ConnectionRole, "connectionState" } };
+        { HostRole, "hostName" }, { StatusRole, "status" }, { MissionIdRole, "missionId" },
+        { MissionNameRole, "missionName" }, { IsOwnerRole, "isOwner" }, { ConnectionRole, "connectionState" } };
 }
 std::optional<SessionCatalogModel::Session> SessionCatalogModel::session(const QString& id) const
 {
@@ -113,7 +113,7 @@ QVariantMap SessionCatalogModel::presentationForSession(const QString& id) const
         { QStringLiteral("headerTitle"), s->title.isEmpty() || s->title == s->name ? s->name : s->name + QStringLiteral(" · ") + s->title },
         { QStringLiteral("program"), s->program }, { QStringLiteral("connectedUsers"), s->connectedUsers },
         { QStringLiteral("ownerName"), s->ownerName }, { QStringLiteral("hostName"), s->hostName },
-        { QStringLiteral("roomId"), s->roomId }, { QStringLiteral("roomName"), s->roomName },
+        { QStringLiteral("missionId"), s->missionId }, { QStringLiteral("missionName"), s->missionName },
         { QStringLiteral("status"), s->status }, { QStringLiteral("message"), s->message },
         { QStringLiteral("connectionState"), s->connectionState }, { QStringLiteral("isOwner"), s->isOwner },
         { QStringLiteral("sharedWith"), s->sharedWith },
@@ -143,7 +143,7 @@ std::optional<SessionCatalogModel::Session> SessionCatalogModel::decode(const QJ
             .contains(s.connectionState)
         || !o.value(QStringLiteral("sharedWith")).isArray())
         return std::nullopt;
-    for (const auto* key : {"ownerName", "hostName", "roomName", "message", "workingDir", "title", "program"}) {
+    for (const auto* key : {"ownerName", "hostName", "missionName", "message", "workingDir", "title", "program"}) {
         const auto value = o.value(QLatin1String(key));
         if (!value.isNull() && !value.isUndefined() && (!value.isString() || value.toString().size()>4096)) return std::nullopt;
     }
@@ -161,8 +161,8 @@ std::optional<SessionCatalogModel::Session> SessionCatalogModel::decode(const QJ
     s.ownerUserId = text("ownerUserId");
     s.ownerName = text("ownerName");
     s.hostName = text("hostName");
-    s.roomId = text("roomId");
-    s.roomName = text("roomName");
+    s.missionId = text("missionId");
+    s.missionName = text("missionName");
     s.message = text("message");
     s.createRequestId = text("createRequestId");
     for (const auto& v : o.value(QStringLiteral("sharedWith")).toArray()) {
@@ -178,7 +178,7 @@ void SessionCatalogModel::apply(const QJsonObject& event)
         return;
     if (!event.value(QStringLiteral("sessions")).isArray()
         || event.value(QStringLiteral("sessions")).toArray().size() > 4096) {
-        fail(tr("The session list is invalid."));
+        fail(tr("The terminal list is invalid."));
         return;
     }
     QVector<Session> result;
@@ -186,7 +186,7 @@ void SessionCatalogModel::apply(const QJsonObject& event)
     for (const auto& value : event.value(QStringLiteral("sessions")).toArray()) {
         const auto s = decode(value.toObject());
         if (!s || ids.contains(s->id)) {
-            fail(tr("The session list contains an invalid entry."));
+            fail(tr("The terminal list contains an invalid entry."));
             return;
         }
         ids.insert(s->id);

@@ -31,27 +31,27 @@ Item {
                     id: handle
 
                     Accessible.id: objectName
-                    Accessible.name: qsTr("Friend's username")
+                    Accessible.name: qsTr("Username")
                     Layout.fillWidth: true
                     objectName: "panel.people.username"
-                    placeholderText: qsTr("Friend's username")
+                    placeholderText: qsTr("Username")
                 }
                 KButton {
                     Accessible.id: objectName
-                    enabled: Models.Workspace.signedIn && handle.text.trim().length > 0
+                    enabled: Models.Account.signedIn && handle.text.trim().length > 0
                     objectName: "panel.peopleView.add-friend"
-                    text: qsTr("Add friend")
+                    text: qsTr("Add")
 
-                    onClicked: Models.Workspace.requestFriend(handle.text)
+                    onClicked: Models.People.request(handle.text)
                 }
             }
             PlainLabel {
                 color: KodosiTheme.textSecondary
-                text: qsTr("Sign in to connect with friends.")
-                visible: !Models.Workspace.signedIn
+                text: qsTr("Sign in to add people.")
+                visible: !Models.Account.signedIn
             }
             Repeater {
-                model: Models.Workspace.incoming
+                model: Models.People.incoming
 
                 delegate: RowLayout {
                     id: entry0
@@ -70,20 +70,20 @@ Item {
                         objectName: "panel.peopleView.accept" + "." + entry0.modelData.userId
                         text: qsTr("Accept")
 
-                        onClicked: Models.Workspace.acceptFriend(entry0.modelData.handle)
+                        onClicked: Models.People.accept(entry0.modelData.handle)
                     }
                     KButton {
                         Accessible.id: objectName
                         objectName: "panel.peopleView.decline" + "." + entry0.modelData.userId
                         text: qsTr("Decline")
-                        variant: "quiet"
+                        variant: KButton.Quiet
 
-                        onClicked: Models.Workspace.rejectFriend(entry0.modelData.handle)
+                        onClicked: Models.People.decline(entry0.modelData.handle)
                     }
                 }
             }
             Repeater {
-                model: Models.Workspace.outgoing
+                model: Models.People.outgoing
 
                 delegate: RowLayout {
                     id: entry1
@@ -100,15 +100,15 @@ Item {
                     KButton {
                         Accessible.id: objectName
                         objectName: "panel.peopleView.cancel-request" + "." + entry1.modelData.userId
-                        text: qsTr("Cancel request")
-                        variant: "quiet"
+                        text: qsTr("Cancel")
+                        variant: KButton.Quiet
 
-                        onClicked: Models.Workspace.cancelFriend(entry1.modelData.handle)
+                        onClicked: Models.People.cancel(entry1.modelData.handle)
                     }
                 }
             }
             Repeater {
-                model: Models.Workspace.friends
+                model: Models.People.friends
 
                 delegate: RowLayout {
                     id: entry2
@@ -126,7 +126,7 @@ Item {
                         Accessible.id: objectName
                         objectName: "panel.people.remove." + entry2.modelData.userId
                         text: qsTr("Remove…")
-                        variant: "quiet"
+                        variant: KButton.Quiet
 
                         onClicked: {
                             removeFriend.username = entry2.modelData.handle;
@@ -138,7 +138,7 @@ Item {
             PlainLabel {
                 color: KodosiTheme.textSecondary
                 text: qsTr("No friends yet.")
-                visible: Models.Workspace.signedIn && Models.Workspace.friends.length === 0
+                visible: Models.Account.signedIn && Models.People.friends.length === 0
             }
         }
     }
@@ -150,11 +150,11 @@ Item {
         standardButtons: Dialog.Ok | Dialog.Cancel
         title: qsTr("Remove %1?").arg(username)
 
-        onAccepted: Models.Workspace.removeFriend(username)
+        onAccepted: Models.People.remove(username)
 
         PlainLabel {
             color: KodosiTheme.textPrimary
-            text: qsTr("They will lose access to sessions shared with them.")
+            text: qsTr("They will lose access to terminals shared with them.")
         }
     }
 }

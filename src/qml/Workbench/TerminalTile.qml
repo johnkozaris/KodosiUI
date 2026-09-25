@@ -25,7 +25,7 @@ Item {
     function bindTerminal() {
         terminalError = "";
         if (!Models.TerminalSurfaces.bind(terminal, sessionId))
-            terminalError = qsTr("This session is no longer available.");
+            terminalError = qsTr("This terminal is no longer available.");
     }
     function forceTerminalFocus() {
         if (visible && enabled)
@@ -106,7 +106,7 @@ Item {
                 }
                 KIconButton {
                     Accessible.id: objectName
-                    Accessible.name: qsTr("Session details")
+                    Accessible.name: qsTr("Terminal details")
                     glyph: "document"
                     objectName: root.objectName + ".details"
 
@@ -135,7 +135,7 @@ Item {
                     Accessible.name: qsTr("Minimize")
                     glyph: "minus"
                     objectName: root.objectName + ".minimize"
-                    onClicked: Models.Workspace.closeView(root.sessionId)
+                    onClicked: Models.SessionActions.minimize(root.sessionId)
                 }
                 KIconButton {
                     Accessible.id: objectName
@@ -178,7 +178,7 @@ Item {
                     context.popup(point.x, point.y);
                 }
                 onOperationError: message => root.terminalOperationError = message
-                onTerminalClosed: root.terminalError = qsTr("The terminal session has ended.")
+                onTerminalClosed: root.terminalError = qsTr("The terminal has ended.")
                 onTerminalError: message => root.terminalError = message
             }
             Rectangle {
@@ -219,7 +219,7 @@ Item {
 
                         onClicked: {
                             root.terminalError = "";
-                            if (Models.Workspace.activateSession(root.sessionId) && !Models.TerminalSurfaces.retry(terminal, root.sessionId))
+                            if (Models.SessionActions.activate(root.sessionId) && !Models.TerminalSurfaces.retry(terminal, root.sessionId))
                                 root.terminalError = qsTr("The terminal could not reconnect.");
                         }
                     }
@@ -265,7 +265,7 @@ Item {
         title: qsTr("Close %1?").arg(root.sessionName)
         onOpened: standardButton(Dialog.Ok).text = qsTr("Close")
 
-        onAccepted: Models.Workspace.closeSession(root.sessionId)
+        onAccepted: Models.SessionActions.close(root.sessionId)
 
         PlainLabel {
             color: KodosiTheme.textPrimary

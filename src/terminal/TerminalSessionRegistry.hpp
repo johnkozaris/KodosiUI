@@ -1,6 +1,6 @@
 #pragma once
 
-#include "bridge/RuntimeBridge.hpp"
+#include "runtime/RuntimeBridge.hpp"
 #include "terminal/GhosttyTerminalKernel.hpp"
 
 #include <functional>

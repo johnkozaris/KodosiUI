@@ -6,19 +6,18 @@ import QtQuick.Layouts
 Button {
     id: root
 
-    property string variant: "secondary"
+    enum Variant {
+        Secondary,
+        Primary,
+        Quiet,
+        Directional
+    }
+
+    property int variant: KButton.Secondary
     property string iconName: ""
-    property bool iconTrailing: variant === "directional"
-    property bool uppercase: false
+    property bool iconTrailing: variant === KButton.Directional
     property bool compact: false
-    property bool contentLeftAligned: false
-    property bool showLeadingDot: false
-    property color leadingDotColor: KodosiTheme.textTertiary
-    property bool tonalSelection: false
     property color iconColor: label.color
-    property string secondaryText: ""
-    property real secondaryMaximumWidth: 160
-    Accessible.description: secondaryText
     activeFocusOnTab: true
 
     implicitHeight: compact
@@ -33,23 +32,15 @@ Button {
     bottomPadding: 6
     hoverEnabled: true
 
-    readonly property color intent: variant === "danger"
-        ? KodosiTheme.danger
-        : KodosiTheme.accent
-    readonly property bool filled: variant === "primary"
-        || variant === "directional"
-        || variant === "danger"
+    readonly property bool filled: variant === KButton.Primary
+        || variant === KButton.Directional
     readonly property bool selected: checkable && checked
 
     contentItem: RowLayout {
         id: contentRow
-        spacing: root.iconName.length > 0
-            || root.showLeadingDot
-            ? 7
-            : 0
+        spacing: root.iconName.length > 0 ? 7 : 0
 
         Item {
-            visible: !root.contentLeftAligned
             Layout.fillWidth: true
         }
 
@@ -61,55 +52,24 @@ Button {
             color: root.iconColor
         }
 
-        Rectangle {
-            Accessible.ignored: true
-            visible: root.showLeadingDot
-            Layout.preferredWidth: 7
-            Layout.preferredHeight: 7
-            radius: 4
-            color: root.leadingDotColor
-        }
-
         PlainLabel {
             id: label
-            Layout.fillWidth: root.contentLeftAligned
-            text: root.uppercase ? root.text.toUpperCase() : root.text
+            text: root.text
             color: !root.enabled
                 ? KodosiTheme.disabled
                 : root.selected
-                  ? (root.tonalSelection
-                     ? KodosiTheme.textPrimary
-                     : KodosiTheme.accent)
+                  ? KodosiTheme.accent
                   : root.filled
-                  ? (root.variant === "danger"
-                     ? KodosiTheme.dangerForeground
-                     : KodosiTheme.accentForeground)
-                  : root.variant === "quiet"
+                  ? KodosiTheme.accentForeground
+                  : root.variant === KButton.Quiet
                     ? (root.hovered
                        ? KodosiTheme.textPrimary
                        : KodosiTheme.textSecondary)
-                    : root.variant === "dangerQuiet"
-                      ? KodosiTheme.danger
-                      : KodosiTheme.textPrimary
+                    : KodosiTheme.textPrimary
             font.pixelSize: KodosiTheme.fontBody
             font.weight: Font.Medium
-            font.letterSpacing: root.uppercase ? 1.0 : 0
-            horizontalAlignment: root.contentLeftAligned
-                ? Text.AlignLeft
-                : Text.AlignHCenter
+            horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-        }
-
-        PlainLabel {
-            visible: root.secondaryText.length > 0
-            Layout.maximumWidth: root.secondaryMaximumWidth
-            Layout.leftMargin: KodosiTheme.spacing2
-            text: root.secondaryText
-            color: root.enabled
-                ? KodosiTheme.textSecondary
-                : KodosiTheme.disabled
-            font.pixelSize: KodosiTheme.fontCaption
             elide: Text.ElideRight
         }
 
@@ -120,9 +80,7 @@ Button {
             name: root.iconName
             color: root.iconColor
         }
-
         Item {
-            visible: !root.contentLeftAligned
             Layout.fillWidth: true
         }
     }
@@ -138,20 +96,16 @@ Button {
                     : KodosiTheme.surfaceSelected
             if (root.filled) {
                 if (root.pressed)
-                    return root.variant === "danger"
-                        ? KodosiTheme.dangerPressed
-                        : KodosiTheme.accentPressed
+                    return KodosiTheme.accentPressed
                 if (root.hovered)
-                    return root.variant === "danger"
-                        ? KodosiTheme.dangerHover
-                        : KodosiTheme.accentHover
-                return root.intent
+                    return KodosiTheme.accentHover
+                return KodosiTheme.accent
             }
             if (root.pressed)
                 return KodosiTheme.surfaceSelected
             if (root.hovered)
                 return KodosiTheme.surfaceElevated
-            return root.variant === "quiet" || root.variant === "dangerQuiet"
+            return root.variant === KButton.Quiet
                 ? KodosiTheme.surface
                 : KodosiTheme.surfaceRaised
         }

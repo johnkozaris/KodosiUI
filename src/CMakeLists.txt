@@ -2,8 +2,33 @@ set_source_files_properties(
     qml/Theme/KodosiTheme.qml
     PROPERTIES QT_QML_SINGLETON_TYPE TRUE
 )
+set_source_files_properties(
+    qml/Settings/GeneralSettings.qml
+    qml/Settings/DeviceSettings.qml
+    qml/Settings/TerminalSettings.qml
+    qml/Settings/ProviderSettings.qml
+    PROPERTIES QT_QML_INTERNAL_TYPE TRUE
+)
 
-qt_add_library(kodosi-runtime-bridge STATIC
+qt_add_library(kodosi-runtime STATIC
+    runtime/RuntimeBridge.cpp
+    runtime/RuntimeBridge.hpp
+    runtime/JsonEnvelope.hpp
+)
+
+target_include_directories(kodosi-runtime
+    PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+target_link_libraries(kodosi-runtime
+    PUBLIC
+        Qt6::Core
+    PRIVATE
+        Kodosi::RustRuntime
+)
+
+qt_add_library(kodosi-application STATIC
     app/ApplicationLifecycleModel.cpp
     app/ApplicationLifecycleModel.hpp
     app/DeepLinkRouter.cpp
@@ -12,40 +37,49 @@ qt_add_library(kodosi-runtime-bridge STATIC
     app/SingleInstanceGuard.hpp
     app/RuntimeStorageBootstrap.cpp
     app/RuntimeStorageBootstrap.hpp
-    bridge/RuntimeBridge.cpp
-    bridge/RuntimeBridge.hpp
-    bridge/JsonEnvelope.hpp
     logging/ApplicationLogStore.cpp
     logging/ApplicationLogStore.hpp
-    models/Workspace.cpp
-    models/Workspace.hpp
-    models/ProviderTools.cpp
-    models/ProviderTools.hpp
-    models/AppearanceModel.cpp
-    models/AppearanceModel.hpp
-    models/DesktopSettings.cpp
-    models/DesktopSettings.hpp
-    models/DesktopStateModel.cpp
-    models/DesktopStateModel.hpp
-    models/SessionCatalogModel.cpp
-    models/SessionCatalogModel.hpp
-    models/TerminalTilingLayoutModel.cpp
-    models/TerminalTilingLayoutModel.hpp
+    presentation/AccountModel.cpp
+    presentation/AccountModel.hpp
+    presentation/ConversationHistoryModel.cpp
+    presentation/ConversationHistoryModel.hpp
+    presentation/DevicesModel.cpp
+    presentation/DevicesModel.hpp
+    presentation/MissionsModel.cpp
+    presentation/MissionsModel.hpp
+    presentation/PeopleModel.cpp
+    presentation/PeopleModel.hpp
+    presentation/ProviderFilesModel.cpp
+    presentation/ProviderFilesModel.hpp
+    presentation/SessionActionsModel.cpp
+    presentation/SessionActionsModel.hpp
+    presentation/Workspace.cpp
+    presentation/Workspace.hpp
+    presentation/AppearanceModel.cpp
+    presentation/AppearanceModel.hpp
+    presentation/DesktopSettings.cpp
+    presentation/DesktopSettings.hpp
+    presentation/DesktopStateModel.cpp
+    presentation/DesktopStateModel.hpp
+    presentation/SessionCatalogModel.cpp
+    presentation/SessionCatalogModel.hpp
+    presentation/TerminalTilingLayoutModel.cpp
+    presentation/TerminalTilingLayoutModel.hpp
 )
 
-target_include_directories(kodosi-runtime-bridge
+target_include_directories(kodosi-application
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-target_link_libraries(kodosi-runtime-bridge
+target_link_libraries(kodosi-application
     PUBLIC
         Qt6::Core
-        Qt6::Network
+        kodosi-runtime
     PRIVATE
-        Kodosi::RustRuntime
         Qt6::DBus
         Qt6::Gui
+        Qt6::Network
 )
 
 qt_add_library(kodosi-desktop-integration STATIC
@@ -69,7 +103,7 @@ target_link_libraries(kodosi-desktop-integration
     PUBLIC
         Qt6::Core
         Qt6::DBus
-        kodosi-runtime-bridge
+        kodosi-application
     PRIVATE
         Qt6::Gui
         Qt6::Widgets
@@ -121,7 +155,7 @@ target_link_libraries(kodosi-qml-models
     PUBLIC
         Qt6::Qml
         kodosi-desktop-integration
-        kodosi-runtime-bridge
+        kodosi-application
         kodosi-terminal-kernel
 )
 
@@ -145,7 +179,7 @@ target_link_libraries(kodosi-terminal-kernel
         Qt6::Core
         Qt6::Gui
         Qt6::Quick
-        kodosi-runtime-bridge
+        kodosi-application
     PRIVATE
         Kodosi::RustRuntime
         kodosi-ghostty-vt
@@ -165,9 +199,13 @@ qt_add_qml_module(kodosi-ui
         Kodosi.Models
     QML_FILES
         qml/Main.qml
-        qml/Workspace/PeopleView.qml
-        qml/Workspace/MissionsView.qml
-        qml/Workspace/SettingsView.qml
+        qml/Screens/PeopleView.qml
+        qml/Screens/MissionsView.qml
+        qml/Settings/SettingsView.qml
+        qml/Settings/GeneralSettings.qml
+        qml/Settings/DeviceSettings.qml
+        qml/Settings/TerminalSettings.qml
+        qml/Settings/ProviderSettings.qml
         qml/Workbench/SessionDetails.qml
         qml/Controls/ProviderIcon.qml
         qml/Controls/NavTab.qml
@@ -189,7 +227,7 @@ qt_add_qml_module(kodosi-ui
         qml/Controls/KSpinBox.qml
         qml/Controls/KTextField.qml
         qml/Controls/PlainLabel.qml
-        qml/Startup/StartupOverlay.qml
+        qml/Shell/StartupOverlay.qml
         qml/Theme/KodosiTheme.qml
         qml/Workbench/SessionSidebar.qml
         qml/Workbench/HistoryView.qml
@@ -219,13 +257,19 @@ target_link_libraries(kodosi-qt
         Qt6::QuickControls2
         Qt6::Widgets
         kodosi-desktop-integration
-        kodosi-runtime-bridge
+        kodosi-application
         kodosi-terminal-kernel
         kodosi-qml-modelsplugin
         kodosi-uiplugin
 )
 
-target_compile_definitions(kodosi-runtime-bridge
+target_compile_definitions(kodosi-runtime
+    PUBLIC
+        QT_NO_CAST_FROM_ASCII
+        QT_NO_CAST_TO_ASCII
+        QT_NO_URL_CAST_FROM_STRING
+)
+target_compile_definitions(kodosi-application
     PUBLIC
         QT_NO_CAST_FROM_ASCII
         QT_NO_CAST_TO_ASCII
@@ -244,7 +288,7 @@ target_compile_definitions(kodosi-terminal-kernel
         QT_NO_URL_CAST_FROM_STRING
 )
 target_compile_definitions(kodosi-qt PRIVATE QT_NO_CAST_FROM_ASCII QT_NO_CAST_TO_ASCII)
-foreach(target kodosi-runtime-bridge kodosi-desktop-integration kodosi-terminal-kernel kodosi-qt)
+foreach(target kodosi-runtime kodosi-application kodosi-desktop-integration kodosi-terminal-kernel kodosi-qt)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endforeach()
 

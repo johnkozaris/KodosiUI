@@ -1,6 +1,6 @@
 #pragma once
 
-#include "models/SessionCatalogModel.hpp"
+#include "presentation/SessionCatalogModel.hpp"
 #include "platform/DesktopNotificationDriver.hpp"
 #include <QJsonObject>
 

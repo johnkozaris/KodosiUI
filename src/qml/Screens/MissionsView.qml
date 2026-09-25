@@ -8,7 +8,7 @@ import Kodosi.Models 1.0 as Models
 Item {
     id: root
 
-    property bool detailVisible: Models.Workspace.selectedMissionId.length > 0
+    property bool detailVisible: Models.Missions.selectedMissionId.length > 0
     property int sessionRevision: 0
 
     Accessible.id: objectName
@@ -22,12 +22,12 @@ Item {
         target: Models.Sessions
     }
     Connections {
-        function onMissionChanged() {
-            if (!Models.Workspace.selectedMissionId.length)
+        function onSelectionChanged() {
+            if (!Models.Missions.selectedMissionId.length)
                 root.detailVisible = false;
         }
 
-        target: Models.Workspace
+        target: Models.Missions
     }
     KScrollView {
         anchors.fill: parent
@@ -45,7 +45,7 @@ Item {
                     iconName: "chevron-left"
                     objectName: "panel.missionsView.missions"
                     text: qsTr("Missions")
-                    variant: "quiet"
+                    variant: KButton.Quiet
                     visible: root.detailVisible
 
                     onClicked: {
@@ -56,11 +56,11 @@ Item {
                     Layout.fillWidth: true
                     color: KodosiTheme.textPrimary
                     font.pixelSize: 22
-                    text: root.detailVisible ? (Models.Workspace.mission.name || qsTr("Loading Mission…")) : qsTr("Missions")
+                    text: root.detailVisible ? (Models.Missions.selectedMission.name || qsTr("Loading Mission…")) : qsTr("Missions")
                 }
                 KButton {
                     Accessible.id: objectName
-                    enabled: Models.Workspace.signedIn
+                    enabled: Models.Account.signedIn
                     objectName: "panel.missionsView.new-mission"
                     text: qsTr("New Mission")
                     visible: !root.detailVisible
@@ -70,20 +70,20 @@ Item {
             }
             PlainLabel {
                 color: KodosiTheme.textSecondary
-                text: qsTr("Sign in to organize shared projects.")
-                visible: !Models.Workspace.signedIn
+                text: qsTr("Sign in to use Missions.")
+                visible: !Models.Account.signedIn
             }
             PlainLabel {
                 Accessible.id: objectName
                 Layout.fillWidth: true
                 color: KodosiTheme.textSecondary
                 objectName: "panel.missions.truncated"
-                text: qsTr("Some Missions or invitations are hidden. Leave Missions or decline invitations to reveal more.")
-                visible: !root.detailVisible && Models.Workspace.missionCatalogTruncated
+                text: qsTr("Mission list full. Leave one or decline an invite to see more.")
+                visible: !root.detailVisible && Models.Missions.catalogTruncated
                 wrapMode: Text.WordWrap
             }
             Repeater {
-                model: root.detailVisible ? [] : Models.Workspace.invitations
+                model: root.detailVisible ? [] : Models.Missions.invitations
 
                 delegate: RowLayout {
                     id: entry0
@@ -95,27 +95,27 @@ Item {
                     PlainLabel {
                         Layout.fillWidth: true
                         color: KodosiTheme.textPrimary
-                        text: qsTr("Invitation to %1").arg(entry0.modelData.roomName)
+                        text: qsTr("Invitation to %1").arg(entry0.modelData.missionName)
                     }
                     KButton {
                         Accessible.id: objectName
                         objectName: "panel.missionsView.join" + "." + entry0.modelData.id
                         text: qsTr("Join")
 
-                        onClicked: Models.Workspace.acceptInvitation(entry0.modelData.id)
+                        onClicked: Models.Missions.acceptInvitation(entry0.modelData.id)
                     }
                     KButton {
                         Accessible.id: objectName
                         objectName: "panel.missionsView.decline" + "." + entry0.modelData.id
                         text: qsTr("Decline")
-                        variant: "quiet"
+                        variant: KButton.Quiet
 
-                        onClicked: Models.Workspace.rejectInvitation(entry0.modelData.id)
+                        onClicked: Models.Missions.declineInvitation(entry0.modelData.id)
                     }
                 }
             }
             Repeater {
-                model: root.detailVisible ? [] : Models.Workspace.missions
+                model: root.detailVisible ? [] : Models.Missions.missions
 
                 delegate: KItemDelegate {
                     id: missionRow
@@ -128,14 +128,14 @@ Item {
                     text: missionRow.modelData.name
 
                     onClicked: {
-                        Models.Workspace.openMission(missionRow.modelData.id);
+                        Models.Missions.open(missionRow.modelData.id);
                         root.detailVisible = true;
                     }
                 }
             }
             RowLayout {
                 Layout.fillWidth: true
-                visible: root.detailVisible && Models.Workspace.mission.ownerUserId === Models.Workspace.userId
+                visible: root.detailVisible && Models.Missions.selectedMission.ownerUserId === Models.Account.userId
 
                 KTextField {
                     id: rename
@@ -144,14 +144,14 @@ Item {
                     Accessible.name: qsTr("Mission name")
                     Layout.fillWidth: true
                     objectName: "panel.missions.rename.name"
-                    text: Models.Workspace.mission.name || ""
+                    text: Models.Missions.selectedMission.name || ""
                 }
                 KButton {
                     Accessible.id: objectName
                     objectName: "panel.missionsView.rename"
                     text: qsTr("Rename")
 
-                    onClicked: Models.Workspace.renameMission(rename.text)
+                    onClicked: Models.Missions.rename(rename.text)
                 }
             }
             PlainLabel {
@@ -161,7 +161,7 @@ Item {
                 visible: root.detailVisible
             }
             Repeater {
-                model: root.detailVisible ? Models.Workspace.missionMembers : []
+                model: root.detailVisible ? Models.Missions.members : []
 
                 delegate: RowLayout {
                     id: entry2
@@ -179,16 +179,16 @@ Item {
                         Accessible.id: objectName
                         objectName: "panel.missionsView.remove" + "." + entry2.modelData.userId
                         text: qsTr("Remove")
-                        variant: "quiet"
-                        visible: Models.Workspace.mission.ownerUserId === Models.Workspace.userId && !entry2.modelData.isOwner
+                        variant: KButton.Quiet
+                        visible: Models.Missions.selectedMission.ownerUserId === Models.Account.userId && !entry2.modelData.isOwner
 
-                        onClicked: Models.Workspace.removeMember(entry2.modelData.userId)
+                        onClicked: Models.Missions.removeMember(entry2.modelData.userId)
                     }
                 }
             }
             RowLayout {
                 Layout.fillWidth: true
-                visible: root.detailVisible && Models.Workspace.mission.ownerUserId === Models.Workspace.userId
+                visible: root.detailVisible && Models.Missions.selectedMission.ownerUserId === Models.Account.userId
 
                 KComboBox {
                     id: friend
@@ -196,7 +196,7 @@ Item {
                     Accessible.id: objectName
                     Accessible.name: qsTr("Invite friend")
                     Layout.fillWidth: true
-                    model: Models.Workspace.friends
+                    model: Models.People.friends
                     objectName: "panel.missionsView.friend"
                     textRole: "displayName"
                     valueRole: "userId"
@@ -207,7 +207,7 @@ Item {
                     objectName: "panel.missionsView.invite"
                     text: qsTr("Invite")
 
-                    onClicked: Models.Workspace.inviteToMission(friend.currentValue)
+                    onClicked: Models.Missions.invite(friend.currentValue)
                 }
             }
             PlainLabel {
@@ -217,7 +217,7 @@ Item {
                 visible: root.detailVisible
             }
             Repeater {
-                model: root.detailVisible ? Models.Workspace.missionSessionIds : []
+                model: root.detailVisible ? Models.Missions.sessionIds : []
 
                 delegate: RowLayout {
                     id: entry3
@@ -230,7 +230,7 @@ Item {
                     PlainLabel {
                         Layout.fillWidth: true
                         color: KodosiTheme.textPrimary
-                        text: entry3.session.name || qsTr("Terminal not shared with you")
+                        text: entry3.session.name || qsTr("Unavailable terminal")
                     }
                     KButton {
                         Accessible.id: objectName
@@ -238,27 +238,27 @@ Item {
                         objectName: "panel.missionsView.open" + "." + entry3.modelData
                         text: qsTr("Open")
 
-                        onClicked: Models.Workspace.activateSession(entry3.modelData)
+                        onClicked: Models.SessionActions.activate(entry3.modelData)
                     }
                 }
             }
             PlainLabel {
                 color: KodosiTheme.textSecondary
-                text: qsTr("Attach a terminal from its session details.")
-                visible: root.detailVisible && Models.Workspace.missionSessionIds.length === 0
+                text: qsTr("Attach terminals from Details.")
+                visible: root.detailVisible && Models.Missions.sessionIds.length === 0
             }
             RowLayout {
-                visible: root.detailVisible && !!Models.Workspace.mission.id
+                visible: root.detailVisible && !!Models.Missions.selectedMission.id
 
                 KButton {
                     Accessible.id: objectName
                     objectName: "panel.missionsView.leave-mission"
                     text: qsTr("Leave Mission")
-                    variant: "quiet"
-                    visible: Models.Workspace.mission.ownerUserId !== Models.Workspace.userId
+                    variant: KButton.Quiet
+                    visible: Models.Missions.selectedMission.ownerUserId !== Models.Account.userId
 
                     onClicked: {
-                        Models.Workspace.leaveMission();
+                        Models.Missions.leave();
                         root.detailVisible = false;
                     }
                 }
@@ -266,8 +266,8 @@ Item {
                     Accessible.id: objectName
                     objectName: "panel.missionsView.delete-mission"
                     text: qsTr("Delete Mission…")
-                    variant: "quiet"
-                    visible: Models.Workspace.mission.ownerUserId === Models.Workspace.userId
+                    variant: KButton.Quiet
+                    visible: Models.Missions.selectedMission.ownerUserId === Models.Account.userId
 
                     onClicked: remove.open()
                 }
@@ -281,7 +281,7 @@ Item {
         standardButtons: Dialog.Ok | Dialog.Cancel
         title: qsTr("New Mission")
 
-        onAccepted: Models.Workspace.createMission(missionName.text)
+        onAccepted: Models.Missions.create(missionName.text)
 
         KTextField {
             id: missionName
@@ -299,7 +299,7 @@ Item {
         title: qsTr("Delete this Mission?")
 
         onAccepted: {
-            Models.Workspace.deleteMission();
+            Models.Missions.remove();
             root.detailVisible = false;
         }
 

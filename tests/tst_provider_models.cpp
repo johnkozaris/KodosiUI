@@ -1,5 +1,6 @@
 #include "SessionFixture.hpp"
-#include "models/ProviderTools.hpp"
+#include "presentation/ConversationHistoryModel.hpp"
+#include "presentation/ProviderFilesModel.hpp"
 #include <QJsonDocument>
 #include <QtTest/QTest>
 
@@ -22,20 +23,19 @@ public:
             { QStringLiteral("result"), result } };
     }
 };
-void apply(kodosi::ProviderTools& tools, const QJsonObject& event)
+void apply(kodosi::ConversationHistoryModel& history, const QJsonObject& event)
 {
-    tools.apply(event, QJsonDocument(event).toJson(QJsonDocument::Compact));
+    history.apply(event, QJsonDocument(event).toJson(QJsonDocument::Compact));
 }
 
-class ProviderToolsTest final : public QObject {
+class ProviderModelsTest final : public QObject {
     Q_OBJECT
 private slots:
     void previewUsesByteCursorAndIgnoresStaleSelection()
     {
         ProviderCommands commands;
-        kodosi::ProviderTools tools(commands);
-        tools.select(QStringLiteral("claude"), QStringLiteral("/repo"));
-        tools.discover();
+        kodosi::ConversationHistoryModel tools(commands);
+        tools.open(kodosi::ConversationHistoryModel::Claude, QStringLiteral("/repo"));
         const QJsonObject item { { QStringLiteral("provider"), QStringLiteral("claude") },
             { QStringLiteral("workingDirectory"), QStringLiteral("/repo") },
             { QStringLiteral("nativeConversationId"), test::id(1) } };
@@ -53,17 +53,18 @@ private slots:
         QCOMPARE(commands.values.last().value(QStringLiteral("beforeByte")).toInt(), 123);
         QVERIFY(!commands.values.last().contains(QStringLiteral("beforeLine")));
         const auto stale = commands.reply({ { QStringLiteral("entries"), QJsonArray { QJsonObject {} } } });
-        tools.select(QStringLiteral("copilot"), QStringLiteral("/other"));
+        tools.open(kodosi::ConversationHistoryModel::Copilot, QStringLiteral("/other"));
         apply(tools, stale);
         QVERIFY(tools.entries().isEmpty());
-        QVERIFY(!tools.busy());
+        QVERIFY(tools.busy());
+        QCOMPARE(commands.values.last().value(QStringLiteral("provider")).toString(),
+            QStringLiteral("copilot"));
     }
     void historyReplacesPagesAndCommitsNavigationOnlyOnSuccess()
     {
         ProviderCommands commands;
-        kodosi::ProviderTools tools(commands);
-        tools.select(QStringLiteral("claude"), QStringLiteral("/repo"));
-        tools.discover();
+        kodosi::ConversationHistoryModel tools(commands);
+        tools.open(kodosi::ConversationHistoryModel::Claude, QStringLiteral("/repo"));
         apply(tools, commands.reply({ { QStringLiteral("items"), QJsonArray { QJsonObject {
             { QStringLiteral("provider"), QStringLiteral("claude") },
             { QStringLiteral("workingDirectory"), QStringLiteral("/repo") },
@@ -100,9 +101,8 @@ private slots:
     void allProjectsPreviewUsesTheSelectedNativeDirectory()
     {
         ProviderCommands commands;
-        kodosi::ProviderTools tools(commands);
-        tools.select(QStringLiteral("claude"), {});
-        tools.discover();
+        kodosi::ConversationHistoryModel tools(commands);
+        tools.open(kodosi::ConversationHistoryModel::Claude, {});
         QVERIFY(!commands.values.last().contains(QStringLiteral("workingDirectory")));
         apply(tools, commands.reply({ { QStringLiteral("items"), QJsonArray { QJsonObject {
             { QStringLiteral("provider"), QStringLiteral("claude") },
@@ -114,9 +114,8 @@ private slots:
     void rejectsConversationFromAnotherProject()
     {
         ProviderCommands commands;
-        kodosi::ProviderTools tools(commands);
-        tools.select(QStringLiteral("claude"), QStringLiteral("/repo"));
-        tools.discover();
+        kodosi::ConversationHistoryModel tools(commands);
+        tools.open(kodosi::ConversationHistoryModel::Claude, QStringLiteral("/repo"));
         apply(tools, commands.reply({ { QStringLiteral("items"),
             QJsonArray { QJsonObject { { QStringLiteral("provider"), QStringLiteral("claude") },
                 { QStringLiteral("workingDirectory"), QStringLiteral("/other") },
@@ -127,9 +126,8 @@ private slots:
     void preservesUnsignedByteCursor()
     {
         ProviderCommands commands;
-        kodosi::ProviderTools tools(commands);
-        tools.select(QStringLiteral("claude"), QStringLiteral("/repo"));
-        tools.discover();
+        kodosi::ConversationHistoryModel tools(commands);
+        tools.open(kodosi::ConversationHistoryModel::Claude, QStringLiteral("/repo"));
         const QJsonObject item {
             {QStringLiteral("provider"), QStringLiteral("claude")},
             {QStringLiteral("workingDirectory"), QStringLiteral("/repo")},
@@ -148,13 +146,15 @@ private slots:
     void inspectionOnlyRequestsMetadata()
     {
         ProviderCommands commands;
-        kodosi::ProviderTools tools(commands);
-        tools.select(QStringLiteral("claude"), QStringLiteral("/repo"));
-        tools.inspect();
+        kodosi::ProviderFilesModel files(commands);
+        files.inspect(kodosi::ProviderFilesModel::Claude, QStringLiteral("/repo"));
         QCOMPARE(commands.values.last().value(QStringLiteral("type")).toString(),
             QStringLiteral("provider.inspect"));
         QVERIFY(!commands.values.last().contains(QStringLiteral("content")));
+        files.apply(commands.reply({ { QStringLiteral("provider"), QStringLiteral("claude") },
+            { QStringLiteral("files"), QJsonArray {} } }));
+        QVERIFY(!files.busy());
     }
 };
-QTEST_GUILESS_MAIN(ProviderToolsTest)
-#include "tst_provider_tools.moc"
+QTEST_GUILESS_MAIN(ProviderModelsTest)
+#include "tst_provider_models.moc"

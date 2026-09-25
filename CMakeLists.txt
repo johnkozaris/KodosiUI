@@ -54,7 +54,7 @@ set(
     CACHE PATH
     "Path to the verified kodosi-ghostty checkout"
 )
-set(KODOSI_RUNTIME_MANIFEST "${KODOSI_RUNTIME_ROOT}/rustProcess/Cargo.toml")
+set(KODOSI_RUNTIME_MANIFEST "${KODOSI_RUNTIME_ROOT}/runtime/Cargo.toml")
 set(KODOSI_RUNTIME_BUNDLE_ROOT "${CMAKE_CURRENT_BINARY_DIR}/rust-ffi")
 set(KODOSI_RUST_TARGET "x86_64-unknown-linux-gnu")
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -68,7 +68,7 @@ set(KODOSI_RUNTIME_HEADER_DIR "${KODOSI_RUNTIME_BUNDLE}/include")
 set(KODOSI_RUNTIME_ARCHIVE "${KODOSI_RUNTIME_BUNDLE}/libkodosi_ffi_c.a")
 set(
     KODOSI_RUNTIME_CLI
-    "${KODOSI_RUNTIME_ROOT}/rustProcess/target/release/kodosi"
+    "${KODOSI_RUNTIME_ROOT}/runtime/target/release/kodosi"
 )
 file(MAKE_DIRECTORY "${KODOSI_RUNTIME_BUNDLE_ROOT}")
 set(

@@ -1,4 +1,4 @@
-#include "models/SessionCatalogModel.hpp"
+#include "presentation/SessionCatalogModel.hpp"
 #include <QJsonArray>
 #include <QUuid>
 

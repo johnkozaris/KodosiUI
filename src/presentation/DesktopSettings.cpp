@@ -1,4 +1,4 @@
-#include "models/DesktopSettings.hpp"
+#include "presentation/DesktopSettings.hpp"
 #include <QDir>
 #include <QFileInfo>
 #include <algorithm>

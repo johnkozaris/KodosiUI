@@ -11,7 +11,7 @@ Item {
     signal newSessionRequested(string folder)
     signal historyRequested
     Accessible.id: objectName
-    Accessible.name: qsTr("Sessions")
+    Accessible.name: qsTr("Terminals")
     Accessible.role: Accessible.Pane
     objectName: "sidebar.sessions"
 
@@ -25,13 +25,13 @@ Item {
                 Accessible.id: objectName
                 Layout.fillWidth: true
                 objectName: "sidebar.sessions.new"
-                text: qsTr("New Session")
-                variant: "primary"
+                text: qsTr("New terminal")
+                variant: KButton.Primary
                 onClicked: root.newSessionRequested("")
             }
             KIconButton {
                 Accessible.id: objectName
-                Accessible.name: qsTr("New session in folder")
+                Accessible.name: qsTr("New terminal in folder")
                 objectName: "sidebar.sessions.folder"
                 glyph: "folder"
                 onClicked: Models.DesktopFiles.requestDirectory("new", Models.DesktopSettings.effectiveWorkingDirectory)
@@ -65,12 +65,12 @@ Item {
                                 Layout.fillWidth: true
                                 objectName: "sidebar.folder." + folder.modelData.key
                                 text: folder.modelData.host ? folder.modelData.name + " · " + folder.modelData.host : folder.modelData.name
-                                variant: "quiet"
+                                variant: KButton.Quiet
                                 onClicked: folder.expanded = !folder.expanded
                             }
                             KIconButton {
                                 Accessible.id: objectName
-                                Accessible.name: qsTr("New session in %1").arg(folder.modelData.name)
+                                Accessible.name: qsTr("New terminal in %1").arg(folder.modelData.name)
                                 objectName: "sidebar.folder.new." + folder.modelData.key
                                 glyph: "plus"
                                 visible: !!folder.modelData.directory
@@ -93,7 +93,7 @@ Item {
                                     PlainLabel { Layout.fillWidth: true; text: row.modelData.name; color: KodosiTheme.textPrimary; elide: Text.ElideRight }
                                     KIconButton {
                                         Accessible.id: objectName
-                                        Accessible.name: qsTr("Session details")
+                                        Accessible.name: qsTr("Terminal details")
                                         objectName: row.objectName + ".details"
                                         glyph: "document"
                                         onClicked: root.detailsRequested(row.modelData.id)
@@ -104,10 +104,10 @@ Item {
                                         objectName: row.objectName + ".minimize"
                                         glyph: "minus"
                                         visible: Models.DesktopState.stagedSessionIds.indexOf(row.modelData.id) >= 0
-                                        onClicked: Models.Workspace.closeView(row.modelData.id)
+                                        onClicked: Models.SessionActions.minimize(row.modelData.id)
                                     }
                                 }
-                                onClicked: Models.Workspace.activateSession(modelData.id)
+                                onClicked: Models.SessionActions.activate(modelData.id)
                             }
                         }
                     }
@@ -119,7 +119,7 @@ Item {
             Layout.fillWidth: true
             objectName: "sidebar.sessions.history"
             text: qsTr("History")
-            variant: "quiet"
+            variant: KButton.Quiet
             onClicked: root.historyRequested()
         }
     }

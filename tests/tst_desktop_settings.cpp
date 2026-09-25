@@ -1,4 +1,4 @@
-#include "models/DesktopSettings.hpp"
+#include "presentation/DesktopSettings.hpp"
 #include <QTemporaryDir>
 #include <QtTest/QTest>
 class DesktopSettingsTest final : public QObject {

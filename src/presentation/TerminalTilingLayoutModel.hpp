@@ -1,6 +1,6 @@
 #pragma once
 
-#include "models/DesktopStateModel.hpp"
+#include "presentation/DesktopStateModel.hpp"
 
 #include <QAbstractListModel>
 #include <QHash>

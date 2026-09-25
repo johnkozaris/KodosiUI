@@ -215,7 +215,7 @@ void AccessibilityScopeTest::cachedTerminalInterfaceCannotReadSuppressedSubtree(
     QVERIFY(accessible);
     QVERIFY(accessible->textInterface());
     QTRY_VERIFY(accessible->text(QAccessible::Value).contains(QStringLiteral("private terminal contents")));
-    QVERIFY(accessibleNames(boundary).contains(QStringLiteral("Terminal session")));
+    QVERIFY(accessibleNames(boundary).contains(QStringLiteral("Terminal")));
 
     scope.setSuppressed(true);
     QCOMPARE(boundary->childCount(), 0);

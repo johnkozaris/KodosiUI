@@ -1,7 +1,7 @@
 #pragma once
 
-#include "bridge/RuntimeBridge.hpp"
-#include "models/SessionCatalogModel.hpp"
+#include "runtime/RuntimeBridge.hpp"
+#include "presentation/SessionCatalogModel.hpp"
 #include "terminal/TerminalSessionRegistry.hpp"
 
 #include <QMetaObject>

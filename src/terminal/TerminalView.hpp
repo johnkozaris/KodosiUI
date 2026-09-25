@@ -1,6 +1,6 @@
 #pragma once
 
-#include "bridge/RuntimeBridge.hpp"
+#include "runtime/RuntimeBridge.hpp"
 #include "terminal/TerminalRasterizer.hpp"
 #include "terminal/TerminalSessionRegistry.hpp"
 

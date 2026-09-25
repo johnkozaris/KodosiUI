@@ -1,5 +1,5 @@
 #include "terminal/TerminalSessionRegistry.hpp"
-#include "bridge/JsonEnvelope.hpp"
+#include "runtime/JsonEnvelope.hpp"
 #include "logging/ApplicationLogStore.hpp"
 
 #include <QJsonDocument>

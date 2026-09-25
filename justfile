@@ -32,7 +32,7 @@ rust-license-test:
         --ghostty-package-root ../kodosi-ghostty
     rm -rf build/rust-license-test
     python3 scripts/release/generate-rust-license-inventory.py \
-        --manifest ../Kodosi/rustProcess/Cargo.toml \
+        --manifest ../Kodosi/runtime/Cargo.toml \
         --output-dir build/rust-license-test
     python3 scripts/release/verify-rust-license-inventory.py \
         --tree build/rust-license-test

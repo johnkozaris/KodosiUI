@@ -50,7 +50,7 @@ public:
         }
         switch (type) {
         case QAccessible::Name:
-            return QCoreApplication::translate("TerminalAccessible", "Terminal session");
+            return QCoreApplication::translate("TerminalAccessible", "Terminal");
         case QAccessible::Value:
             return view->accessibleText();
         case QAccessible::Description:

@@ -10,7 +10,7 @@ ApplicationWindow {
     readonly property bool modalOpen: Models.DesktopState.modalOpen || Models.DesktopFiles.busy
 
     function openCreate(folder) {
-        Models.Workspace.createSession("", folder || Models.DesktopSettings.effectiveWorkingDirectory, "", "");
+        Models.SessionActions.create("", folder || Models.DesktopSettings.effectiveWorkingDirectory);
     }
 
     color: KodosiTheme.canvas
@@ -45,26 +45,26 @@ ApplicationWindow {
             NavTab {
                 accessibleId: "sessions"
                 iconName: "terminal"
-                selected: Models.DesktopState.activeView === 0
-                title: qsTr("Sessions")
+                selected: Models.DesktopState.activeView === Models.DesktopState.Sessions
+                title: qsTr("Terminals")
 
-                onClicked: Models.DesktopState.activeView = 0
+                onClicked: Models.DesktopState.activeView = Models.DesktopState.Sessions
             }
             NavTab {
                 accessibleId: "missions"
                 iconName: "mission"
-                selected: Models.DesktopState.activeView === 1
+                selected: Models.DesktopState.activeView === Models.DesktopState.Missions
                 title: qsTr("Missions")
 
-                onClicked: Models.DesktopState.activeView = 1
+                onClicked: Models.DesktopState.activeView = Models.DesktopState.Missions
             }
             NavTab {
                 accessibleId: "people"
                 iconName: "people"
-                selected: Models.DesktopState.activeView === 2
+                selected: Models.DesktopState.activeView === Models.DesktopState.People
                 title: qsTr("People")
 
-                onClicked: Models.DesktopState.activeView = 2
+                onClicked: Models.DesktopState.activeView = Models.DesktopState.People
             }
             Item {
                 Layout.fillWidth: true
@@ -73,16 +73,19 @@ ApplicationWindow {
                 Accessible.id: objectName
                 objectName: "header.sign-in"
                 text: qsTr("Sign in")
-                visible: !Models.Workspace.signedIn
-                variant: "primary"
-                onClicked: { Models.DesktopState.activeView = 3; Models.Workspace.login(); }
+                visible: !Models.Account.signedIn
+                variant: KButton.Primary
+                onClicked: {
+                    Models.DesktopState.activeView = Models.DesktopState.Settings;
+                    Models.Account.login();
+                }
             }
             KIconButton {
                 Accessible.id: objectName
                 Accessible.name: qsTr("Settings")
                 objectName: "header.settings"
                 glyph: "settings"
-                onClicked: Models.DesktopState.activeView = 3
+                onClicked: Models.DesktopState.activeView = Models.DesktopState.Settings
             }
         }
     }
@@ -104,7 +107,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: errorRow.implicitHeight + 16
                 color: KodosiTheme.surfaceRaised
-                visible: Models.Workspace.error.length > 0 || Models.DesktopState.lastError.length > 0 || Models.DesktopFiles.errorMessage.length > 0
+                visible: Models.AppState.error.length > 0 || Models.DesktopState.lastError.length > 0 || Models.DesktopFiles.errorMessage.length > 0
 
                 RowLayout {
                     id: errorRow
@@ -115,7 +118,7 @@ ApplicationWindow {
                     PlainLabel {
                         Layout.fillWidth: true
                         color: KodosiTheme.danger
-                        text: Models.Workspace.error || Models.DesktopState.lastError || Models.DesktopFiles.errorMessage
+                        text: Models.AppState.error || Models.DesktopState.lastError || Models.DesktopFiles.errorMessage
                         wrapMode: Text.WordWrap
                     }
                     KIconButton {
@@ -125,7 +128,7 @@ ApplicationWindow {
                         objectName: "window.error.dismiss"
 
                         onClicked: {
-                            Models.Workspace.clearError();
+                            Models.AppState.clearError();
                             Models.DesktopState.clearError();
                             Models.DesktopFiles.clearError();
                         }
@@ -154,7 +157,7 @@ ApplicationWindow {
 
                         Layout.fillHeight: true
                         Layout.fillWidth: true
-                        interactionEnabled: !window.modalOpen && Models.DesktopState.activeView === 0
+                        interactionEnabled: !window.modalOpen && Models.DesktopState.activeView === Models.DesktopState.Sessions
                         sidebarOpen: Models.DesktopState.sidebarOpen
 
                         onInspectSessionRequested: (sessionId, name) => details.openSession(sessionId)
@@ -183,13 +186,13 @@ ApplicationWindow {
         target: Models.DesktopFiles
     }
     Connections {
-        function onSessionActivated(sessionId) {
+        function onActivated(sessionId) {
             window.show();
             window.raise();
             stage.scheduleTerminalFocus();
         }
 
-        target: Models.Workspace
+        target: Models.SessionActions
     }
     SessionDetails {
         id: details
@@ -213,15 +216,15 @@ ApplicationWindow {
         onActivated: Models.DesktopState.sidebarOpen = !Models.DesktopState.sidebarOpen
     }
     Shortcut {
-        enabled: !window.modalOpen && Models.DesktopState.activeView === 0
+        enabled: !window.modalOpen && Models.DesktopState.activeView === Models.DesktopState.Sessions
         sequence: "Ctrl+Shift+F"
 
         onActivated: Models.DesktopState.toggleFocusForSelectedSession()
     }
     Shortcut {
-        enabled: !window.modalOpen && Models.DesktopState.activeView === 0
+        enabled: !window.modalOpen && Models.DesktopState.activeView === Models.DesktopState.Sessions
         sequence: "Ctrl+Shift+W"
 
-        onActivated: Models.Workspace.closeView(Models.DesktopState.selectedSessionId)
+        onActivated: Models.SessionActions.minimize(Models.DesktopState.selectedSessionId)
     }
 }

@@ -21,13 +21,13 @@ Q_IMPORT_QML_PLUGIN(KodosiPlugin)
 class ControlsTest final : public QObject {
     Q_OBJECT
 private slots:
-    void secondaryTextAndKeyboardFocusAreVisible();
+    void keyboardFocusTracksButtonState();
     void modalControlsSuppressNativeTerminalAccessibility();
     void terminalCloseConfirmsAndMinimizeOnlyHidesView();
     void missionCreationHasOneNameField();
 };
 
-void ControlsTest::secondaryTextAndKeyboardFocusAreVisible()
+void ControlsTest::keyboardFocusTracksButtonState()
 {
     QTemporaryDir directory;
     kodosi::AppearanceModel appearance(
@@ -48,7 +48,6 @@ void ControlsTest::secondaryTextAndKeyboardFocusAreVisible()
                 anchors.centerIn: parent
                 width: 450
                 text: "Mission"
-                secondaryText: "Everyone can read it"
             }
         }
     )", {});
@@ -62,13 +61,6 @@ void ControlsTest::secondaryTextAndKeyboardFocusAreVisible()
     auto* indicator = button->findChild<QQuickItem*>(QStringLiteral("control.keyboardFocus"));
     QVERIFY(indicator);
     QVERIFY(!indicator->isVisible());
-    bool secondaryVisible = false;
-    for (auto* item : button->findChildren<QQuickItem*>()) {
-        if (item->property("text").toString() == QStringLiteral("Everyone can read it")) {
-            secondaryVisible = item->isVisible();
-        }
-    }
-    QVERIFY(secondaryVisible);
     button->forceActiveFocus(Qt::TabFocusReason);
     QTRY_VERIFY(button->hasActiveFocus());
     QTRY_VERIFY(indicator->isVisible());
@@ -154,7 +146,7 @@ void ControlsTest::terminalCloseConfirmsAndMinimizeOnlyHidesView()
         std::make_unique<QSettings>(directory.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat));
     kodosi::SessionCatalogModel sessions;
     desktop.attachSessionCatalog(&sessions);
-    kodosi::Workspace workspace(commands, sessions, desktop);
+    kodosi::Workspace workspace(commands, sessions, desktop, settings);
     kodosi::TerminalSessionRegistry registry;
     kodosi::RuntimeBridge runtime;
     kodosi::TerminalSurfaceController surfaces(registry, runtime, sessions);
@@ -162,10 +154,15 @@ void ControlsTest::terminalCloseConfirmsAndMinimizeOnlyHidesView()
     kodosi::qml::DesktopStateModelForeign::instance = &desktop;
     kodosi::qml::DesktopSettingsForeign::instance = &settings;
     kodosi::qml::SessionCatalogModelForeign::instance = &sessions;
-    kodosi::qml::WorkspaceForeign::instance = &workspace;
+    kodosi::qml::AppStateForeign::instance = &workspace;
+    kodosi::qml::AccountModelForeign::instance = &workspace.account();
+    kodosi::qml::PeopleModelForeign::instance = &workspace.people();
+    kodosi::qml::DevicesModelForeign::instance = &workspace.devices();
+    kodosi::qml::MissionsModelForeign::instance = &workspace.missions();
+    kodosi::qml::SessionActionsModelForeign::instance = &workspace.sessionActions();
     kodosi::qml::TerminalSurfaceControllerForeign::instance = &surfaces;
     workspace.apply(test::snapshot({test::session(1)}), 0);
-    QVERIFY(workspace.activateSession(test::id(1)));
+    QVERIFY(workspace.sessionActions().activate(test::id(1)));
     QQmlEngine engine;
     QQmlComponent component(&engine);
     component.setData(R"(
@@ -217,7 +214,7 @@ void ControlsTest::terminalCloseConfirmsAndMinimizeOnlyHidesView()
     QVERIFY(desktop.stagedSessionIds().isEmpty());
     QVERIFY(sessions.containsSession(test::id(1)));
     QVERIFY(commands.values.isEmpty());
-    QVERIFY(workspace.activateSession(test::id(1)));
+    QVERIFY(workspace.sessionActions().activate(test::id(1)));
     QVERIFY(QMetaObject::invokeMethod(close, "clicked"));
     QTRY_VERIFY(confirmation->property("visible").toBool());
     QVERIFY(QMetaObject::invokeMethod(confirmation, "accept"));
@@ -248,12 +245,20 @@ void ControlsTest::missionCreationHasOneNameField()
         { [] { return Qt::ColorScheme::Dark; }, [](Qt::ColorScheme) {}, [] {} }, false);
     kodosi::DesktopStateModel desktop(
         std::make_unique<QSettings>(directory.filePath(QStringLiteral("desktop.ini")), QSettings::IniFormat), false);
+    kodosi::DesktopSettings settings(
+        std::make_unique<QSettings>(directory.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat));
     kodosi::SessionCatalogModel sessions;
-    kodosi::Workspace workspace(commands, sessions, desktop);
+    desktop.attachSessionCatalog(&sessions);
+    kodosi::Workspace workspace(commands, sessions, desktop, settings);
     kodosi::qml::AppearanceModelForeign::instance = &appearance;
     kodosi::qml::DesktopStateModelForeign::instance = &desktop;
     kodosi::qml::SessionCatalogModelForeign::instance = &sessions;
-    kodosi::qml::WorkspaceForeign::instance = &workspace;
+    kodosi::qml::AppStateForeign::instance = &workspace;
+    kodosi::qml::AccountModelForeign::instance = &workspace.account();
+    kodosi::qml::PeopleModelForeign::instance = &workspace.people();
+    kodosi::qml::DevicesModelForeign::instance = &workspace.devices();
+    kodosi::qml::MissionsModelForeign::instance = &workspace.missions();
+    kodosi::qml::SessionActionsModelForeign::instance = &workspace.sessionActions();
     workspace.apply({ {QStringLiteral("type"), QStringLiteral("auth.ready")},
         {QStringLiteral("userId"), test::id(50)} }, 1);
     commands.values.clear();
@@ -282,21 +287,21 @@ void ControlsTest::missionCreationHasOneNameField()
     QVERIFY(name->setProperty("text", QStringLiteral("Release")));
     QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
     QCOMPARE(commands.values.size(), 1);
-    QCOMPARE(commands.values.first().value(QStringLiteral("type")).toString(), QStringLiteral("room.create"));
+    QCOMPARE(commands.values.first().value(QStringLiteral("type")).toString(), QStringLiteral("mission.create"));
     QCOMPARE(commands.values.first().value(QStringLiteral("name")).toString(), QStringLiteral("Release"));
     QCOMPARE(commands.values.first().size(), 3);
     auto* warning = root->findChild<QQuickItem*>(QStringLiteral("panel.missions.truncated"));
     QVERIFY(warning);
     QVERIFY(!warning->isVisible());
     const QJsonObject invitation {{QStringLiteral("id"), test::id(12)},
-        {QStringLiteral("roomId"), test::id(10)}, {QStringLiteral("roomName"), QStringLiteral("Project")}};
-    QJsonObject snapshot {{QStringLiteral("type"), QStringLiteral("rooms.snapshot")},
-        {QStringLiteral("rooms"), QJsonArray {}},
+        {QStringLiteral("missionId"), test::id(10)}, {QStringLiteral("missionName"), QStringLiteral("Project")}};
+    QJsonObject snapshot {{QStringLiteral("type"), QStringLiteral("missions.snapshot")},
+        {QStringLiteral("missions"), QJsonArray {}},
         {QStringLiteral("invitations"), QJsonArray {invitation}},
         {QStringLiteral("invitationsTruncated"), true}};
     workspace.apply(snapshot, 1);
     QTRY_VERIFY(warning->isVisible());
-    QCOMPARE(warning->property("text").toString(), QStringLiteral("Some Missions or invitations are hidden. Leave Missions or decline invitations to reveal more."));
+    QCOMPARE(warning->property("text").toString(), QStringLiteral("Mission list full. Leave one or decline an invite to see more."));
     QQuickItem* decline = nullptr;
     const auto findDecline = [&] {
         QList<QQuickItem*> pending {qobject_cast<QQuickWindow*>(root.get())->contentItem()};
@@ -313,7 +318,7 @@ void ControlsTest::missionCreationHasOneNameField()
     QTRY_VERIFY(findDecline());
     QTRY_VERIFY(decline->isVisible() && decline->isEnabled());
     QVERIFY(QMetaObject::invokeMethod(decline, "clicked"));
-    QCOMPARE(commands.values.last().value(QStringLiteral("type")).toString(), QStringLiteral("room.invitation.reject"));
+    QCOMPARE(commands.values.last().value(QStringLiteral("type")).toString(), QStringLiteral("mission.invitation.reject"));
     snapshot.remove(QStringLiteral("invitationsTruncated"));
     workspace.apply(snapshot, 1);
     QTRY_VERIFY(!warning->isVisible());

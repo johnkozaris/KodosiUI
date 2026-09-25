@@ -9,9 +9,8 @@ KPopover {
     id: root
 
     function openModal() {
-        Models.ProviderTools.select("claude", "");
+        Models.ConversationHistory.open(Models.ConversationHistory.Claude, "");
         open();
-        Models.ProviderTools.discover();
     }
 
     focus: true
@@ -26,15 +25,14 @@ KPopover {
 
     onClosed: {
         Models.DesktopFiles.cancelDirectory();
-        Models.ProviderTools.reset();
+        Models.ConversationHistory.reset();
     }
 
     Connections {
         function onDirectoryPicked(purpose, path) {
             if (purpose !== "history" || !root.opened)
                 return;
-            Models.ProviderTools.select(Models.ProviderTools.provider, path);
-            Models.ProviderTools.discover();
+            Models.ConversationHistory.open(Models.ConversationHistory.provider, path);
         }
 
         target: Models.DesktopFiles
@@ -63,34 +61,36 @@ KPopover {
             KComboBox {
                 Accessible.id: objectName
                 Accessible.name: qsTr("Provider")
-                currentIndex: Models.ProviderTools.provider === "copilot" ? 1 : 0
+                currentIndex: Models.ConversationHistory.provider
                 model: ["Claude", "Copilot"]
                 objectName: "panel.history.provider"
 
-                onActivated: {
-                    Models.ProviderTools.select(currentIndex === 0 ? "claude" : "copilot", Models.ProviderTools.directory);
-                    Models.ProviderTools.discover();
-                }
+                onActivated: Models.ConversationHistory.open(
+                    currentIndex === 0
+                        ? Models.ConversationHistory.Claude
+                        : Models.ConversationHistory.Copilot,
+                    Models.ConversationHistory.directory)
             }
             PlainLabel {
                 Layout.fillWidth: true
                 color: KodosiTheme.textSecondary
                 elide: Text.ElideMiddle
-                text: Models.ProviderTools.directory || qsTr("All projects")
+                text: Models.ConversationHistory.directory || qsTr("All projects")
             }
             KButton {
                 Accessible.id: objectName
                 objectName: "panel.history.all-projects"
                 text: qsTr("All projects")
-                visible: Models.ProviderTools.directory.length > 0
-                onClicked: { Models.ProviderTools.select(Models.ProviderTools.provider, ""); Models.ProviderTools.discover(); }
+                visible: Models.ConversationHistory.directory.length > 0
+                onClicked: Models.ConversationHistory.open(
+                    Models.ConversationHistory.provider, "")
             }
             KButton {
                 Accessible.id: objectName
                 objectName: "panel.history.folder"
                 text: qsTr("Choose folder…")
 
-                onClicked: Models.DesktopFiles.requestDirectory("history", Models.ProviderTools.directory)
+                onClicked: Models.DesktopFiles.requestDirectory("history", Models.ConversationHistory.directory)
             }
         }
         RowLayout {
@@ -104,7 +104,7 @@ KPopover {
                 Layout.fillHeight: true
                 Layout.preferredWidth: Math.min(260, root.width * 0.36)
                 clip: true
-                model: Models.ProviderTools.conversations
+                model: Models.ConversationHistory.conversations
 
                 ScrollBar.vertical: KScrollBar {
                 }
@@ -118,16 +118,16 @@ KPopover {
                     text: conversationRow.modelData.title || conversationRow.modelData.nativeConversationId
                     width: conversations.width
 
-                    onClicked: Models.ProviderTools.preview(conversationRow.modelData.nativeConversationId)
+                    onClicked: Models.ConversationHistory.preview(conversationRow.modelData.nativeConversationId)
                 }
                 footer: KButton {
                     Accessible.id: objectName
-                    enabled: !Models.ProviderTools.busy
+                    enabled: !Models.ConversationHistory.busy
                     objectName: "panel.history.more-conversations"
                     text: qsTr("More conversations")
-                    visible: Models.ProviderTools.hasMore
+                    visible: Models.ConversationHistory.hasMore
 
-                    onClicked: Models.ProviderTools.loadMore()
+                    onClicked: Models.ConversationHistory.loadMore()
                 }
             }
             KScrollView {
@@ -141,28 +141,28 @@ KPopover {
                     RowLayout {
                         KButton {
                             Accessible.id: objectName
-                            enabled: !Models.ProviderTools.busy && Models.ProviderTools.hasOlder
+                            enabled: !Models.ConversationHistory.busy && Models.ConversationHistory.hasOlder
                             objectName: "panel.history.earlier-messages"
                             text: qsTr("Earlier")
-                            onClicked: Models.ProviderTools.loadOlder()
+                            onClicked: Models.ConversationHistory.loadOlder()
                         }
                         KButton {
                             Accessible.id: objectName
-                            enabled: !Models.ProviderTools.busy && Models.ProviderTools.hasNewer
+                            enabled: !Models.ConversationHistory.busy && Models.ConversationHistory.hasNewer
                             objectName: "panel.history.later-messages"
                             text: qsTr("Later")
-                            onClicked: Models.ProviderTools.loadNewer()
+                            onClicked: Models.ConversationHistory.loadNewer()
                         }
                         KButton {
                             Accessible.id: objectName
-                            enabled: !Models.ProviderTools.busy && Models.ProviderTools.hasNewer
+                            enabled: !Models.ConversationHistory.busy && Models.ConversationHistory.hasNewer
                             objectName: "panel.history.latest-messages"
                             text: qsTr("Latest")
-                            onClicked: Models.ProviderTools.loadLatest()
+                            onClicked: Models.ConversationHistory.loadLatest()
                         }
                     }
                     Repeater {
-                        model: Models.ProviderTools.entries
+                        model: Models.ConversationHistory.entries
 
                         delegate: ColumnLayout {
                             id: entry1
@@ -191,7 +191,7 @@ KPopover {
                                 objectName: "panel.history.message." + entry1.index + ".expand"
                                 text: entry1.expanded ? qsTr("Show less") : entry1.modelData.role === "tool" ? qsTr("Show tool output") : qsTr("Show more")
                                 visible: entry1.content.length > 2000 || entry1.modelData.role === "tool"
-                                variant: "quiet"
+                                variant: KButton.Quiet
                                 onClicked: entry1.expanded = !entry1.expanded
                             }
                         }
@@ -199,7 +199,7 @@ KPopover {
                     PlainLabel {
                         color: KodosiTheme.textSecondary
                         text: qsTr("Select a saved conversation to preview it.")
-                        visible: Models.ProviderTools.entries.length === 0 && !Models.ProviderTools.busy
+                        visible: Models.ConversationHistory.entries.length === 0 && !Models.ConversationHistory.busy
                     }
                 }
             }
@@ -207,13 +207,13 @@ KPopover {
         PlainLabel {
             Layout.fillWidth: true
             color: KodosiTheme.danger
-            text: Models.ProviderTools.error
-            visible: Models.ProviderTools.error.length > 0
+            text: Models.ConversationHistory.error
+            visible: Models.ConversationHistory.error.length > 0
             wrapMode: Text.WordWrap
         }
         RowLayout {
             KBusyIndicator {
-                running: Models.ProviderTools.busy
+                running: Models.ConversationHistory.busy
                 visible: running
             }
             Item {
@@ -221,14 +221,14 @@ KPopover {
             }
             KButton {
                 Accessible.id: objectName
-                enabled: !Models.ProviderTools.busy && !!Models.ProviderTools.selectedConversation.nativeConversationId
+                enabled: !Models.ConversationHistory.busy && !!Models.ConversationHistory.selectedConversation.nativeConversationId
                 objectName: "panel.history.start"
                 text: qsTr("Resume in new terminal")
 
                 onClicked: {
-                    const selected = Models.ProviderTools.selectedConversation;
-                    if (Models.Workspace.createSession("", selected.workingDirectory, Models.ProviderTools.provider, selected.nativeConversationId)) {
-                        Models.DesktopSettings.setWorkingDirectory(selected.workingDirectory);
+                    const selected = Models.ConversationHistory.selectedConversation;
+                    if (Models.SessionActions.resume(Models.ConversationHistory.providerId,
+                            selected.nativeConversationId, selected.workingDirectory)) {
                         root.close();
                     }
                 }

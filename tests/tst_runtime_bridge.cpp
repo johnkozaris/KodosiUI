@@ -1,6 +1,6 @@
 #include "RuntimeApiFixture.hpp"
 #include "SessionFixture.hpp"
-#include "bridge/RuntimeBridge.hpp"
+#include "runtime/RuntimeBridge.hpp"
 #include <QJsonDocument>
 #include <QSignalSpy>
 #include <limits>
@@ -16,7 +16,7 @@ private slots:
     }
     void requiresExactDesktopProtocol()
     {
-        for (const auto version : { 41u, 43u }) {
+        for (const auto version : { 43u, 45u }) {
             runtime_fixture::protocolVersion = version;
             kodosi::RuntimeBridge bridge;
             const auto result = bridge.start();
@@ -31,7 +31,7 @@ private slots:
             QVERIFY(!bridge.isRunning());
             QVERIFY(runtime_fixture::userdata == nullptr);
         }
-        runtime_fixture::protocolVersion = 42;
+        runtime_fixture::protocolVersion = 44;
         kodosi::RuntimeBridge bridge;
         QVERIFY(bridge.start());
         QVERIFY(bridge.isRunning());

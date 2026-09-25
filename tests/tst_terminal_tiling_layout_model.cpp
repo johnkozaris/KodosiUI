@@ -1,4 +1,4 @@
-#include "models/TerminalTilingLayoutModel.hpp"
+#include "presentation/TerminalTilingLayoutModel.hpp"
 
 #include <QPersistentModelIndex>
 #include <QSignalSpy>

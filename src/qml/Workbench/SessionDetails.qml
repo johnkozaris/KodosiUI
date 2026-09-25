@@ -19,7 +19,7 @@ KPopover {
         refresh();
         originalUsers = session.sharedWith || [];
         selectedUsers = originalUsers.slice();
-        selectedMission = session.roomId || "";
+        selectedMission = session.missionId || "";
         open();
     }
     function refresh() {
@@ -57,18 +57,17 @@ KPopover {
                 color: KodosiTheme.textPrimary
                 elide: Text.ElideRight
                 font.pixelSize: 18
-                text: root.session.name || qsTr("Session")
+                text: root.session.name || qsTr("Terminal")
             }
             KIconButton {
                 Accessible.id: objectName
-                Accessible.name: qsTr("Close session details")
+                Accessible.name: qsTr("Close terminal details")
                 glyph: "close"
                 objectName: "panel.sessionDetails.close"
 
                 onClicked: root.close()
             }
         }
-        PlainLabel { text: qsTr("Workspace"); color: KodosiTheme.textPrimary; font.weight: Font.DemiBold }
         PlainLabel {
             color: KodosiTheme.textSecondary
             text: root.session.kind === "local" ? qsTr("This computer") : (root.session.hostName || root.session.ownerName || qsTr("Remote computer"))
@@ -91,7 +90,7 @@ KPopover {
                 Accessible.id: objectName
                 Accessible.name: qsTr("Mission")
                 Layout.fillWidth: true
-                model: [{ id: "", name: qsTr("No Mission") }].concat(Models.Workspace.missions)
+                model: [{ id: "", name: qsTr("No Mission") }].concat(Models.Missions.missions)
                 objectName: "panel.sessionDetails.mission"
                 textRole: "name"
                 valueRole: "id"
@@ -102,37 +101,37 @@ KPopover {
                 Accessible.id: objectName
                 objectName: "panel.sessionDetails.mission.save"
                 text: qsTr("Save")
-                visible: root.selectedMission !== (root.session.roomId || "")
-                enabled: !Models.Workspace.busy
-                onClicked: Models.Workspace.attachMission(root.sessionId, root.selectedMission)
+                visible: root.selectedMission !== (root.session.missionId || "")
+                enabled: !Models.SessionActions.busy
+                onClicked: Models.SessionActions.attachMission(root.sessionId, root.selectedMission)
             }
         }
-        PlainLabel { text: root.session.roomName || qsTr("No Mission"); color: KodosiTheme.textSecondary; visible: root.session.isOwner !== true }
+        PlainLabel { text: root.session.missionName || qsTr("No Mission"); color: KodosiTheme.textSecondary; visible: root.session.isOwner !== true }
         PlainLabel {
             color: KodosiTheme.textPrimary
             font.weight: Font.DemiBold
             text: qsTr("People")
-            visible: root.session.isOwner === true && root.session.kind === "local" && Models.Workspace.signedIn
+            visible: root.session.isOwner === true && root.session.kind === "local" && Models.Account.signedIn
         }
         PlainLabel {
             Layout.fillWidth: true
             color: KodosiTheme.textSecondary
-            text: qsTr("Selected friends can control this terminal. Shell access is not limited to this project.")
-            visible: root.session.isOwner === true && root.session.kind === "local" && Models.Workspace.signedIn
+            text: qsTr("Selected friends can control the full terminal.")
+            visible: root.session.isOwner === true && root.session.kind === "local" && Models.Account.signedIn
             wrapMode: Text.WordWrap
         }
         PlainLabel {
             Layout.fillWidth: true
-            text: qsTr("Connected now")
+            text: qsTr("Connected")
             color: KodosiTheme.textSecondary
-            visible: (root.session.connectedUsers || []).filter(user => user !== Models.Workspace.userId).length > 0
+            visible: (root.session.connectedUsers || []).filter(user => user !== Models.Account.userId).length > 0
         }
         Repeater {
-            model: (root.session.connectedUsers || []).filter(user => user !== Models.Workspace.userId)
+            model: (root.session.connectedUsers || []).filter(user => user !== Models.Account.userId)
             delegate: PlainLabel {
                 required property string modelData
                 color: KodosiTheme.textPrimary
-                text: { const person = Models.Workspace.friends.find(friend => friend.userId === modelData); return person ? person.displayName || person.handle : qsTr("Connected person"); }
+                text: Models.People.displayName(modelData) || qsTr("Connected person")
             }
         }
         ListView {
@@ -141,8 +140,8 @@ KPopover {
             Layout.fillHeight: true
             Layout.fillWidth: true
             clip: true
-            model: Models.Workspace.friends
-            visible: root.session.isOwner === true && root.session.kind === "local" && Models.Workspace.signedIn
+            model: Models.People.friends
+            visible: root.session.isOwner === true && root.session.kind === "local" && Models.Account.signedIn
 
             delegate: KCheckBox {
                 required property var modelData
@@ -166,17 +165,17 @@ KPopover {
         }
         KButton {
             Accessible.id: objectName
-            enabled: !Models.Workspace.busy && JSON.stringify(root.selectedUsers.slice().sort()) !== JSON.stringify(root.originalUsers.slice().sort())
+            enabled: !Models.SessionActions.busy && JSON.stringify(root.selectedUsers.slice().sort()) !== JSON.stringify(root.originalUsers.slice().sort())
             objectName: "panel.sessionDetails.share"
-            text: qsTr("Save sharing")
-            visible: root.session.isOwner === true && root.session.kind === "local" && Models.Workspace.signedIn
+            text: qsTr("Save")
+            visible: root.session.isOwner === true && root.session.kind === "local" && Models.Account.signedIn
 
-            onClicked: Models.Workspace.shareSession(root.sessionId, root.selectedUsers, root.originalUsers)
+            onClicked: Models.SessionActions.share(root.sessionId, root.selectedUsers, root.originalUsers)
         }
         PlainLabel {
             Layout.fillWidth: true
             color: KodosiTheme.textSecondary
-            text: qsTr("Change sharing on the computer hosting this terminal.")
+            text: qsTr("Sharing can only be changed on the host.")
             visible: root.session.isOwner === true && root.session.kind === "remote"
             wrapMode: Text.WordWrap
         }
@@ -194,12 +193,12 @@ KPopover {
         KButton {
             Accessible.id: objectName
             objectName: "panel.sessionDetails.leave-shared-session"
-            text: qsTr("Leave shared session")
-            variant: "quiet"
+            text: qsTr("Leave shared terminal")
+            variant: KButton.Quiet
             visible: root.session.isOwner === false
 
             onClicked: {
-                Models.Workspace.leaveSession(root.sessionId);
+                Models.SessionActions.leave(root.sessionId);
                 root.close();
             }
         }

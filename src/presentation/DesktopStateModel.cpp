@@ -1,5 +1,5 @@
-#include "models/DesktopStateModel.hpp"
-#include "models/SessionCatalogModel.hpp"
+#include "presentation/DesktopStateModel.hpp"
+#include "presentation/SessionCatalogModel.hpp"
 #include <QEvent>
 #include <QGuiApplication>
 #include <QScreen>
@@ -22,9 +22,9 @@ DesktopStateModel::~DesktopStateModel()
 {
     saveWindow();
 }
-void DesktopStateModel::setActiveView(int value)
+void DesktopStateModel::setActiveView(ActiveView value)
 {
-    if (value < 0 || value > 3 || m_activeView == value)
+    if (m_activeView == value)
         return;
     m_activeView = value;
     emit activeViewChanged();
@@ -67,7 +67,7 @@ bool DesktopStateModel::stageSession(const QString& id)
         m_selected = id;
         emit selectedSessionIdChanged();
     }
-    setActiveView(0);
+    setActiveView(Sessions);
     clearError();
     return true;
 }

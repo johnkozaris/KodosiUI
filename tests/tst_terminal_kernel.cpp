@@ -6,7 +6,7 @@
 #include "terminal/TerminalSessionRegistry.hpp"
 #include "terminal/TerminalSurfaceController.hpp"
 #include "terminal/TerminalView.hpp"
-#include "models/SessionCatalogModel.hpp"
+#include "presentation/SessionCatalogModel.hpp"
 #include "SessionFixture.hpp"
 
 #include <QAccessible>
@@ -1462,7 +1462,7 @@ void TerminalKernelTest::terminalViewExposesNativeAccessibleTextInterface()
     QVERIFY(accessible != nullptr);
     QCOMPARE(accessible->role(), QAccessible::Terminal);
     QVERIFY(accessible->textInterface() != nullptr);
-    QCOMPARE(accessible->text(QAccessible::Name), QStringLiteral("Terminal session"));
+    QCOMPARE(accessible->text(QAccessible::Name), QStringLiteral("Terminal"));
     QVERIFY(accessible->state().disabled);
     QVERIFY(accessible->state().readOnly);
     QVERIFY(!accessible->state().editable);
@@ -1502,7 +1502,7 @@ void TerminalKernelTest::qmlConstructionEnrollsTerminalInAccessibleTree()
         static_cast<int>(QAccessible::Terminal));
     QCOMPARE(
         attached->property(QByteArrayLiteral("name")).toString(),
-        QStringLiteral("Terminal session"));
+        QStringLiteral("Terminal"));
 }
 
 void TerminalKernelTest::terminalViewGatesDeniedCommandsAndRevocation()
