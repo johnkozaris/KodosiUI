@@ -1,11 +1,11 @@
-# KodosiQT agent guide
+# KodosiUI agent guide
 
 Read `PRODUCT.md` before changing product behavior and `DESIGN.md` before
 changing the interface.
 
 ## Boundary
 
-KodosiQT is the native Linux presentation client. The shared Rust runtime owns
+KodosiUI is the native Linux presentation client. The shared Rust runtime owns
 terminal and session behavior, identity, sharing, security, and shared data.
 Qt owns the native interface, presentation models, accessibility, and desktop
 integration.

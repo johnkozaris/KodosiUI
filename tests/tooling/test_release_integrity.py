@@ -34,7 +34,7 @@ class ReleaseIntegrityTests(unittest.TestCase):
         temporary = Path(self.temporary.name)
         self.source = self.create_repo(
             temporary / "client",
-            "johnkozaris/KodosiQT",
+            "johnkozaris/KodosiUI",
             {
                 ".gitignore": "build/\n",
                 "CMakeLists.txt": (

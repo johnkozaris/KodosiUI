@@ -54,15 +54,15 @@
   },
   "kodosi": {
     "repository": "johnkozaris/Kodosi",
-    "commit": "1e1bcaa5c04924d19f29e283970857551c728b54",
-    "ffiAbiVersion": 6,
-    "desktopProtocolVersion": 42
+    "commit": "fdc778529e2d4a14e4b3faa57537f843879c6ea5",
+    "ffiAbiVersion": 7,
+    "desktopProtocolVersion": 44
   },
   "ghostty": {
     "repository": "ghostty-org/ghostty",
     "commit": "9bbb9b24680358c939846b79a519ce10f7638d1f",
     "packageRepository": "johnkozaris/kodosi-ghostty",
-    "packageCommit": "b68a2cefe7f604a3035065a09f39cbbeed4aeef3",
+    "packageCommit": "102c3407c6f62d3cc0b566005bee4016c0e664ca",
     "linuxVtArchiveSha256": "d531a52eb6960771e07878bd6995a1ae2f6879efe4b9a3212d35808b03f90027",
     "versioning": "unversioned-libghostty-tip"
   }
