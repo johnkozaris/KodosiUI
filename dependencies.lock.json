@@ -8,20 +8,6 @@
     }
   },
   "tools": {
-    "githubActions": {
-      "checkout": {
-        "version": "7.0.1",
-        "commit": "3d3c42e5aac5ba805825da76410c181273ba90b1"
-      },
-      "setupPython": {
-        "version": "7.0.0",
-        "commit": "5fda3b95a4ea91299a34e894583c3862153e4b97"
-      },
-      "setupUv": {
-        "version": "10.0.1",
-        "commit": "20cfd1bf945f4377ade1205e4dbc17946fc9a30d"
-      }
-    },
     "uv": {
       "version": "0.12.7",
       "source": "https://github.com/astral-sh/uv/releases/tag/0.12.7"
@@ -54,7 +40,7 @@
   },
   "kodosi": {
     "repository": "johnkozaris/Kodosi",
-    "commit": "520853b4406fbff89a57218aa4914ea66459e91e",
+    "commit": "8759efe28c0dba2c82fcbc6828d97a035c671f32",
     "ffiAbiVersion": 7,
     "desktopProtocolVersion": 44
   },
@@ -62,7 +48,7 @@
     "repository": "ghostty-org/ghostty",
     "commit": "9bbb9b24680358c939846b79a519ce10f7638d1f",
     "packageRepository": "johnkozaris/kodosi-ghostty",
-    "packageCommit": "139935ccd53a21f6e19fa5bb90318d74ba42332b",
+    "packageCommit": "69f861639dd6694eee40d46b08dfa365f7201978",
     "linuxVtArchiveSha256": "d531a52eb6960771e07878bd6995a1ae2f6879efe4b9a3212d35808b03f90027",
     "versioning": "unversioned-libghostty-tip"
   }
